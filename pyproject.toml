@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-lark-streaming"
+version = "0.8.0"
+description = "Feishu/Lark CardKit v2.0 streaming cards for Hermes Agent — plugin edition"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Cheerwhy"},
+]
+dependencies = [
+    "lark-oapi>=1.4.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["hermes_lark_streaming*"]
+
+[tool.setuptools.package-data]
+hermes_lark_streaming = ["../plugin.yaml"]
