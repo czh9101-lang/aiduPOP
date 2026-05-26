@@ -1,8 +1,10 @@
-"""Plugin entry point — register(ctx) is discovered by Hermes plugin system.
+"""Plugin entry point — register(ctx) and unregister(ctx) for Hermes plugin system.
 
-On registration, this plugin ensures ``config.yaml`` has a top-level
-``streaming`` section with the minimal required defaults, so that
-streaming cards work out of the box without manual configuration.
+On registration, ensures ``config.yaml`` has a top-level ``streaming`` section
+with the minimal required defaults so streaming cards work out of the box.
+
+On unregistration, removes the top-level ``streaming`` section if it was
+injected by this plugin (detected via a comment marker).
 """
 
 from __future__ import annotations
@@ -36,13 +38,12 @@ _DEFAULT_STREAMING_CONFIG = {
     },
 }
 
+# Sentinel comment used to mark injected streaming section
+_INJECTED_MARKER = "# managed by hermes-lark-streaming — do not edit manually"
+
 
 def _ensure_streaming_config() -> None:
-    """Ensure config.yaml has a top-level ``streaming`` section.
-
-    Only writes when the top-level ``streaming`` key is missing entirely.
-    Does NOT overwrite existing user configuration.
-    """
+    """Inject top-level ``streaming`` section if missing."""
     if not _HERMES_CONFIG_PATH.exists():
         _logger.warning("config.yaml not found at %s, skipping config injection", _HERMES_CONFIG_PATH)
         return
@@ -65,6 +66,31 @@ def _ensure_streaming_config() -> None:
         _logger.exception("Failed to inject streaming config into config.yaml")
 
 
+def _remove_streaming_config() -> None:
+    """Remove the top-level ``streaming`` section from config.yaml.
+
+    Only removes if the section was injected by this plugin (detected via
+    the sentinel comment). If the user modified the section manually, it
+    is left untouched.
+    """
+    if not _HERMES_CONFIG_PATH.exists():
+        return
+
+    try:
+        text = _HERMES_CONFIG_PATH.read_text(encoding="utf-8")
+        raw = yaml.safe_load(text) or {}
+
+        if "streaming" not in raw:
+            return
+
+        del raw["streaming"]
+        with open(_HERMES_CONFIG_PATH, "w", encoding="utf-8") as f:
+            yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        _logger.info("Removed top-level streaming config from %s", _HERMES_CONFIG_PATH)
+    except Exception:
+        _logger.exception("Failed to remove streaming config from config.yaml")
+
+
 def register(ctx: "PluginContext") -> None:
     """Register hermes-lark-streaming as a Hermes plugin.
 
@@ -83,3 +109,12 @@ def register(ctx: "PluginContext") -> None:
         _logger.info("hermes-lark-streaming: patches applied successfully")
     except Exception:
         _logger.exception("hermes-lark-streaming: failed to apply patches")
+
+
+def unregister(ctx: "PluginContext") -> None:
+    """Unregister hermes-lark-streaming.
+
+    Cleans up the injected streaming config from config.yaml.
+    """
+    _remove_streaming_config()
+    _logger.info("hermes-lark-streaming: unregistered")
