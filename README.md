@@ -171,128 +171,6 @@ display:
 
 ---
 
-## Architecture
-
-This plugin uses **runtime monkey patching** instead of AST source injection. When loaded via `hermes plugins install`, it wraps `GatewayRunner`, `AIAgent`, and `Scheduler` methods at runtime — **without modifying any source files on disk**.
-
-### Injection Points
-
-```
-hermes-agent
-  │
-  ├─ gateway/run.py              ← wrapped by hermes-lark-streaming at import
-  │   └─ GatewayRunner._handle_message          → NORMALIZE
-  │   └─ GatewayRunner._handle_message_with_agent → START + ABORT + INTERRUPT
-  │   └─ GatewayRunner._run_agent               → COMPLETE + context
-  │
-  ├─ agent/conversation_loop.py
-  │   └─ run_conversation                       → wraps all 6 callbacks (module-level)
-  │
-  ├─ run_agent.py
-  │   └─ AIAgent.run_conversation               → wraps all 6 callbacks (instance-level backup)
-  │       ├─ stream_delta_callback              → ANSWER
-  │       ├─ interim_assistant_callback         → THINKING
-  │       ├─ tool_progress_callback             → TOOL
-  │       ├─ reasoning_callback                 → REASONING
-  │       └─ background_review_callback         → BACKGROUND_REVIEW
-  │
-  ├─ cron/scheduler.py
-  │   └─ Scheduler._deliver_result              → CRON (Feishu only)
-  │
-  └─ hermes-lark-streaming plugin
-      ├─ plugin.yaml          — manifest (name, version, hooks)
-      ├─ __init__.py          — root package + register export
-      ├─ __main__.py          — CLI (status / verify)
-      ├─ plugin.py            — register(ctx) entry point (Hermes plugin discovery)
-      ├─ monkey_patch.py      — runtime monkey patching (method wrappers)
-      ├─ patch.py             — 11 hook functions (called by wrappers)
-      ├─ config.py            — config reader
-      ├─ controller.py        — StreamCardController (session management)
-      ├─ controller_mixin.py  — retry/fallback mixin (non-linear mode)
-      ├─ controller_linear_mixin.py — linear mode card orchestration
-      ├─ feishu.py            — Feishu Open API client (lark-oapi SDK)
-      ├─ cardkit.py           — CardKit v2.0 card builder
-      ├─ cardkit_i18n.py      — Chinese/English i18n
-      ├─ cardkit_md.py        — Markdown processing
-      ├─ linear.py            — linear mode state tracking
-      ├─ text.py              — incremental text accumulator
-      ├─ tooluse.py           — tool call tracking and visualization
-      ├─ image.py             — async image upload
-      ├─ flush.py             — throttle refresh scheduler
-      └─ unavailable_guard.py — message unavailable protection
-```
-
-### Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `lark-oapi` | >= 1.4.0 | Feishu Open API SDK |
-| `PyYAML` | >= 6.0 | YAML config parsing |
-
----
-
-## Linear Mode
-
-Linear mode is the default mode, rendering all content (thinking, tool calls, answer) in a single dynamically updated card.
-
-### How It Works
-
-1. **Segmented Rendering** — Content organized by segments (reasoning, answer, tool)
-2. **Auto Card Splitting** — Cards automatically split when approaching Feishu's 200-element limit
-3. **Smooth Transition** — Old cards are archived, new cards continue the conversation
-
-### Benefits
-
-- Better user experience with continuous scrolling
-- Context preserved in a single view
-- Automatic handling of Feishu element limits
-
-### Card Splitting Behavior
-
-The plugin monitors element count and auto-splits in these cases:
-- Element count exceeds 180 (reserving 20 for footer and fluctuations)
-- Tool segments can split at step boundaries
-- Answer segments trigger splitting on overflow
-
----
-
-## Technical Details
-
-### Runtime Monkey Patching
-
-The plugin injects functionality by wrapping Hermes core class methods instead of modifying source files:
-
-- **Thread Safety** — Uses `contextvars.ContextVar` to propagate message context, with `threading.local()` as fallback (for thread pool scenarios)
-- **Idempotency** — Prevents duplicate wrapping via function attribute markers (`_hls_wrapper`)
-- **Dual Backup** — Applies patches at both module and instance levels to ensure callbacks are intercepted correctly
-- **Delayed Loading** — Retries direct patch after 5 seconds to ensure Hermes modules are fully loaded
-
-### Message Protection (UnavailableGuard)
-
-Terminates update pipeline when messages are deleted/recalled:
-
-- Monitors Feishu API error codes (231003, 1000023, 230011)
-- Caches unavailable message states (30-minute TTL)
-- Avoids invalid API calls on deleted messages
-
-### Throttle Refresh (FlushController)
-
-Controls card update frequency to avoid API rate limiting:
-
-- CardKit mode: 50ms throttle
-- IM PATCH mode: 150ms throttle
-- Wait mechanism: Ensures all updates are flushed before completion
-
-### Text State Management (TextState)
-
-Incremental text accumulation and boundary detection:
-
-- Tracks flushed and pending text
-- Reasoning tag separation (`<thinking>`/`</thinking>`)
-- Avoids duplicate rendering of same content
-
----
-
 ## FAQ
 
 ### Plugin Loading Failed
@@ -331,17 +209,12 @@ Incremental text accumulation and boundary detection:
 
 ## Changelog
 
-### v0.8.6 (2026-05-26)
+| Version | Date | Summary |
+|---------|------|---------|
+| v0.8.6 | 2026-05-26 | 安装自动注入配置、卸载清理残留、配置格式修复 |
+| v0.8.5 | 2026-05-26 | 修复 contextvars 不跨线程、setattr 缩进错误、回调重复包装等 5 个问题 |
 
-| 问题 | 说明 |
-|------|------|
-| 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` |
-| 配置文件格式错误 | `footer.fields` 被序列化为二维数组格式，与文档不符 |
-| 卸载残留配置 | 卸载后 `streaming` 配置段和 `plugins.enabled` 中的条目未清理 |
-
-### v0.8.5 (2026-05-26)
-
-Contains 5 bug fixes:
+See [CHANGELOG.md](CHANGELOG.md) for full history.
 
 | Fix | Date | Issue |
 |-----|------|-------|
