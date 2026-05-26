@@ -205,4 +205,22 @@ display:
 
 ## 更新日志
 
+### v0.8.6 (2026-05-26)
+
+| # | 问题 | 原因 | 修复 |
+|---|------|------|------|
+| 1 | 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` | `register()` 自动注入顶层 `streaming` 配置段 |
+| 2 | 配置文件格式错误 | `footer.fields` 被序列化为二维数组格式 | `_prepare_config()` 展平为一维列表后写入 |
+| 3 | 卸载后配置残留 | Hermes 的 `plugins uninstall` 只删目录不调 `unregister` | 新增 `python -m hermes_lark_streaming cleanup` 命令，先清配置再卸载 |
+
+### v0.8.5 (2026-05-26)
+
+| # | 问题 | 原因 | 修复 |
+|---|------|------|------|
+| fix1 | 插件加载失败 | 仓库缺少根目录 `__init__.py` | 新增根目录 `__init__.py` 桥接导入 |
+| fix2 | 卡片内容重复 | 回调被多次包装，每段文本被处理两次 | 防重复包装守卫 `_hls_wrapped` 标记 |
+| fix3 | 语法异常 | `setattr` 错位缩进到 `except` 内部 | 修复缩进位置 |
+| fix4 | 后续消息无流式更新 | `contextvars` 不跨线程，`_set_thread_local_ctx()` 未定义 | 引入 `threading.local()` fallback |
+| fix5 | 重启后所有消息无流式更新 | 备份目录干扰命名空间 + `_set_thread_local_ctx()` 未定义 | 删除备份目录 + 定义 `_thread_local_ctx` + 双重保险直接 patch |
+
 ## 致谢
