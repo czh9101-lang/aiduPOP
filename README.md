@@ -331,6 +331,14 @@ Incremental text accumulation and boundary detection:
 
 ## Changelog
 
+### v0.8.6 (2026-05-26)
+
+| 问题 | 说明 |
+|------|------|
+| 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` |
+| 配置文件格式错误 | `footer.fields` 被序列化为二维数组格式，与文档不符 |
+| 卸载残留配置 | 卸载后 `streaming` 配置段和 `plugins.enabled` 中的条目未清理 |
+
 ### v0.8.5 (2026-05-26)
 
 Contains 5 bug fixes:
