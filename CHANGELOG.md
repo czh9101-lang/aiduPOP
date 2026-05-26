@@ -9,6 +9,30 @@
 | 问题 | 说明 |
 |------|------|
 | 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` |
+| 配置文件格式错误 | `footer.fields` 被序列化为二维数组格式，与文档不符 |
+| 卸载残留配置 | 卸载后 `streaming` 配置段和 `plugins.enabled` 中的条目未清理 |
+
+### 改动
+
+1. **`config.py`** — `_streaming_sec()` 只查顶层 `streaming`
+2. **`plugin.py`** — 新增 `register()` 自动注入：
+   - 写入顶层 `streaming` 配置段（含默认值）
+   - 写入 `plugins.enabled` 条目
+   - `footer.fields` 展平为一维列表，配置格式与文档一致
+3. **`plugin.py`** — 新增 `unregister()` + `_cleanup_config()`，卸载时清理 `streaming` 配置段和 `plugins.enabled` 条目
+4. **版本号** — 更新至 v0.8.6
+
+# hermes-lark-streaming Changelog
+
+---
+
+## v0.8.6 — 2026-05-26
+
+### 修复
+
+| 问题 | 说明 |
+|------|------|
+| 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` |
 | 卸载残留配置 | 卸载后 `streaming` 配置段和 `plugins.enabled` 中的条目未清理 |
 
 ### 改动
