@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-_HERMES_CONFIG_PATH = Path.home() / ".hermes" / "config.yaml"
+_HERMES_CONFIG_PATH = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
 
 
 class Config:

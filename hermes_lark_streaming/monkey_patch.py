@@ -23,7 +23,13 @@ from __future__ import annotations
 import contextvars
 import functools
 import logging
+import threading
 from typing import Any, Callable
+
+
+# Thread-local storage for context propagation into worker threads
+_thread_local_ctx = threading.local()
+_thread_local_ctx.data = None
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
@@ -45,8 +51,14 @@ _started_msg_ids: set[str] = set()
 def _get_event_message_id() -> str | None:
     ctx = _msg_ctx.get()
     if ctx is None:
+        ctx = _get_thread_local_ctx()
+    if ctx is None:
         return None
     return ctx.get("event_message_id")
+
+
+def _get_thread_local_ctx() -> dict | None:
+    return getattr(_thread_local_ctx, "data", None)
 
 
 # ── GatewayRunner method wrappers ──────────────────────────────────
@@ -188,6 +200,8 @@ def _wrap_run_agent(orig: Callable) -> Callable:
         ctx = _msg_ctx.get()
         if ctx is not None and event_message_id:
             ctx["event_message_id"] = event_message_id
+            # Copy to thread-local for thread-pool workers
+            _thread_local_ctx.data = dict(ctx)
 
         result = await orig(
             self,
@@ -271,9 +285,11 @@ def _maybe_wrap_callbacks(agent) -> None:
     """Replace streaming callbacks on *agent* with wrappers that also fire
     Feishu CardKit updates.  Skips silently when outside a Feishu message
     context (i.e. no event_message_id in context)."""
+    _logger.info("HLS_CALLED: _maybe_wrap_callbacks invoked, has_stream=%s, eid_lookup=%s", bool(getattr(agent, "stream_delta_callback", None)), bool(_get_event_message_id()))
+
     eid = _get_event_message_id()
     if not eid:
-        _logger.debug("_maybe_wrap_callbacks: skip — no event_message_id in ctx")
+        _logger.info("HLS_CALLED: skip — no event_message_id in ctx")
         return  # Not in a hermes-lark-streaming context — skip
 
     _logger.debug(
@@ -285,6 +301,30 @@ def _maybe_wrap_callbacks(agent) -> None:
         bool(getattr(agent, "reasoning_callback", None)),
         bool(getattr(agent, "background_review_callback", None)),
     )
+
+    # ── Guard: skip if stream_delta_callback is already wrapped ──
+    # Hermes resets stream_delta_callback per message in _run_agent, so we
+    # check the function itself for our wrapper mark rather than a global
+    # agent flag. This ensures new messages get freshly wrapped callbacks
+    # while preventing double-wrapping within a single run_conversation.
+    _current_stream = getattr(agent, "stream_delta_callback", None)
+    _current_interim = getattr(agent, "interim_assistant_callback", None)
+    _current_tool = getattr(agent, "tool_progress_callback", None)
+    _current_reasoning = getattr(agent, "reasoning_callback", None)
+    _current_bg = getattr(agent, "background_review_callback", None)
+    _logger.info(
+        "HLS_WRAP: guard check stream=%s(hls=%s) interim=%s tool=%s reasoning=%s bg=%s eid=%s",
+        bool(_current_stream),
+        getattr(_current_stream, "_hls_wrapper", False) if _current_stream else "N/A",
+        bool(_current_interim),
+        bool(_current_tool),
+        bool(_current_reasoning),
+        bool(_current_bg),
+        eid[:12] if eid else "?",
+    )
+    if _current_stream and getattr(_current_stream, "_hls_wrapper", False):
+        _logger.info("HLS_WRAP: guard SKIP — stream_delta already wrapped")
+        return
 
     # ── ANSWER: wrap stream_delta_callback ──
     if getattr(agent, "stream_delta_callback", None):
@@ -351,6 +391,18 @@ def _maybe_wrap_callbacks(agent) -> None:
             return _orig(event_type, tool_name, preview, *args, **kwargs)
 
         agent.tool_progress_callback = _tool_wrapper
+
+    # Mark wrapper functions so guard can detect them next time
+    if getattr(agent, "stream_delta_callback", None):
+        setattr(agent.stream_delta_callback, "_hls_wrapper", True)
+    if getattr(agent, "interim_assistant_callback", None):
+        setattr(agent.interim_assistant_callback, "_hls_wrapper", True)
+    if getattr(agent, "tool_progress_callback", None):
+        setattr(agent.tool_progress_callback, "_hls_wrapper", True)
+    if getattr(agent, "reasoning_callback", None):
+        setattr(agent.reasoning_callback, "_hls_wrapper", True)
+    if getattr(agent, "background_review_callback", None):
+        setattr(agent.background_review_callback, "_hls_wrapper", True)
 
     # ── REASONING: set reasoning_callback ──
     _orig_reasoning = getattr(agent, "reasoning_callback", None)
@@ -450,9 +502,15 @@ def apply_patches() -> None:
     )
     GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
 
-    from run_agent import AIAgent
+    from agent.conversation_loop import run_conversation as _cl_run_conversation
 
-    AIAgent.run_conversation = _wrap_run_conversation(AIAgent.run_conversation)
+    import agent.conversation_loop as _cl_mod
+    _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
+
+    # Also try to patch AIAgent.run_conversation directly (belt-and-suspenders)
+    # This ensures _maybe_wrap_callbacks is called even if the module-level
+    # patch doesn't take effect in the running process.
+    _apply_direct_agent_patch()
 
     # ── Cron scheduler (graceful if not found) ──
     try:
@@ -474,3 +532,52 @@ def apply_patches() -> None:
             _logger.info("hermes-lark-streaming: cron scheduler not found, cron cards disabled")
 
     _logger.info("hermes-lark-streaming: all runtime patches applied")
+    _logger.info("hermes-lark-streaming: about to call _schedule_direct_patch")
+
+    # Deferred direct patch: retry AIAgent.run_conversation after Hermes
+    # finishes loading all modules
+    _schedule_direct_patch()
+    _logger.info("hermes-lark-streaming: _schedule_direct_patch returned")
+
+
+def _schedule_direct_patch() -> None:
+    """Schedule _apply_direct_agent_patch to run after Hermes finishes loading."""
+    import threading
+
+    def _delayed_patch():
+        import time
+        time.sleep(5)  # Wait for Hermes to finish loading
+        _apply_direct_agent_patch()
+
+    t = threading.Thread(target=_delayed_patch, daemon=True)
+    t.start()
+    _logger.info("hermes-lark-streaming: scheduled direct agent patch (5s delay)")
+
+
+def _apply_direct_agent_patch() -> None:
+    """Directly patch AIAgent.run_conversation as belt-and-suspenders.
+
+    The module-level agent.conversation_loop.run_conversation patch should
+    suffice, but in some Hermes runtimes the module attribute replacement
+    doesn't propagate to the AIAgent method's lazy import.  This function
+    patches the instance method directly.
+    """
+    try:
+        from run_agent import AIAgent
+
+        _orig_method = AIAgent.run_conversation
+
+        # Guard: skip if already patched
+        if getattr(_orig_method, "_hls_direct_patched", False):
+            _logger.info("hermes-lark-streaming: AIAgent.run_conversation already directly patched, skip")
+            return
+
+        def _patched_run_conversation(self, user_message, *args, **kwargs):
+            _maybe_wrap_callbacks(self)
+            return _orig_method(self, user_message, *args, **kwargs)
+
+        _patched_run_conversation._hls_direct_patched = True
+        AIAgent.run_conversation = _patched_run_conversation
+        _logger.info("hermes-lark-streaming: AIAgent.run_conversation patched directly")
+    except ImportError:
+        _logger.info("hermes-lark-streaming: AIAgent.run_conversation direct patch deferred (run_agent not yet loaded)")
