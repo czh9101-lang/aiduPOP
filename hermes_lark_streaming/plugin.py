@@ -67,12 +67,7 @@ def _ensure_streaming_config() -> None:
 
 
 def _remove_streaming_config() -> None:
-    """Remove the top-level ``streaming`` section from config.yaml.
-
-    Only removes if the section was injected by this plugin (detected via
-    the sentinel comment). If the user modified the section manually, it
-    is left untouched.
-    """
+    """Remove the top-level ``streaming`` section from config.yaml."""
     if not _HERMES_CONFIG_PATH.exists():
         return
 
@@ -80,15 +75,22 @@ def _remove_streaming_config() -> None:
         text = _HERMES_CONFIG_PATH.read_text(encoding="utf-8")
         raw = yaml.safe_load(text) or {}
 
-        if "streaming" not in raw:
-            return
+        if "streaming" in raw:
+            del raw["streaming"]
+            _logger.info("Removed top-level streaming config from %s", _HERMES_CONFIG_PATH)
 
-        del raw["streaming"]
+        # Also clean up plugins.enabled list
+        plugins = raw.get("plugins")
+        if isinstance(plugins, dict):
+            enabled = plugins.get("enabled")
+            if isinstance(enabled, list) and "hermes-lark-streaming" in enabled:
+                enabled.remove("hermes-lark-streaming")
+                _logger.info("Removed hermes-lark-streaming from plugins.enabled")
+
         with open(_HERMES_CONFIG_PATH, "w", encoding="utf-8") as f:
             yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        _logger.info("Removed top-level streaming config from %s", _HERMES_CONFIG_PATH)
     except Exception:
-        _logger.exception("Failed to remove streaming config from config.yaml")
+        _logger.exception("Failed to clean up streaming config / plugins.enabled")
 
 
 def register(ctx: "PluginContext") -> None:
