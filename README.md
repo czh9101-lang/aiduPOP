@@ -67,7 +67,13 @@ hermes gateway restart
 ### Uninstallation
 
 ```bash
+# 1. Clean up injected config first (while plugin code is still available)
+python -m hermes_lark_streaming cleanup
+
+# 2. Remove plugin files
 hermes plugins uninstall hermes-lark-streaming
+
+# 3. Restart gateway
 hermes gateway restart
 ```
 

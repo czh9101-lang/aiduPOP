@@ -65,7 +65,13 @@ hermes gateway restart
 ### 卸载
 
 ```bash
+# 1. 先清理注入的配置（插件代码还在，可以跑）
+python -m hermes_lark_streaming cleanup
+
+# 2. 卸载插件
 hermes plugins uninstall hermes-lark-streaming
+
+# 3. 重启网关
 hermes gateway restart
 ```
 
