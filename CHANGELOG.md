@@ -1,22 +1,8 @@
-# hermes-lark-streaming 修复记录
+# hermes-lark-streaming Changelog
 
 ---
 
-<<<<<<< HEAD
 ## v0.8.5 — 2026-05-26
-=======
-## [0.7.1] - 2026-05-26
-
-### 新增
-
-- 支持 `HERMES_HOME` 环境变量自定义安装路径，与 Hermes 主程序保持一致。修复 #30. (#31)
-
-### Added
-
-- Support `HERMES_HOME` environment variable for custom installation path, aligning with Hermes's own `hermes_constants.get_hermes_home()`. Fixes #30. (#31)
-
-## [0.7.0] - 2026-05-22
->>>>>>> 90cddc2bc2a0e4d7053fa96ace2ee4736f505be1
 
 包含以下 5 个修复：
 

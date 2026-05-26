@@ -1,7 +1,7 @@
-"""AST Patch 注入的 Hook 函数.
+"""Runtime Hook Functions for Monkey Patching.
 
-这些函数从 gateway/run.py 的注入点被调用.
-它们只做一件事：检查配置 → 调用 controller.
+These functions are called by monkey_patch.py when wrapping Hermes methods.
+They perform one task: check config → call controller.
 """
 
 from __future__ import annotations
