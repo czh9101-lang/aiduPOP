@@ -66,7 +66,7 @@ hermes gateway restart
 
 ```bash
 # 1. 先清理注入的配置（插件代码还在，可以跑）
-python -m hermes_lark_streaming cleanup
+$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup
 
 # 2. 卸载插件
 hermes plugins uninstall hermes-lark-streaming
@@ -79,10 +79,10 @@ hermes gateway restart
 
 ```bash
 # 检查插件状态
-python -m hermes_lark_streaming status
+$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status
 
 # 验证环境兼容性
-python -m hermes_lark_streaming verify
+$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming verify
 
 # 查看网关日志
 grep hermes-lark-streaming ~/.hermes/logs/gateway.log
@@ -176,7 +176,7 @@ display:
 **解决**：
 1. 检查插件是否正确安装：`hermes plugins list`
 2. 查看网关日志：`grep hermes-lark-streaming ~/.hermes/logs/gateway.log`
-3. 验证飞书凭据：`python -m hermes_lark_streaming status`
+3. 验证飞书凭据：`$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`
 4. 检查是否存在备份目录干扰：`ls -la ~/.hermes/plugins/ | grep bak`，如有则删除
 
 ### 卡片内容重复
@@ -211,7 +211,7 @@ display:
 |---|------|------|------|
 | 1 | 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` | `register()` 自动注入顶层 `streaming` 配置段 |
 | 2 | 配置文件格式错误 | `footer.fields` 被序列化为二维数组格式 | `_prepare_config()` 展平为一维列表后写入 |
-| 3 | 卸载后配置残留 | Hermes 的 `plugins uninstall` 只删目录不调 `unregister` | 新增 `python -m hermes_lark_streaming cleanup` 命令，先清配置再卸载 |
+| 3 | 卸载后配置残留 | Hermes 的 `plugins uninstall` 只删目录不调 `unregister` | 新增 `$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup` 命令，先清配置再卸载 |
 
 ### v0.8.5 (2026-05-26)
 

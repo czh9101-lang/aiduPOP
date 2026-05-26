@@ -26,7 +26,7 @@ def main() -> int:
 
 
 def _print_usage() -> None:
-    print("Usage: python -m hermes_lark_streaming <command>")
+    print("Usage: $(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming <command>")
     print()
     print("Commands:")
     print("  status     Show current configuration and credentials status")
