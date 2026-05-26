@@ -213,19 +213,19 @@ display:
 
 | # | Problem | Root Cause | Fix |
 |---|---------|------------|-----|
-| 1 | 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` | `register()` 自动注入顶层 `streaming` 配置段 |
-| 2 | 配置文件格式错误 | `footer.fields` 被序列化为二维数组格式 | `_prepare_config()` 展平为一维列表后写入 |
-| 3 | 卸载后配置残留 | Hermes 的 `plugins uninstall` 只删目录不调 `unregister` | 新增 `python -m hermes_lark_streaming cleanup` 命令，先清配置再卸载 |
+| 1 | No card effect after install | Plugin Config cannot find top-level `streaming` section, `enabled` always `False` | `register()` auto-injects top-level `streaming` config section |
+| 2 | Config file format error | `footer.fields` serialized as 2D array format | `_prepare_config()` flattens to 1D list before writing |
+| 3 | Config leftover after uninstall | Hermes `plugins uninstall` only removes directory, doesn't call `unregister` | New `python -m hermes_lark_streaming cleanup` command, clean config first then uninstall |
 
 ### v0.8.5 (2026-05-26)
 
 | # | Problem | Root Cause | Fix |
 |---|---------|------------|-----|
-| fix1 | 插件加载失败 | 仓库缺少根目录 `__init__.py` | 新增根目录 `__init__.py` 桥接导入 |
-| fix2 | 卡片内容重复 | 回调被多次包装，每段文本被处理两次 | 防重复包装守卫 `_hls_wrapped` 标记 |
-| fix3 | 语法异常 | `setattr` 错位缩进到 `except` 内部 | 修复缩进位置 |
-| fix4 | 后续消息无流式更新 | `contextvars` 不跨线程，`_set_thread_local_ctx()` 未定义 | 引入 `threading.local()` fallback |
-| fix5 | 重启后所有消息无流式更新 | 备份目录干扰命名空间 + `_set_thread_local_ctx()` 未定义 | 删除备份目录 + 定义 `_thread_local_ctx` + 双重保险直接 patch |
+| fix1 | Plugin load failure | Repository missing root `__init__.py` | Added root `__init__.py` bridge import |
+| fix2 | Duplicate card content | Callbacks wrapped multiple times, each text processed twice | Anti-duplicate guard with `_hls_wrapped` flag |
+| fix3 | Syntax exception | `setattr` misplaced indentation inside `except` block | Fixed indentation position |
+| fix4 | Subsequent messages lose streaming | `contextvars` doesn't cross threads, `_set_thread_local_ctx()` undefined | Introduced `threading.local()` fallback |
+| fix5 | All messages lose streaming after restart | Backup directory namespace collision + `_set_thread_local_ctx()` undefined | Removed backup dir + defined `_thread_local_ctx` + double-belt direct patch |
 
 ---
 
