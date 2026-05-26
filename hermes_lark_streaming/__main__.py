@@ -82,7 +82,9 @@ def _cmd_cleanup() -> int:
     from .plugin import _cleanup_config
 
     _cleanup_config()
-    print("Cleanup complete. Run 'hermes gateway restart' to apply.")
+    print("Cleanup complete. Next steps:")
+    print("  1. hermes plugins uninstall hermes-lark-streaming")
+    print("  2. hermes gateway restart")
     return 0
 
 
