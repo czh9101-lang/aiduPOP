@@ -57,6 +57,11 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 ```bash
 hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
 ```
+or
+
+```bash
+hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
+```
 
 Enter `Y` when prompted to enable the plugin, then restart the gateway:
 

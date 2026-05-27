@@ -55,6 +55,10 @@
 ```bash
 hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
 ```
+或
+```bash
+hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
+```
 
 提示时输入 `Y` 启用插件，然后重启网关：
 
