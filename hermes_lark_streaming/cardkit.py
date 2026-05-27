@@ -343,6 +343,24 @@ def _render_footer_field(
             return val, val
         return None, None
 
+    if name == "api_calls":
+        v = data.get("api_calls", 0) or 0
+        if v:
+            en_val, zh_val = _T["api_calls"]
+            if show_label:
+                return f"{en_val} {v}", f"{zh_val} {v}"
+            return str(v), str(v)
+        return None, None
+
+    if name == "history_offset":
+        v = data.get("history_offset", 0) or 0
+        if v:
+            en_val, zh_val = _T["history_offset"]
+            if show_label:
+                return f"{en_val} {v}", f"{zh_val} {v}"
+            return str(v), str(v)
+        return None, None
+
     return None, None
 
 

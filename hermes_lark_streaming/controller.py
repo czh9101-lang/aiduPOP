@@ -417,6 +417,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         model: str = "",
         tokens: dict | None = None,
         context: dict | None = None,
+        api_calls: int = 0,
+        history_offset: int = 0,
     ) -> bool:
         """消息处理完成 — 构建终端卡片."""
         if not self.enabled:
@@ -459,6 +461,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             **({"output_tokens": tokens.get("output_tokens")} if tokens else {}),
             **({"context_used": context.get("used_tokens")} if context else {}),
             **({"context_max": context.get("max_tokens")} if context else {}),
+            **({"api_calls": api_calls} if api_calls else {}),
+            **({"history_offset": history_offset} if history_offset else {}),
         }
 
         self._complete_session(session)

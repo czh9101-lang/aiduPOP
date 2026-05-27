@@ -27,6 +27,8 @@ _T: dict[str, tuple[str, str]] = {
     "thinking_panel": ("Thinking", "思考中"),
     "thought_for": ("Thought for {}", "思考了 {}"),
     "done": ("Done.", "完成。"),
+    "api_calls": ("API", "API"),
+    "history_offset": ("Offset", "偏移量"),
 }
 
 

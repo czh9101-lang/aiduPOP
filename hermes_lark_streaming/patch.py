@@ -109,6 +109,8 @@ def on_message_completed(
     model: str = "",
     tokens: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    api_calls: int = 0,
+    history_offset: int = 0,
 ) -> bool:
     """[注入点 2] return 前 — message.completed."""
     return bool(
@@ -119,6 +121,8 @@ def on_message_completed(
             model=model,
             tokens=tokens,
             context=context,
+            api_calls=api_calls,
+            history_offset=history_offset,
         )
     )
 
