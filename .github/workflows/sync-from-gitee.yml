@@ -1,0 +1,30 @@
+name: Sync from Gitee
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # 每30分钟自动同步
+  workflow_dispatch:           # 支持手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout GitHub repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "gitee-sync"
+          git config user.email "sync@example.com"
+
+      - name: Sync from Gitee
+        run: |
+          git remote add gitee https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/${{ github.event.repository.name }}.git
+          git fetch gitee
+          git checkout main || git checkout master
+          git merge gitee/main --no-edit || git merge gitee/master --no-edit
+          git push origin HEAD
