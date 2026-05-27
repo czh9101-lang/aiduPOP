@@ -2,19 +2,19 @@ name: Sync from Gitee
 
 on:
   schedule:
-    - cron: '44 * * * *'  # 每小时44分运行
+    - cron: '44 * * * *'
   workflow_dispatch:
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    env:
-      # 强制使用Node.js 24
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    # 1. 关键修复：给予写入权限，否则无法推送
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout GitHub repo
-        uses: actions/checkout@v3  # 使用v3版本，兼容Node.js 24
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -26,8 +26,17 @@ jobs:
 
       - name: Sync from Gitee
         run: |
+          # 2. 关键修复：处理 Git 合并和推送逻辑
           git remote add gitee https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/${{ github.event.repository.name }}.git
+          
+          # 获取 Gitee 代码
           git fetch gitee
+          
+          # 切换分支
           git checkout main || git checkout master
+          
+          # 合并 Gitee 代码
           git merge gitee/main --no-edit || git merge gitee/master --no-edit
-          git push origin HEAD
+          
+          # 3. 关键修复：显式推送到当前分支，并设置上游
+          git push origin $(git branch --show-current)
