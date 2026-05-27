@@ -9,15 +9,10 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     env:
-      # 明确指定使用Node.js 24
-      NODE_VERSION: '24'
+      # 关键修复：强制使用Node.js 24
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     steps:
-      - name: Set up Node.js 24
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      
       - name: Checkout GitHub repo
         uses: actions/checkout@v4
         with:
@@ -33,6 +28,6 @@ jobs:
         run: |
           git remote add gitee https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/${{ github.event.repository.name }}.git
           git fetch gitee
-          git checkout main || git checkout master
+          git checkout main || gitcheckout master
           git merge gitee/main --no-edit || git merge gitee/master --no-edit
           git push origin HEAD
