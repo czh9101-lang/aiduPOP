@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.8.6-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.9.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -54,6 +54,10 @@
 
 ```bash
 hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
+```
+或
+```bash
+hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
 ```
 
 提示时输入 `Y` 启用插件，然后重启网关：
@@ -136,6 +140,10 @@ streaming:
       - model
       - tokens
       - context
+      # - api_calls          # 本轮对话的 API 调用次数（默认不添加，需要时自行添加后重启网关）
+      # - history_offset     # 对话轮次偏移量（默认不添加，需要时自行添加后重启网关）
+      #                        # 值越大 → 对话历史越长，AI 已有更多上下文
+      #                        # 值突然变小 → 发生了上下文压缩，早期对话被摘要替代
     show_label: true         # 是否显示字段标签（true/false）
 ```
 
@@ -179,48 +187,24 @@ display:
 3. 验证飞书凭据：`$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`
 4. 检查是否存在备份目录干扰：`ls -la ~/.hermes/plugins/ | grep bak`，如有则删除
 
-### 卡片内容重复
-
-**问题**：回复文本在卡片中出现两次
-
-**原因**：Hermes 在同一会话中多次调用 `run_conversation`，导致回调被重复包装
-
-**解决**：插件已内置防重复包装守卫（v0.8.0-fix2），通过 `_hls_wrapper` 属性标记已包装的回调
-
 ### 卡片元素超限
 
 **问题**：长对话导致卡片更新失败
 
 **解决**：启用线性模式（`streaming.linear: true`），插件会自动拆卡处理
 
-### 第二条及后续消息无流式更新
+### 表格显示异常
 
-**问题**：第一条消息正常，后续消息只显示跑马灯和 Done
+**问题**：AI 回复中的表格数量较多时，部分表格显示为 Markdown 源码而非表格样式
 
-**原因**：`contextvars.ContextVar` 不跨线程传播，线程池中无法读取消息上下文
+**原因**：飞书卡片对表格元素数量有限制，超限表格会被降级为代码块显示
 
-**解决**：插件已通过 `threading.local()` 作为 fallback（v0.8.0-fix4/fix5），确保跨线程场景下上下文正确传递
+**解决**：v0.9.0 已将表格降级阈值从 3 调整为 10，绝大多数场景不再触发降级。如仍遇到此问题，可在 `cardkit_md.py` 中调整 `_MAX_CARD_TABLES` 值
 
 ---
 
 ## 更新日志
 
-### v0.8.6 (2026-05-26)
-
-| # | 问题 | 原因 | 修复 |
-|---|------|------|------|
-| 1 | 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` | `register()` 自动注入顶层 `streaming` 配置段 |
-| 2 | 配置文件格式错误 | `footer.fields` 被序列化为二维数组格式 | `_prepare_config()` 展平为一维列表后写入 |
-| 3 | 卸载后配置残留 | Hermes 的 `plugins uninstall` 只删目录不调 `unregister` | 新增 `$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup` 命令，先清配置再卸载 |
-
-### v0.8.5 (2026-05-26)
-
-| # | 问题 | 原因 | 修复 |
-|---|------|------|------|
-| fix1 | 插件加载失败 | 仓库缺少根目录 `__init__.py` | 新增根目录 `__init__.py` 桥接导入 |
-| fix2 | 卡片内容重复 | 回调被多次包装，每段文本被处理两次 | 防重复包装守卫 `_hls_wrapped` 标记 |
-| fix3 | 语法异常 | `setattr` 错位缩进到 `except` 内部 | 修复缩进位置 |
-| fix4 | 后续消息无流式更新 | `contextvars` 不跨线程，`_set_thread_local_ctx()` 未定义 | 引入 `threading.local()` fallback |
-| fix5 | 重启后所有消息无流式更新 | 备份目录干扰命名空间 + `_set_thread_local_ctx()` 未定义 | 删除备份目录 + 定义 `_thread_local_ctx` + 双重保险直接 patch |
+> 完整版本历史请查看 [CHANGELOG.md](CHANGELOG.md)
 
 ## 致谢

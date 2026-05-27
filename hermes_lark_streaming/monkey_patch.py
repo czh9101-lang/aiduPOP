@@ -24,6 +24,7 @@ import contextvars
 import functools
 import logging
 import threading
+import time
 from typing import Any, Callable
 
 
@@ -118,6 +119,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                 "anchor_id": anchor_id,
                 "event_message_id": "",  # filled by _wrap_run_agent
                 "card_sent": False,
+                "_msg_start_time": time.monotonic(),  # 自计时：替代无法获取的 _response_time 局部变量
             }
         )
 
@@ -224,10 +226,16 @@ def _wrap_run_agent(orig: Callable) -> Callable:
             try:
                 from .patch import on_message_completed
 
+                # 自计时：计算从消息开始到 agent 运行完成的耗时
+                # 原因：_response_time 是 _handle_message_with_agent 的局部变量，
+                # 不在 _run_agent 的返回值 agent_result 中，
+                # 所以 result.get("_response_time", 0) 永远返回 0。
+                _elapsed = time.monotonic() - ctx.get("_msg_start_time", time.monotonic())
+
                 card_sent = on_message_completed(
                     message_id=ctx["message_id"],
                     answer=result.get("final_response", ""),
-                    duration=result.get("_response_time", 0),
+                    duration=_elapsed,
                     model=result.get("model", ""),
                     tokens={
                         "input_tokens": result.get("input_tokens", 0),
@@ -237,6 +245,8 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         "used_tokens": result.get("last_prompt_tokens", 0),
                         "max_tokens": result.get("context_length", 0),
                     },
+                    api_calls=result.get("api_calls", 0),
+                    history_offset=result.get("history_offset", 0),
                 )
                 if card_sent:
                     result["already_sent"] = True
@@ -354,21 +364,12 @@ def _maybe_wrap_callbacks(agent) -> None:
     else:
         _logger.debug("_maybe_wrap_callbacks: NO stream_delta_callback on agent")
 
-    # ── THINKING: wrap interim_assistant_callback ──
-    if getattr(agent, "interim_assistant_callback", None):
-        _orig = agent.interim_assistant_callback
-
-        def _thinking_wrapper(text, *args, **kwargs):
-            try:
-                from .patch import on_thinking_delta
-
-                if text and on_thinking_delta(message_id=eid, text=text):
-                    return
-            except Exception:
-                pass
-            return _orig(text, *args, **kwargs)
-
-        agent.interim_assistant_callback = _thinking_wrapper
+    # ── THINKING: 不包裹 interim_assistant_callback ──
+    # 原因：Hermes 内部 on_thinking 和 on_answer 可能处理同一段文本，
+    # 原版 AST 注入有 already_streamed 守卫防重，但 monkey patch 无法访问该参数。
+    # 如果两层都包裹，会导致内容重复显示（thinking 一次 + answer 一次）。
+    # 思考内容仍由 reasoning_callback（原生模型推理）处理。
+    # 详见：Bug fix 1 — 重复内容问题
 
     # ── TOOL: wrap tool_progress_callback ──
     if getattr(agent, "tool_progress_callback", None):
@@ -395,8 +396,7 @@ def _maybe_wrap_callbacks(agent) -> None:
     # Mark wrapper functions so guard can detect them next time
     if getattr(agent, "stream_delta_callback", None):
         setattr(agent.stream_delta_callback, "_hls_wrapper", True)
-    if getattr(agent, "interim_assistant_callback", None):
-        setattr(agent.interim_assistant_callback, "_hls_wrapper", True)
+    # 不再标记 interim_assistant_callback（未包裹）
     if getattr(agent, "tool_progress_callback", None):
         setattr(agent.tool_progress_callback, "_hls_wrapper", True)
     if getattr(agent, "reasoning_callback", None):

@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.8.6-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.9.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -56,6 +56,11 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 
 ```bash
 hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
+```
+or
+
+```bash
+hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
 ```
 
 Enter `Y` when prompted to enable the plugin, then restart the gateway:
@@ -140,6 +145,10 @@ streaming:
       - model
       - tokens
       - context
+      # - api_calls          # Number of API calls in this session (not added by default, add manually if needed)
+      # - history_offset     # Conversation turn offset (not added by default, add manually if needed)
+      #                        # Larger value → longer conversation history, AI has more context
+      #                        # Value suddenly decreases → context compression occurred, early dialogue replaced by summary
     show_label: true         # Show field labels (true/false)
 ```
 
@@ -183,49 +192,25 @@ display:
 3. Verify Feishu credentials: `$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`
 4. Check for backup directory interference: `ls -la ~/.hermes/plugins/ | grep bak`, delete if exists
 
-### Duplicate Card Content
-
-**Problem**: Reply text appears twice in the card
-
-**Cause**: Hermes calls `run_conversation` multiple times in the same session, causing callbacks to be wrapped repeatedly
-
-**Solution**: Plugin has built-in duplicate wrap guard (v0.8.5), uses `_hls_wrapper` attribute to mark wrapped callbacks
-
 ### Card Element Limit Exceeded
 
 **Problem**: Card update fails during long conversations
 
 **Solution**: Enable linear mode (`streaming.linear: true`), plugin will auto-split cards
 
-### Second and Subsequent Messages Have No Streaming Updates
+### Table Display Issues
 
-**Problem**: First message is normal, subsequent messages only show marquee and Done
+**Problem**: When AI response contains many tables, some tables display as raw Markdown instead of formatted tables
 
-**Cause**: `contextvars.ContextVar` doesn't propagate across threads, message context unavailable in thread pool
+**Cause**: Feishu cards have a limit on the number of table elements; tables exceeding the limit are downgraded to code blocks
 
-**Solution**: Plugin uses `threading.local()` as fallback (v0.8.5), ensuring correct context propagation in cross-thread scenarios
+**Solution**: v0.9.0 has increased the table downgrade threshold from 3 to 10, which covers most scenarios. If you still encounter this issue, adjust `_MAX_CARD_TABLES` in `cardkit_md.py`
 
 ---
 
 ## Changelog
 
-### v0.8.6 (2026-05-26)
-
-| # | Problem | Root Cause | Fix |
-|---|---------|------------|-----|
-| 1 | No card effect after install | Plugin Config cannot find top-level `streaming` section, `enabled` always `False` | `register()` auto-injects top-level `streaming` config section |
-| 2 | Config file format error | `footer.fields` serialized as 2D array format | `_prepare_config()` flattens to 1D list before writing |
-| 3 | Config leftover after uninstall | Hermes `plugins uninstall` only removes directory, doesn't call `unregister` | New `$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup` command, clean config first then uninstall |
-
-### v0.8.5 (2026-05-26)
-
-| # | Problem | Root Cause | Fix |
-|---|---------|------------|-----|
-| fix1 | Plugin load failure | Repository missing root `__init__.py` | Added root `__init__.py` bridge import |
-| fix2 | Duplicate card content | Callbacks wrapped multiple times, each text processed twice | Anti-duplicate guard with `_hls_wrapped` flag |
-| fix3 | Syntax exception | `setattr` misplaced indentation inside `except` block | Fixed indentation position |
-| fix4 | Subsequent messages lose streaming | `contextvars` doesn't cross threads, `_set_thread_local_ctx()` undefined | Introduced `threading.local()` fallback |
-| fix5 | All messages lose streaming after restart | Backup directory namespace collision + `_set_thread_local_ctx()` undefined | Removed backup dir + defined `_thread_local_ctx` + double-belt direct patch |
+> See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ---
 
