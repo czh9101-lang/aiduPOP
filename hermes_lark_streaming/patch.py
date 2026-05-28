@@ -111,6 +111,9 @@ def on_message_completed(
     context: dict[str, Any] | None = None,
     api_calls: int = 0,
     history_offset: int = 0,
+    compression_exhausted: bool = False,
+    aborted: bool = False,
+    error_message: str = "",
 ) -> bool:
     """[注入点 2] return 前 — message.completed."""
     return bool(
@@ -123,6 +126,9 @@ def on_message_completed(
             context=context,
             api_calls=api_calls,
             history_offset=history_offset,
+            compression_exhausted=compression_exhausted,
+            aborted=aborted,
+            error_message=error_message,
         )
     )
 

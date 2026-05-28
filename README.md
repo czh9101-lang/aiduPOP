@@ -141,12 +141,13 @@ streaming:
 
   footer:
     fields:
-      - [status, elapsed, model, history_offset]
-      - [tokens, context, api_calls]
-      # Available fields: status, elapsed, model, tokens, context, api_calls, history_offset
+      - [status, elapsed, model, api_calls]
+      - [tokens, context, history_offset, compression_exhausted]
+      # Available fields: status, elapsed, model, tokens, context, api_calls, history_offset, compression_exhausted
       # Each inner list is one row in the footer
       # history_offset: larger value → longer conversation history; sudden decrease → context compression
       # api_calls: number of API calls in this session
+      # compression_exhausted: shown when context compression can no longer fit the window (⚠ Compressed)
     show_label: true         # Show field labels (true/false)
 ```
 

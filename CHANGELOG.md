@@ -5,11 +5,16 @@
 | # | 类型 | 功能 | 说明 |
 |---|------|------|------|
 | 1 | Feature | 时间注入（`streaming.inject_time`） | 开启后，每条用户消息前自动添加 `[HH:MM:SS CST] ` 时间前缀，让 AI 模型无需调用 `date` 工具即可感知当前时间 |
+| 2 | Bug | `/stop` 后卡片状态显示"已完成"而非"已停止" | 检测 `result.interrupted` / `result.partial`，传入 `aborted=True` 使卡片显示 🛑 已停止 |
+| 3 | Feature | 错误/中断消息在卡片正文展示 | `result.error` 和 `result.interrupt_message` 现在会以红色提示块显示在卡片正文中（而非仅页脚） |
+| 4 | Feature | 页脚新增 `compression_exhausted` 字段 | 上下文压缩耗尽时显示 ⚠ 已压缩 / ⚠ Compressed，提示用户 AI 可能丢失早期对话 |
+| 5 | Chore | 默认页脚字段调整 | `[status, elapsed, model, api_calls]` + `[tokens, context, history_offset, compression_exhausted]`；`show_label` 默认 `true` |
 
-**实现原理**：
+**时间注入实现原理**：
 - 注入点：`_wrap_run_conversation` 和 `_apply_direct_agent_patch`（双保险）
 - 格式：`[HH:MM:SS CST] <原始消息>`，例：`[14:30:05 CST] 你好`
 - 时间前缀同时添加到 `user_message` 和 `persist_user_message`（若已设置），确保 DB 存储的内容与 API 收到的一致
+- 双重注入防护：`threading.local()` 标志位 + `finally` 重置，防止两层 patch 同时生效时重复注入
 
 **Prefix Cache 影响**：
 - **零额外影响**。DB 存储带时间前缀的版本 → 下轮从 DB 加载的历史 = 上轮 API 收到的 → 前缀字节一致 → cache 命中率不变

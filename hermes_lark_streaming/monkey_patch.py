@@ -248,7 +248,13 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 # 所以 result.get("_response_time", 0) 永远返回 0。
                 _elapsed = time.monotonic() - ctx.get("_msg_start_time", time.monotonic())
 
-                card_sent = on_message_completed(
+                # ── 检查是否被中断（/stop 或新消息打断） ──
+                # Hermes 的 /stop 不会让 _run_agent 返回 None，而是返回
+                # interrupted=True / partial=True 的 result。
+                # 此时应该显示“已停止”而非“已完成”。
+                is_interrupted = result.get("interrupted", False) or result.get("partial", False)
+
+                if is_interrupted:
                     message_id=ctx["message_id"],
                     answer=result.get("final_response", ""),
                     duration=_elapsed,
@@ -263,6 +269,9 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     },
                     api_calls=result.get("api_calls", 0),
                     history_offset=result.get("history_offset", 0),
+                    compression_exhausted=result.get("compression_exhausted", False),
+                    aborted=is_interrupted,
+                    error_message=result.get("error") or result.get("interrupt_message", ""),
                 )
                 if card_sent:
                     result["already_sent"] = True

@@ -31,8 +31,8 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "inject_time": False,
     "footer": {
         "fields": [
-            ["status", "elapsed", "model", "history_offset"],
-            ["tokens", "context", "api_calls"],
+            ["status", "elapsed", "model", "api_calls"],
+            ["tokens", "context", "history_offset", "compression_exhausted"],
         ],
         "show_label": True,
     },

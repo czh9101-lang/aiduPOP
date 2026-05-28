@@ -136,12 +136,13 @@ streaming:
 
   footer:
     fields:
-      - [status, elapsed, model, history_offset]
-      - [tokens, context, api_calls]
-      # 可用字段：status, elapsed, model, tokens, context, api_calls, history_offset
+      - [status, elapsed, model, api_calls]
+      - [tokens, context, history_offset, compression_exhausted]
+      # 可用字段：status, elapsed, model, tokens, context, api_calls, history_offset, compression_exhausted
       # 每个内层列表为页脚的一行
       # history_offset：值越大 → 对话历史越长；值突然变小 → 发生了上下文压缩
       # api_calls：本轮对话的 API 调用次数
+      # compression_exhausted：上下文压缩已耗尽，无法再适应上下文窗口时显示（⚠ 已压缩）
     show_label: true         # 是否显示字段标签（true/false）
 ```
 

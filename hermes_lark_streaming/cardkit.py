@@ -361,6 +361,13 @@ def _render_footer_field(
             return str(v), str(v)
         return None, None
 
+    if name == "compression_exhausted":
+        v = data.get("compression_exhausted", False)
+        if v:
+            en_val, zh_val = _T["compression_exhausted"]
+            return en_val, zh_val
+        return None, None
+
     return None, None
 
 
@@ -501,6 +508,7 @@ def build_complete_card(
     has_cardkit: bool = False,
     is_error: bool = False,
     is_aborted: bool = False,
+    error_message: str = "",
     footer_fields: list[list[str]] | None = None,
     footer_show_label: bool = True,
     panel_expanded: bool = False,
@@ -513,6 +521,14 @@ def build_complete_card(
 
     if tool_steps:
         elements.append(_build_tool_panel(tool_steps, tool_elapsed_ms, expanded=panel_expanded))
+
+    # ── 错误/中断消息展示 ──
+    # 在正文区域显示错误或中断原因（红色提示块）
+    if error_message:
+        elements.append({
+            "tag": "markdown",
+            "content": f"<font color='red'>⚠ {error_message}</font>",
+        })
 
     content = _downgrade_tables(optimize_markdown_style(text or _T["done"][0]))
     for chunk in _split_long_text(content):
@@ -557,6 +573,7 @@ def build_linear_complete_card(
     footer_data: dict | None = None,
     is_error: bool = False,
     is_aborted: bool = False,
+    error_message: str = "",
     footer_fields: list[list[str]] | None = None,
     footer_show_label: bool = True,
     panel_expanded: bool = False,
@@ -564,6 +581,13 @@ def build_linear_complete_card(
     """线性模式完成态卡片 — 按 segments 顺序渲染."""
     elements: list[dict] = []
     has_answer = False
+
+    # ── 错误/中断消息展示 ──
+    if error_message:
+        elements.append({
+            "tag": "markdown",
+            "content": f"<font color='red'>⚠ {error_message}</font>",
+        })
 
     for seg in segments:
         if seg.type == "reasoning":
