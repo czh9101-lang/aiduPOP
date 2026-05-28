@@ -16,11 +16,11 @@ except Exception:
                     __version__ = _line.split(":", 1)[1].strip().strip('"').strip("'")
                     break
             else:
-                __version__ = "0.10.0"
+                __version__ = "unknown"
         else:
-            __version__ = "0.10.0"
+            __version__ = "unknown"
     except Exception:
-        __version__ = "0.10.0"
+        __version__ = "unknown"
 
 from .plugin import register
 
