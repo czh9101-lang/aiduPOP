@@ -142,7 +142,7 @@ streaming:
       # 每个内层列表为页脚的一行
       # history_offset：值越大 → 对话历史越长；值突然变小 → 发生了上下文压缩
       # api_calls：本轮对话的 API 调用次数
-    show_label: false        # 是否显示字段标签（true/false）
+    show_label: true         # 是否显示字段标签（true/false）
 ```
 
 ### 时间注入（`inject_time`）

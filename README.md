@@ -147,7 +147,7 @@ streaming:
       # Each inner list is one row in the footer
       # history_offset: larger value → longer conversation history; sudden decrease → context compression
       # api_calls: number of API calls in this session
-    show_label: false        # Show field labels (true/false)
+    show_label: true         # Show field labels (true/false)
 ```
 
 ### Time Injection (`inject_time`)

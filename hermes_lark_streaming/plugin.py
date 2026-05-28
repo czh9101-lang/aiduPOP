@@ -34,7 +34,7 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
             ["status", "elapsed", "model", "history_offset"],
             ["tokens", "context", "api_calls"],
         ],
-        "show_label": False,
+        "show_label": True,
     },
 }
 
