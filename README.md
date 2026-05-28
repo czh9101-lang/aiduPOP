@@ -141,16 +141,13 @@ streaming:
 
   footer:
     fields:
-      - status
-      - elapsed
-      - model
-      - tokens
-      - context
-      # - api_calls          # Number of API calls in this session (not added by default, add manually if needed)
-      # - history_offset     # Conversation turn offset (not added by default, add manually if needed)
-      #                        # Larger value → longer conversation history, AI has more context
-      #                        # Value suddenly decreases → context compression occurred, early dialogue replaced by summary
-    show_label: true         # Show field labels (true/false)
+      - [status, elapsed, model, history_offset]
+      - [tokens, context, api_calls]
+      # Available fields: status, elapsed, model, tokens, context, api_calls, history_offset
+      # Each inner list is one row in the footer
+      # history_offset: larger value → longer conversation history; sudden decrease → context compression
+      # api_calls: number of API calls in this session
+    show_label: false        # Show field labels (true/false)
 ```
 
 ### Time Injection (`inject_time`)

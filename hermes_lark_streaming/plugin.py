@@ -31,30 +31,24 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "inject_time": False,
     "footer": {
         "fields": [
-            ["status", "elapsed", "model"],
-            ["tokens", "context"],
+            ["status", "elapsed", "model", "history_offset"],
+            ["tokens", "context", "api_calls"],
         ],
-        "show_label": True,
+        "show_label": False,
     },
 }
 
 
 def _prepare_config(cfg: dict[str, Any]) -> dict[str, Any]:
-    """Pre-process config dict: flatten ``footer.fields`` before YAML dump.
+    """Pre-process config dict before YAML dump.
 
-    The plugin internally uses a 2D array for footer field layout (rows),
-    but the documented YAML format is a flat list. This function flattens
-    the 2D array so the dumped YAML matches user expectations.
+    Handles nested dicts recursively. Footer fields are kept as-is
+    (2D array for row layout) so the YAML output preserves the
+    visual row structure.
     """
     result: dict[str, Any] = {}
     for k, v in cfg.items():
-        if k == "footer" and isinstance(v, dict):
-            footer = dict(v)
-            flds = footer.get("fields", [])
-            if flds and isinstance(flds[0], list):
-                footer["fields"] = [item for sub in flds for item in sub]
-            result[k] = footer
-        elif isinstance(v, dict):
+        if isinstance(v, dict):
             result[k] = _prepare_config(v)
         else:
             result[k] = v

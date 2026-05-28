@@ -136,16 +136,13 @@ streaming:
 
   footer:
     fields:
-      - status
-      - elapsed
-      - model
-      - tokens
-      - context
-      # - api_calls          # 本轮对话的 API 调用次数（默认不添加，需要时自行添加后重启网关）
-      # - history_offset     # 对话轮次偏移量（默认不添加，需要时自行添加后重启网关）
-      #                        # 值越大 → 对话历史越长，AI 已有更多上下文
-      #                        # 值突然变小 → 发生了上下文压缩，早期对话被摘要替代
-    show_label: true         # 是否显示字段标签（true/false）
+      - [status, elapsed, model, history_offset]
+      - [tokens, context, api_calls]
+      # 可用字段：status, elapsed, model, tokens, context, api_calls, history_offset
+      # 每个内层列表为页脚的一行
+      # history_offset：值越大 → 对话历史越长；值突然变小 → 发生了上下文压缩
+      # api_calls：本轮对话的 API 调用次数
+    show_label: false        # 是否显示字段标签（true/false）
 ```
 
 ### 时间注入（`inject_time`）
