@@ -156,8 +156,11 @@ class TestFlushNow:
             count += 1
 
         # 构造一个 pending timer 的场景
+        # schedule_update 现在通过 call_soon_threadsafe 调度，
+        # 需要让事件循环处理回调后 _pending_timer 才会被设置
         ctrl._last_update_time = time.monotonic() - 0.05
         ctrl.schedule_update(do_flush)
+        await asyncio.sleep(0.01)  # 让事件循环处理 call_soon_threadsafe 回调
         assert ctrl._pending_timer is not None
         await ctrl.flush_now(do_flush)
         assert ctrl._pending_timer is None

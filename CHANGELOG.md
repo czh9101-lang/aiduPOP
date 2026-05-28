@@ -14,6 +14,8 @@
 | 8 | Chore | `apply_patches()` 中任何 import 失败导致整个插件崩溃 | V0.9.0 无 try/except，单个模块失败后全部补丁不执行 | 所有 import 包裹 try/except，单个模块补丁失败不影响其他补丁 |
 | 9 | Bug | Cron 推送卡片从未生效，每次静默回退为纯文本 | `_wrap_cron_deliver` 为 async，内部同步调用 `on_cron_deliver` → `run_coroutine_threadsafe().result(30)` 阻塞事件循环导致 30 秒死锁超时 | 全链路改为 async：`on_cron_deliver` → `on_cron_deliver_async` → 直接 `await _do_cron_deliver()`，消除阻塞 |
 | 10 | Bug | Cron 推送卡片中表格超限后渲染失败 | `build_cron_card` 缺少 `_downgrade_tables()` 调用 | 与 `build_complete_card` / `build_streaming_card` 一致，添加 `_downgrade_tables()` |
+| 11 | Bug | 流式卡片跑马灯无文字，等很久才出文字，看到时已完成 | `FlushController.schedule_update` 使用 `call_soon` / `call_later` 从 LLM worker 线程调度到事件循环，这两个方法 **不唤醒事件循环**（缺少 `_write_to_self()`），导致回调虽入队列但永远不被及时处理 | `schedule_update` 改用 `call_soon_threadsafe` 调度到事件循环线程，确保每次 flush 请求立即唤醒事件循环；新增 `_schedule_update_on_loop()` 内部方法 |
+| 12 | Perf | 首次文字出现慢 ~200ms | 线性模式创建 answer/reasoning 元素时内容为空，需额外一次 `stream_element` API 调用才出文字 | `batch_update` 时预填充已累积的文本内容，省去首次 `stream_element` 调用 |
 
 ## v0.9.0 (2026-05-27)
 

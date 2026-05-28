@@ -241,15 +241,27 @@ class LinearControllerMixin:
                     new_el_total = 0
 
                 if seg.type == "reasoning":
+                    # 预填充推理文本：与 answer 优化同理
+                    _reasoning_content = optimize_markdown_style(seg.text) or " " if seg.text else " "
                     el = _build_reasoning_panel(
-                        " ",
+                        _reasoning_content,
                         seg.elapsed_ms,
                         expanded=True,
                         element_id=seg.el_id,
                         text_element_id=seg.text_el_id,
                     )
+                    if seg.text:
+                        seg.dirty = False  # 文本已在 batch_update 中发送
                 elif seg.type == "answer":
-                    el = _streaming_element(element_id=seg.el_id)
+                    # 预填充文本：避免 batch_update 后再调一次 stream_element，
+                    # 减少首次文字出现的 API 调用次数（省 ~100-200ms）
+                    _ans_content = seg.text or ""
+                    if session.image_resolver:
+                        _ans_content = session.image_resolver.resolve_images(_ans_content)
+                    _ans_content = _downgrade_tables(optimize_markdown_style(_ans_content)) or " "
+                    el = _streaming_element(content=_ans_content, element_id=seg.el_id)
+                    if seg.text:
+                        seg.dirty = False  # 文本已在 batch_update 中发送
                 elif seg.type == "tool":
                     start = seg.tool_offset
                     end = seg.tool_end_offset if seg.tool_end_offset else len(all_steps)

@@ -277,7 +277,12 @@ streaming:
 - `card_sent=True` → 正常完成，抑制 Hermes 纯文本回复
 - `card_sent=False` → 真正的 abort/error
 
-### 10.6 Feishu CardKit 元素限制
+### 10.6 FlushController 线程安全（v0.10.1 修复）
+**❌ 错误**: 从 worker 线程调用 `loop.call_soon()` 或 `loop.call_later()`
+**✅ 正确**: 使用 `loop.call_soon_threadsafe()` 确保唤醒事件循环
+**原因**: `call_soon` 只把回调加入 `_ready` 队列，但不调 `_write_to_self()` 唤醒事件循环。LLM 流式回调在 worker 线程中执行 → `schedule_update` → `call_soon` → 回调入队但事件循环不醒 → flush 永远不执行 → "跑马灯无文字"
+
+### 10.7 Feishu CardKit 元素限制
 飞书硬限制 200 元素/卡片。线性模式阈值设为 180（预留 20 给 footer + 波动）。
 
 ---
@@ -365,4 +370,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-05-28 | Version: 0.10.0 DEV*
+*Last updated: 2026-05-28 | Version: 0.10.1 DEV*
