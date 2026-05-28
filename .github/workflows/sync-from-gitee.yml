@@ -11,6 +11,9 @@ on:
         default: false
         type: boolean
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -37,9 +40,18 @@ jobs:
         run: |
           git remote add gitee https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/${{ github.event.repository.name }}.git
           git fetch gitee
-          git checkout master
-          git merge gitee/master --no-edit
-          git push origin $(git branch --show-current)
+
+          BRANCH=$(git branch --show-current)
+          git checkout "$BRANCH"
+
+          # 冲突时以 Gitee 为准
+          if ! git merge gitee/master --no-edit --strategy-option theirs; then
+            echo "⚠️ Merge failed, forcing Gitee version"
+            git merge --abort
+            git reset --hard gitee/master
+          fi
+
+          git push origin "$BRANCH"
 
       - name: Detect changes
         id: detect
