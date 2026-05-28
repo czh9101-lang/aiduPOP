@@ -1,7 +1,7 @@
 """Tests for version reading logic in __init__.py and setup.py.
 
 Covers:
-  - hermes_lark_streaming.__version__ reads "0.10.1" from plugin.yaml
+  - hermes_lark_streaming.__version__ reads "0.11.0" from plugin.yaml
   - Fallback to "unknown" when plugin.yaml is missing
   - Fallback to "unknown" when plugin.yaml has no version: field
   - setup.py raises FileNotFoundError when plugin.yaml is missing
@@ -46,8 +46,8 @@ class TestInitVersion:
     """Tests for ``hermes_lark_streaming.__version__``."""
 
     def test_version_reads_correct_value(self) -> None:
-        """__version__ should be '0.10.2' as defined in plugin.yaml."""
-        assert hermes_lark_streaming.__version__ == "0.10.2"
+        """__version__ should be '0.11.0' as defined in plugin.yaml."""
+        assert hermes_lark_streaming.__version__ == "0.11.0"
 
     def test_version_fallback_when_plugin_yaml_missing(self) -> None:
         """__version__ falls back to 'unknown' when plugin.yaml does not exist."""

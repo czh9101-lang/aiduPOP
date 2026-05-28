@@ -57,6 +57,7 @@ class CardSession:
         "deferred_background_review_lock",
         "deferred_background_reviews",
         "element_count",
+        "element_limit_hit",
         "error_message",
         "flush",
         "footer",
@@ -120,6 +121,7 @@ class CardSession:
         self.linear = False
         self.linear_state: LinearState | None = None
         self.element_count: int = 0
+        self.element_limit_hit = False
         self.split_disabled = False
         self.split_index: int = 0
         self.error_message: str = ""

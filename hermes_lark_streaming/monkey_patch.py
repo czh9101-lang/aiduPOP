@@ -68,6 +68,7 @@ _msg_ctx: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar
 # an old call is still in-flight, the old call's None return indicates
 # the old session was interrupted (not just aborted).
 _started_msg_ids: set[str] = set()
+_started_msg_ids_lock = threading.Lock()
 
 
 def _get_event_message_id() -> str | None:
@@ -118,7 +119,8 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
         chat_id = source.chat_id if hasattr(source, "chat_id") else ""
 
         # Track this message as started (for interrupt detection)
-        _started_msg_ids.add(mid)
+        with _started_msg_ids_lock:
+            _started_msg_ids.add(mid)
 
         # ── START hook ──
         try:
@@ -157,7 +159,8 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                     "card already sent for msg=%s, suppressing gateway reply",
                     mid[:12],
                 )
-                _started_msg_ids.discard(mid)
+                with _started_msg_ids_lock:
+                    _started_msg_ids.discard(mid)
                 return None
 
         # ── ABORT / INTERRUPT detection ──
@@ -168,7 +171,8 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
             if ctx and ctx.get("card_sent"):
                 # Card was sent successfully via on_message_completed.
                 # Only fire interrupt if a newer message started after this one.
-                others = _started_msg_ids - {mid}
+                with _started_msg_ids_lock:
+                    others = _started_msg_ids - {mid}
                 if others:
                     try:
                         from .patch import on_message_interrupted
@@ -194,7 +198,8 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                     pass
 
         # Cleanup tracking
-        _started_msg_ids.discard(mid)
+        with _started_msg_ids_lock:
+            _started_msg_ids.discard(mid)
 
         return result
 

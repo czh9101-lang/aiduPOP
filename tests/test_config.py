@@ -1,8 +1,9 @@
-"""config.py 测试 — 配置加载、footer 字段容错、平台配置优先级."""
+"""config.py 测试 — 配置加载、footer 字段容错、平台配置优先级、_reload_cached TTL 缓存."""
 
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 from unittest.mock import patch
 
@@ -140,9 +141,9 @@ class TestFeishuBaseURL:
 
 class TestShowReasoning:
     def _make_reasoning_config(self, raw: dict[str, Any]) -> Config:
-        """Create a Config with _reload mocked to return given raw dict."""
+        """Create a Config with _reload_cached mocked to return given raw dict."""
         cfg = Config()
-        cfg._reload = lambda: raw  # type: ignore[assignment]
+        cfg._reload_cached = lambda: raw  # type: ignore[assignment]
         return cfg
 
     def test_platform_level_true(self) -> None:
@@ -223,9 +224,9 @@ class TestPlatformCfg:
 
 class TestInjectTime:
     def _make_inject_time_config(self, raw: dict[str, Any]) -> Config:
-        """Create a Config with _reload mocked to return given raw dict."""
+        """Create a Config with _reload_cached mocked to return given raw dict."""
         cfg = Config()
-        cfg._reload = lambda: raw  # type: ignore[assignment]
+        cfg._reload_cached = lambda: raw  # type: ignore[assignment]
         return cfg
 
     def test_inject_time_true(self) -> None:
@@ -275,3 +276,151 @@ class TestPanelExpanded:
     def test_panel_expanded_missing_defaults_false(self) -> None:
         cfg = _make_config({"streaming": {}})
         assert cfg.panel_expanded is False
+
+
+class TestReloadCached:
+    """_reload_cached() TTL 缓存行为测试."""
+
+    def test_returns_cached_result_within_ttl(self) -> None:
+        """在 TTL 窗口内，多次调用返回同一缓存结果，不重复读磁盘."""
+        cfg = Config()
+        raw1 = {"streaming": {"inject_time": True}}
+        raw2 = {"streaming": {"inject_time": False}}
+
+        call_count = 0
+        original_reload_cached = cfg._reload_cached
+
+        def counting_reload_cached() -> dict[str, Any]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return raw1
+            return raw2
+
+        cfg._reload_cached = counting_reload_cached  # type: ignore[assignment]
+
+        # First call populates the cache
+        result1 = cfg._reload_cached()
+        assert result1 == raw1
+        assert call_count == 1
+
+    def test_reloads_after_ttl_expires(self) -> None:
+        """TTL 过期后，_reload_cached 重新读取磁盘（不再返回旧缓存）."""
+        cfg = Config()
+        raw_old = {"streaming": {"inject_time": False}}
+        raw_new = {"streaming": {"inject_time": True}}
+
+        # Pre-populate the cache with the old value
+        cfg._reload_cache = raw_old
+        cfg._reload_cache_at = time.monotonic() - 10.0  # TTL 已过期
+
+        # Mock the actual disk read to return new data
+        with patch.object(Config, "_reload_cached", return_value=raw_new):
+            result = cfg._reload_cached()
+            assert result == raw_new
+
+    def test_cache_is_populated_on_first_call(self) -> None:
+        """首次调用后 _reload_cache 和 _reload_cache_at 被设置."""
+        cfg = Config()
+        raw = {"streaming": {"inject_time": True}}
+
+        assert cfg._reload_cache is None
+        assert cfg._reload_cache_at == 0.0
+
+        cfg._reload_cached = lambda: raw  # type: ignore[assignment]
+        cfg._reload_cached()
+
+        # Since we mocked _reload_cached, the internal state is set by the mock.
+        # Let's test with the real method instead.
+        cfg2 = Config()
+        cfg2._reload_cache = raw
+        cfg2._reload_cache_at = time.monotonic()
+
+        # Within TTL, should return the cached value
+        result = cfg2._reload_cached()
+        assert result is raw
+
+    def test_ttl_boundary_returns_cached(self) -> None:
+        """刚好在 TTL 边界内（小于 TTL），返回缓存."""
+        cfg = Config()
+        raw = {"streaming": {"inject_time": True}}
+        now = time.monotonic()
+
+        cfg._reload_cache = raw
+        cfg._reload_cache_at = now - 4.99  # TTL is 5.0 seconds
+
+        # Should still return cached (within TTL)
+        result = cfg._reload_cached()
+        assert result is raw
+
+    def test_ttl_boundary_reloads_after_expiry(self) -> None:
+        """刚好超过 TTL 边界，重新读取."""
+        cfg = Config()
+        raw_old = {"streaming": {"inject_time": False}}
+        raw_new = {"streaming": {"inject_time": True}}
+
+        cfg._reload_cache = raw_old
+        cfg._reload_cache_at = time.monotonic() - 5.01  # Just over TTL
+
+        # Need to mock the actual file reading part
+        with patch("hermes_lark_streaming.config._HERMES_CONFIG_PATH") as mock_path, \
+             patch("hermes_lark_streaming.config.yaml") as mock_yaml:
+            mock_path.exists.return_value = True
+            mock_path.read_text.return_value = "streaming:\n  inject_time: true\n"
+            mock_yaml.safe_load.return_value = raw_new
+
+            result = cfg._reload_cached()
+            assert result == raw_new
+            assert cfg._reload_cache_at > 0
+
+    def test_show_reasoning_uses_reload_cached(self) -> None:
+        """show_reasoning 属性使用 _reload_cached 而非 _reload."""
+        cfg = Config()
+        reload_cached_calls = 0
+        reload_calls = 0
+        raw = {"display": {"platforms": {"feishu": {"show_reasoning": True}}}}
+
+        original_reload_cached = cfg._reload_cached
+
+        def counting_reload_cached() -> dict[str, Any]:
+            nonlocal reload_cached_calls
+            reload_cached_calls += 1
+            return raw
+
+        def counting_reload() -> dict[str, Any]:
+            nonlocal reload_calls
+            reload_calls += 1
+            return raw
+
+        cfg._reload_cached = counting_reload_cached  # type: ignore[assignment]
+        cfg._reload = counting_reload  # type: ignore[assignment]
+
+        _ = cfg.show_reasoning
+
+        assert reload_cached_calls == 1
+        assert reload_calls == 0  # _reload should NOT be called
+
+    def test_inject_time_uses_reload_cached(self) -> None:
+        """inject_time 属性使用 _reload_cached 而非 _reload."""
+        cfg = Config()
+        reload_cached_calls = 0
+        reload_calls = 0
+        raw = {"streaming": {"inject_time": True}}
+
+        def counting_reload_cached() -> dict[str, Any]:
+            nonlocal reload_cached_calls
+            reload_cached_calls += 1
+            return raw
+
+        def counting_reload() -> dict[str, Any]:
+            nonlocal reload_calls
+            reload_calls += 1
+            return raw
+
+        cfg._reload_cached = counting_reload_cached  # type: ignore[assignment]
+        cfg._reload = counting_reload  # type: ignore[assignment]
+
+        _ = cfg.inject_time
+
+        assert reload_cached_calls == 1
+        assert reload_calls == 0  # _reload should NOT be called

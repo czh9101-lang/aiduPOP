@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.10.2 (DEV 分支) |
+| 版本 | 0.11.0 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -65,15 +65,15 @@ monkey_patch.py (运行时拦截)
 
 | 文件 | 行数 | 职责 | 关键点 |
 |------|------|------|--------|
-| `monkey_patch.py` | 980 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>` |
+| `monkey_patch.py` | 985 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全 |
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async |
-| `controller.py` | 636 | 主控制器(单例) | `CardSession` 状态机；`on_cron_deliver_async` 直接 await；`error_message` 属性 |
+| `controller.py` | 640 | 主控制器(单例) | `CardSession` 状态机；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志 |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链 |
-| `controller_linear_mixin.py` | 730 | 线性模式编排 | 拆卡阈值 180 元素；segment 按事件顺序扁平排列 |
+| `controller_linear_mixin.py` | 740 | 线性模式编排 | 拆卡阈值 180 元素；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列 |
 | `cardkit.py` | 701 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales |
 | `cardkit_i18n.py` | 44 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤10)、图片 key 剥离、长文本分块(2400 chars) |
-| `config.py` | 161 | 配置读取 | 惰性加载 + 运行时 `_reload()`；`inject_time` 每次磁盘重读 |
+| `config.py` | 168 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；`inject_time` / `show_reasoning` 使用缓存 |
 | `feishu.py` | 291 | 飞书 API 客户端 | CardKit v1/v2 + IM API；错误码分类；token 脱敏 |
 | `flush.py` | 156 | 节流调度器 | CardKit 100ms / IM PATCH 1.5s；互斥锁 + re-flush |
 | `linear.py` | 158 | 线性 segment 状态 | `Segment` 数据类；`LinearState` 扁平管理 |
@@ -94,7 +94,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.10.2")
+plugin.yaml (唯一版本号: "0.11.0")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -143,7 +143,7 @@ Hermes 的 `_handle_message_with_agent` 返回 None 有两种含义：
 1. **正常完成**：卡片已发送，Hermes 返回 None 抑制文本回复
 2. **中断**：新消息打断旧消息
 
-通过 `_started_msg_ids` 集合追踪：如果返回 None 时集合中还有其他 msg_id，说明是中断而非正常完成。
+通过 `_started_msg_ids` 集合追踪：如果返回 None 时集合中还有其他 msg_id，说明是中断而非正常完成。v0.11.0 起，所有操作加 `threading.Lock` 保护，确保并发消息安全。
 
 ### 4.7 根 `__init__.py` 桥接
 
@@ -296,6 +296,7 @@ streaming:
 
 ### 10.7 Feishu CardKit 元素限制
 飞书硬限制 200 元素/卡片。线性模式阈值设为 180（预留 20 给 footer + 波动）。
+v0.11.0 起，超限时自动触发拆卡（而非仅打日志），设置 `element_limit_hit` 标志后跳过新增段，拆卡成功后重置标志和元素计数。
 
 ---
 
@@ -357,6 +358,7 @@ hermes gateway restart
 | v0.10.0 | 2026-05-28 | 时间注入、/stop 状态显示、错误面板、compression_exhausted、Apple Silicon 修复、补丁隔离、Cron 死锁修复、Cron 表格降级 |
 | v0.10.1 | 2026-05-28 | FlushController 线程安全修复（跑马灯无文字根因）、线性模式首次文字预填充、on_thinking reasoning_dirty 预防性修复 |
 | v0.10.2 | 2026-05-28 | 时间注入格式优化为 XML 标签 `<time>` （避免 LLM 忽略或模仿）、线性模式冗余 stream_element 调用优化 |
+| v0.11.0 | 2026-05-29 | 超限自动拆卡（卡片不再卡死）、拆卡失败+超限死局修复、Config TTL 缓存（减少磁盘读取）、`_started_msg_ids` 线程安全 |
 
 ---
 
@@ -367,7 +369,7 @@ hermes gateway restart
 - [ ] DEV → master 兼容性回归测试
 - [ ] 考虑更多 Hermes 版本的兼容性探测
 - [ ] `inject_time` 时区配置化（当前硬编码 CST/UTC+8）
-- [ ] `_handle_linear_flush_error` 对 `CARDKIT_ELEMENT_LIMIT` 增加断路器（避免无限重试）
+- [x] ~~`_handle_linear_flush_error` 对 `CARDKIT_ELEMENT_LIMIT` 增加超限拆卡~~（v0.11.0 已实现：超限自动触发拆卡 + `element_limit_hit` 标志）
 
 ---
 
@@ -382,8 +384,9 @@ hermes gateway restart
 | 版本号显示 unknown | plugin.yaml 是否存在于正确路径 | `__init__.py` |
 | 页脚耗时为 0 | `_msg_start_time` 是否正确设置 | monkey_patch.py `_wrap_handle_message_with_agent` |
 | 消息删除后仍在更新 | UnavailableGuard 是否工作 | unavailable_guard.py |
-| 卡片元素超限 | `_MAX_CARD_TABLES` 和 `_ELEMENT_THRESHOLD` | cardkit_md.py, controller_linear_mixin.py |
+| 卡片元素超限 | `_element_limit_hit` 标志、`_do_linear_split` 拆卡 | controller_linear_mixin.py |
+| 卡片卡死不更新 | 元素超限后无限重试失败 | controller_linear_mixin.py `_handle_linear_flush_error_async` |
 
 ---
 
-*Last updated: 2026-05-28 | Version: 0.10.2 DEV*
+*Last updated: 2026-05-29 | Version: 0.11.0 DEV*

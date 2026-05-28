@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -10,12 +11,16 @@ import yaml
 
 _HERMES_CONFIG_PATH = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
 
+_RELOAD_CACHE_TTL = 5.0  # 运行时可变配置的缓存 TTL（秒）
+
 
 class Config:
     """插件配置，惰性读取 Hermes 主配置."""
 
     def __init__(self) -> None:
         self._raw: dict[str, Any] | None = None
+        self._reload_cache: dict[str, Any] | None = None
+        self._reload_cache_at: float = 0.0
 
     @property
     def enabled(self) -> bool:
@@ -39,9 +44,10 @@ class Config:
     def show_reasoning(self) -> bool:
         """是否展示推理过程（display.platforms.feishu.show_reasoning → display.show_reasoning）.
 
-        每次都从磁盘重读，因为 /reasoning 命令会在运行时修改配置文件.
+        通过 TTL 缓存读取，因为 /reasoning 命令会在运行时修改配置文件，
+        但不需要每次属性访问都读磁盘。最多延迟 _RELOAD_CACHE_TTL 秒生效。
         """
-        display = self._reload().get("display")
+        display = self._reload_cached().get("display")
         if not isinstance(display, dict):
             return False
         platforms = display.get("platforms")
@@ -93,9 +99,10 @@ class Config:
         前缀同时写入 DB（保证 prefix cache 一致性）。
         使用 XML 标签格式而非方括号格式，避免 LLM 忽略或模仿时间前缀。
 
-        每次都从磁盘重读，因为用户可能在运行时修改配置文件。
+        通过 TTL 缓存读取，用户运行时修改配置文件后最多延迟
+        _RELOAD_CACHE_TTL 秒生效，避免高频访问时反复读磁盘。
         """
-        sec = self._reload().get("streaming")
+        sec = self._reload_cached().get("streaming")
         if not isinstance(sec, dict):
             return False
         return bool(sec.get("inject_time", False))
@@ -154,9 +161,20 @@ class Config:
             self._raw = {}
         return self._raw
 
-    def _reload(self) -> dict[str, Any]:
-        """从磁盘重新读取配置（不更新缓存），供运行时可变的配置项使用."""
+    def _reload_cached(self) -> dict[str, Any]:
+        """带 TTL 缓存的磁盘重读，供运行时可变的配置项使用.
+
+        在 _RELOAD_CACHE_TTL 秒内复用上次读取结果，避免高频属性访问
+        （如流式输出期间反复检查 inject_time / show_reasoning）反复读磁盘。
+        配置变更最多延迟 _RELOAD_CACHE_TTL 秒生效。
+        """
+        now = time.monotonic()
+        if self._reload_cache is not None and (now - self._reload_cache_at) < _RELOAD_CACHE_TTL:
+            return self._reload_cache
         if _HERMES_CONFIG_PATH.exists():
             text = _HERMES_CONFIG_PATH.read_text(encoding="utf-8")
-            return yaml.safe_load(text) or {}
-        return {}
+            self._reload_cache = yaml.safe_load(text) or {}
+        else:
+            self._reload_cache = {}
+        self._reload_cache_at = now
+        return self._reload_cache

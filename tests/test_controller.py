@@ -17,7 +17,14 @@ from hermes_lark_streaming.controller_mixin import (
     FAILED,
     STREAMING,
 )
-from hermes_lark_streaming.feishu import FeishuAPIError, FeishuClient
+from hermes_lark_streaming.feishu import (
+    CARDKIT_CONTENT_FAILED,
+    CARDKIT_ELEMENT_LIMIT,
+    CARDKIT_RATE_LIMITED,
+    CARDKIT_STREAMING_CLOSED,
+    FeishuAPIError,
+    FeishuClient,
+)
 from hermes_lark_streaming.linear import LinearState, Segment
 
 
@@ -234,7 +241,7 @@ class TestLinearDispatch:
     ])
     def test_linear_dispatch_creates_segment(self, event: str, kwargs: dict, seg_type: str) -> None:
         ctrl = _setup_ctrl()
-        ctrl._cfg._reload = lambda: {"display": {"platforms": {"feishu": {"show_reasoning": True}}}}  # type: ignore[assignment]
+        ctrl._cfg._reload_cached = lambda: {"display": {"platforms": {"feishu": {"show_reasoning": True}}}}  # type: ignore[assignment]
         session = _make_session("msg_d", linear=True)
         ctrl._sessions["msg_d"] = session
         getattr(ctrl, event)(message_id="msg_d", **kwargs)
@@ -889,7 +896,7 @@ class TestDoLinearComplete:
 class TestLinearOnThinking:
     def test_splits_and_dispatches(self) -> None:
         ctrl = _setup_ctrl()
-        ctrl._cfg._reload = lambda: {"display": {"platforms": {"feishu": {"show_reasoning": True}}}}  # type: ignore[assignment]
+        ctrl._cfg._reload_cached = lambda: {"display": {"platforms": {"feishu": {"show_reasoning": True}}}}  # type: ignore[assignment]
         session = _make_session("msg_think", linear=True)
         ctrl._sessions["msg_think"] = session
 
@@ -918,7 +925,7 @@ class TestLinearOnThinking:
 
     def test_show_reasoning_false_skips_reasoning(self) -> None:
         ctrl = _setup_ctrl()
-        ctrl._cfg._reload = lambda: {"display": {"platforms": {"feishu": {"show_reasoning": False}}}}  # type: ignore[assignment]
+        ctrl._cfg._reload_cached = lambda: {"display": {"platforms": {"feishu": {"show_reasoning": False}}}}  # type: ignore[assignment]
         session = _make_session("msg_noreas", linear=True)
         ctrl._sessions["msg_noreas"] = session
 
@@ -929,7 +936,7 @@ class TestLinearOnThinking:
 
     def test_reasoning_only_with_show_reasoning(self) -> None:
         ctrl = _setup_ctrl()
-        ctrl._cfg._reload = lambda: {"display": {"platforms": {"feishu": {"show_reasoning": True}}}}  # type: ignore[assignment]
+        ctrl._cfg._reload_cached = lambda: {"display": {"platforms": {"feishu": {"show_reasoning": True}}}}  # type: ignore[assignment]
         session = _make_session("msg_ronly", linear=True)
         ctrl._sessions["msg_ronly"] = session
 
@@ -1199,3 +1206,333 @@ class TestOnAborted:
         with patch.object(ctrl, "_complete_session") as mock_complete:
             ctrl.on_aborted(message_id="nonexistent")
             mock_complete.assert_not_called()
+
+
+# ── _handle_linear_flush_error_async 测试 ──
+
+
+def _make_element_limit_error() -> FeishuAPIError:
+    """Construct a FeishuAPIError with CARDKIT_CONTENT_FAILED code and CARDKIT_ELEMENT_LIMIT sub_code."""
+    return FeishuAPIError(
+        f"Failed to create card content, ext=ErrCode: {CARDKIT_ELEMENT_LIMIT}; detail",
+        code=CARDKIT_CONTENT_FAILED,
+    )
+
+
+class TestHandleLinearFlushError:
+    """_handle_linear_flush_error_async: CARDKIT_ELEMENT_LIMIT 触发拆卡."""
+
+    @pytest.mark.asyncio
+    async def test_element_limit_sets_flag_and_triggers_split(self) -> None:
+        """CARDKIT_ELEMENT_LIMIT 错误设置 element_limit_hit=True 并尝试拆卡.
+
+        测试 _handle_linear_flush_error_async 直接调用：
+        当有未创建的 segment 时，设置标记后尝试拆卡，拆卡成功返回 True,
+        并且 element_limit_hit 被重置为 False.
+        """
+        ctrl = _setup_ctrl()
+        calls = _capture_split_calls(ctrl)
+
+        session = _make_session("msg_elimit", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_old"
+        session.card_msg_id = "msg_old"
+        session.element_count = 174
+        session.linear_state.on_reasoning_delta("think")
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].dirty = False
+        session.linear_state.on_answer_delta("new answer")
+        ctrl._sessions["msg_elimit"] = session
+
+        e = _make_element_limit_error()
+
+        # Call the error handler directly with empty actions (no pending batch)
+        result = await ctrl._handle_linear_flush_error_async(
+            e, session,
+            session.linear_state.segments,
+            [], set(), {}, [],
+        )
+
+        # Split was attempted; since actions is empty, _do_linear_split skips
+        # the batch_update and proceeds directly to create the new card
+        assert result is True
+        # After successful split, element_limit_hit is reset
+        assert session.element_limit_hit is False
+        assert session.card_id == "card_next"
+
+    @pytest.mark.asyncio
+    async def test_element_limit_no_splittable_content_returns_false(self) -> None:
+        """split_index 已到末尾时，CARDKIT_ELEMENT_LIMIT 返回 False（无法拆分）."""
+        ctrl = _setup_ctrl()
+
+        session = _make_session("msg_nosplit", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_nosplit"
+        session.element_count = 195
+        session.linear_state.on_answer_delta("answer")
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].dirty = False
+        # split_index past all segments → no splittable content
+        session.split_index = 1
+        ctrl._sessions["msg_nosplit"] = session
+
+        e = _make_element_limit_error()
+
+        result = await ctrl._handle_linear_flush_error_async(
+            e, session,
+            session.linear_state.segments,
+            [], set(), {}, [],
+        )
+
+        assert result is False
+        assert session.element_limit_hit is True
+
+    @pytest.mark.asyncio
+    async def test_element_limit_split_create_failure_degrades_gracefully(self) -> None:
+        """CARDKIT_ELEMENT_LIMIT 触发拆卡但新卡创建失败时，_do_linear_split 返回 True（降级继续）.
+
+        _do_linear_split 在新卡创建失败时设置 split_disabled=True 并返回 True
+        （有意降级为继续写当前卡）。element_limit_hit 保持 True（未被重置）。
+        """
+        ctrl = _setup_ctrl()
+        # Make cardkit_create fail so split degrades
+        _capture_split_calls(ctrl, create_error=RuntimeError("create failed"))
+
+        session = _make_session("msg_splitfail", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_current"
+        session.card_msg_id = "msg_current"
+        session.element_count = 174
+        session.linear_state.on_reasoning_delta("think")
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].dirty = False
+        session.linear_state.on_answer_delta("new answer")
+        ctrl._sessions["msg_splitfail"] = session
+
+        e = _make_element_limit_error()
+
+        result = await ctrl._handle_linear_flush_error_async(
+            e, session,
+            session.linear_state.segments,
+            [], set(), {}, [],
+        )
+
+        # _do_linear_split returns True (graceful degradation)
+        assert result is True
+        # element_limit_hit remains True (not reset because new card was not created)
+        assert session.element_limit_hit is True
+        # split_disabled is set to prevent retry
+        assert session.split_disabled is True
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_returns_false(self) -> None:
+        """CARDKIT_RATE_LIMITED 错误返回 False，不设置 element_limit_hit."""
+        ctrl = _setup_ctrl()
+
+        session = _make_session("msg_ratelimit", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_rate"
+        ctrl._sessions["msg_ratelimit"] = session
+
+        e = FeishuAPIError("rate limited", code=CARDKIT_RATE_LIMITED)
+
+        result = await ctrl._handle_linear_flush_error_async(
+            e, session,
+            session.linear_state.segments,
+            [], set(), {}, [],
+        )
+
+        assert result is False
+        assert session.element_limit_hit is False
+
+    @pytest.mark.asyncio
+    async def test_streaming_closed_returns_false(self) -> None:
+        """CARDKIT_STREAMING_CLOSED 错误返回 False，不设置 element_limit_hit."""
+        ctrl = _setup_ctrl()
+
+        session = _make_session("msg_closed", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_closed"
+        ctrl._sessions["msg_closed"] = session
+
+        e = FeishuAPIError("streaming closed", code=CARDKIT_STREAMING_CLOSED)
+
+        result = await ctrl._handle_linear_flush_error_async(
+            e, session,
+            session.linear_state.segments,
+            [], set(), {}, [],
+        )
+
+        assert result is False
+        assert session.element_limit_hit is False
+
+    @pytest.mark.asyncio
+    async def test_other_content_failed_without_element_limit_subcode(self) -> None:
+        """CARDKIT_CONTENT_FAILED 但 sub_code 不是 CARDKIT_ELEMENT_LIMIT 返回 False."""
+        ctrl = _setup_ctrl()
+
+        session = _make_session("msg_other", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_other"
+        ctrl._sessions["msg_other"] = session
+
+        # CARDKIT_CONTENT_FAILED with a different sub code
+        e = FeishuAPIError(
+            "Failed to create card content, ext=ErrCode: 99999; detail",
+            code=CARDKIT_CONTENT_FAILED,
+        )
+
+        result = await ctrl._handle_linear_flush_error_async(
+            e, session,
+            session.linear_state.segments,
+            [], set(), {}, [],
+        )
+
+        assert result is False
+        assert session.element_limit_hit is False
+
+
+# ── element_limit_hit 标记测试 ──
+
+
+class TestElementLimitHit:
+    """element_limit_hit 标记：当设置时 _do_linear_flush 跳过未创建的 segment."""
+
+    @pytest.mark.asyncio
+    async def test_element_limit_hit_skips_uncreated_segments(self) -> None:
+        """element_limit_hit=True 时，_do_linear_flush 跳过 not seg.created 的 segment."""
+        ctrl = _setup_ctrl()
+
+        session = _make_session("msg_skip", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_skip"
+        session.element_limit_hit = True
+        # First segment: created, dirty (should be flushed)
+        session.linear_state.on_reasoning_delta("think")
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].dirty = True
+        # Second segment: not created (should be skipped because element_limit_hit)
+        session.linear_state.on_answer_delta("answer")
+        assert session.linear_state.segments[1].created is False
+        ctrl._sessions["msg_skip"] = session
+
+        await ctrl._do_linear_flush(session)
+
+        # The answer segment should NOT have been created (skipped due to element_limit_hit)
+        assert session.linear_state.segments[1].created is False
+        # The reasoning segment should have been flushed
+        assert session.linear_state.segments[0].dirty is False
+
+    @pytest.mark.asyncio
+    async def test_element_limit_hit_does_not_skip_created_dirty_segments(self) -> None:
+        """element_limit_hit=True 时，已创建的 dirty segment 仍会被正常更新（via stream_element）."""
+        ctrl = _setup_ctrl()
+
+        session = _make_session("msg_dirty_flush", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_dirty"
+        session.element_limit_hit = True
+        session.linear_state.on_answer_delta("text")
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].dirty = True
+        ctrl._sessions["msg_dirty_flush"] = session
+
+        await ctrl._do_linear_flush(session)
+
+        # Created dirty segment should be flushed via stream_element (step 2)
+        assert session.linear_state.segments[0].dirty is False
+        ctrl._client.cardkit_stream_element.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_element_limit_hit_reset_after_successful_split(self) -> None:
+        """成功拆卡后 element_limit_hit 被重置为 False.
+
+        Use a tool segment rollover to trigger the split while element_limit_hit
+        is True — the split resets the flag.
+        """
+        ctrl = _setup_ctrl()
+        calls = _capture_split_calls(
+            ctrl,
+            cards=["card_tool_next"],
+            messages=["msg_tool_next"],
+        )
+
+        session = _make_session("msg_reset", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_old"
+        session.card_msg_id = "msg_old"
+        session.element_limit_hit = True  # Pre-set
+        session.tool_use.record_start("read", "file0")
+        session.linear_state.on_tool_event(1)
+        tool_seg = session.linear_state.segments[0]
+        tool_seg.created = True
+        tool_seg.element_estimate = _estimate_segment_elements(tool_seg, session.tool_use.build_display_steps())
+        session.element_count = 174
+
+        for idx in range(1, 4):
+            session.tool_use.record_start("read", f"file{idx}")
+        session.linear_state.on_tool_event(len(session.tool_use.build_display_steps()))
+        ctrl._sessions["msg_reset"] = session
+
+        await ctrl._do_linear_flush(session)
+
+        # Split happened → element_limit_hit should be reset
+        assert session.element_limit_hit is False
+        assert session.card_id == "card_tool_next"
+
+    @pytest.mark.asyncio
+    async def test_split_disabled_with_element_limit_is_deadlock_safe(self) -> None:
+        """split_disabled=True + element_limit_hit=True 时不会死锁：
+        flush 只更新已创建的 dirty segment，跳过未创建的 segment."""
+        ctrl = _setup_ctrl()
+
+        session = _make_session("msg_deadlock", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_deadlock"
+        session.split_disabled = True
+        session.element_limit_hit = True
+        # Created answer segment with dirty text
+        session.linear_state.on_answer_delta("existing text")
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].dirty = True
+        # Uncreated reasoning segment (would normally trigger split, but split is disabled)
+        session.linear_state.on_reasoning_delta("more text")
+        assert session.linear_state.segments[1].created is False
+        ctrl._sessions["msg_deadlock"] = session
+
+        await ctrl._do_linear_flush(session)
+
+        # Should NOT have tried to split (split_disabled)
+        ctrl._client.cardkit_create.assert_not_called()
+        ctrl._client.cardkit_close_streaming.assert_not_called()
+        # Should have flushed the created dirty segment via stream_element
+        assert session.linear_state.segments[0].dirty is False
+        # Should have skipped the uncreated segment
+        assert session.linear_state.segments[1].created is False
+        # element_limit_hit should remain True (no split to reset it)
+        assert session.element_limit_hit is True
+
+    @pytest.mark.asyncio
+    async def test_element_limit_hit_with_all_segments_created(self) -> None:
+        """element_limit_hit=True 且所有 segment 都已创建时，flush 只更新 dirty segment (via stream_element)."""
+        ctrl = _setup_ctrl()
+
+        session = _make_session("msg_all_created", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_all"
+        session.element_limit_hit = True
+        session.linear_state.on_reasoning_delta("think")
+        session.linear_state.on_answer_delta("answer")
+        # Mark all as created but dirty
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].dirty = True
+        session.linear_state.segments[1].created = True
+        session.linear_state.segments[1].dirty = True
+        ctrl._sessions["msg_all_created"] = session
+
+        await ctrl._do_linear_flush(session)
+
+        # All dirty segments flushed via stream_element (step 2)
+        assert session.linear_state.segments[0].dirty is False
+        assert session.linear_state.segments[1].dirty is False
+        ctrl._client.cardkit_stream_element.assert_called()

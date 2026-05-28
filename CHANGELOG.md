@@ -1,5 +1,14 @@
 # 更新日志 / Changelog
 
+## v0.11.0 (2026-05-29)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 飞书卡片元素超限后卡片"卡死"，后续更新全部失败 | `_handle_linear_flush_error` 收到 `CARDKIT_ELEMENT_LIMIT` 错误后仅打日志，无任何恢复措施；下次 flush 继续往同一张卡塞内容 → 继续超限 → 无限循环直到 AI 输出完成 | 超限时自动触发拆卡：封存当前卡，开新卡继续流式输出；设置 `element_limit_hit` 标志，拆卡前跳过新增段避免继续超限；拆卡成功后重置标志和元素计数 |
+| 2 | Bug | 拆卡失败后元素再超限 = 死局 | `split_disabled=True`（拆卡失败降级）后，元素超限无路可走 | 超限拆卡不受 `split_disabled` 限制（`_do_linear_split` 内部已有降级逻辑）；即使拆卡也失败，`element_limit_hit` 标志确保只刷已有段的脏文本，等完成阶段整体重建 |
+| 3 | Perf | `inject_time` / `show_reasoning` 每次属性访问都读磁盘 | `_reload()` 每次调用都执行 `Path.read_text()` + `yaml.safe_load()`，流式输出期间每 100ms 可能触发多次，高频场景下不必要 | 新增 `_reload_cached()` 方法，带 5 秒 TTL 缓存：5 秒内复用上次读取结果，避免高频属性访问反复读磁盘；配置变更最多延迟 5 秒生效 |
+| 4 | Bug | 并发消息可能漏判中断 | `_started_msg_ids` 是全局 `set`，两个消息同时到达时 `add` / `discard` / 差集运算非原子，可能漏判中断 | 所有 `_started_msg_ids` 操作加 `threading.Lock` 保护，确保并发安全 |
+
 ## v0.10.2 (2026-05-28)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
