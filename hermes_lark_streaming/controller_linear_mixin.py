@@ -451,12 +451,11 @@ class LinearControllerMixin:
             for seg in segments:
                 if seg.type == "reasoning" and pre_flush_reasoning_elapsed.get(seg.el_id, 0) > 0:
                     seg.reasoning_finalized = True
-            if new_el_ids:
-                for seg in segments:
-                    if seg.el_id in new_el_ids or not seg.created:
-                        continue
-                    if seg.type in ("reasoning", "answer") and seg.text:
-                        seg.dirty = True
+            # 注：旧版本在 new_el_ids 非空时会强制将所有已创建的
+            # reasoning/answer segment 设 dirty=True（冗余重刷保险）。
+            # v0.10.2 起，预填充优化已在 add_elements 时发送文本内容，
+            # 且后续 delta 到来时 on_answer_delta/on_reasoning_delta 会
+            # 自然标记 dirty，因此不再强制重刷——减少冗余 stream_element 调用。
             for seg in updated_tool_segs:
                 offset_ok = pre_flush_tool_offsets.get(seg.el_id, -1) == seg.tool_end_offset
                 if seg.el_id in new_el_estimates:

@@ -46,8 +46,8 @@ class TestInitVersion:
     """Tests for ``hermes_lark_streaming.__version__``."""
 
     def test_version_reads_correct_value(self) -> None:
-        """__version__ should be '0.10.1' as defined in plugin.yaml."""
-        assert hermes_lark_streaming.__version__ == "0.10.1"
+        """__version__ should be '0.10.2' as defined in plugin.yaml."""
+        assert hermes_lark_streaming.__version__ == "0.10.2"
 
     def test_version_fallback_when_plugin_yaml_missing(self) -> None:
         """__version__ falls back to 'unknown' when plugin.yaml does not exist."""

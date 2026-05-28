@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.10.1-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.10.2-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -167,11 +167,17 @@ streaming:
 
 开启 `streaming.inject_time: true` 后，插件会在每条用户消息前添加当前时间，让 AI 模型无需调用 `date` 工具即可感知当前时间。
 
-**格式**：`[HH:MM:SS CST] <原始消息>`（例：`[14:30:05 CST] 你好`）
+**格式**：`<time>HH:MM:SS</time> <原始消息>`（例：`<time>14:30:05</time> 你好`）
+
+**为什么用 XML 标签？**
+- LLM 普遍理解 XML 标签是结构化元数据，不会在回复中模仿该格式
+- 方括号格式（``[14:30:05 CST]``）可能被部分模型忽略，或在回复中学样也加时间前缀
+- 不含日期，因为 Hermes 系统提示词中已包含当前日期
+- 不含时区后缀，因为系统提示词已确定时区上下文
 
 **核心特性**：
 - **Prefix Cache 安全**：时间前缀与原始消息一起写入对话数据库，确保下轮从 DB 加载的历史与上轮 API 收到的一致，从而保证前缀缓存一致性——**所有场景下零额外缓存影响**（全程开启、全程关闭、中途开启/关闭）。
-- **Token 开销**：每条 user message ≈ 5 tokens；N 轮对话累计 ≈ (N-1)×5 tokens。
+- **Token 开销**：每条 user message ≈ 6 tokens；N 轮对话累计 ≈ (N-1)×6 tokens。
 - **副作用**：会话查看器（如 Hermes Web UI）中用户消息将显示时间前缀。
 - **边界情况处理**：群聊中 gateway 已设置 `persist_user_message`（observed_group_context）时，时间前缀同时添加到 `persist_user_message`，避免时间前缀丢失。
 

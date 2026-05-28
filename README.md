@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.10.1-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.10.2-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -170,11 +170,17 @@ streaming:
 
 When `streaming.inject_time: true`, the plugin prepends the current time to each user message so the AI model can perceive the current time without calling the `date` tool.
 
-**Format**: `[HH:MM:SS CST] <original message>` (e.g., `[14:30:05 CST] Hello`)
+**Format**: `<time>HH:MM:SS</time> <original message>` (e.g., `<time>14:30:05</time> Hello`)
+
+**Why XML-style tags?**
+- LLMs universally understand XML tags as structured metadata — they won't mimic the format in their responses
+- Bracket-prefixed time (``[14:30:05 CST]``) can be ignored as noise by some models, or worse, mimicked in their output
+- Date is omitted because Hermes's system prompt already contains the current date
+- Timezone suffix is omitted because the system prompt establishes timezone context
 
 **Key characteristics**:
 - **Prefix cache safe**: The time prefix is written to the conversation database along with the original message, ensuring that the history loaded from the DB in the next turn matches what the API received. This preserves prefix cache consistency — **zero extra cache impact** in all scenarios (always-on, always-off, mid-session enable/disable).
-- **Token overhead**: ~5 tokens per user message; cumulative ~(N-1)×5 tokens for an N-turn conversation.
+- **Token overhead**: ~6 tokens per user message; cumulative ~(N-1)×6 tokens for an N-turn conversation.
 - **Side effect**: Conversation viewer (e.g., Hermes web UI) will show the time prefix in user messages.
 - **Edge case handling**: In group chats where `persist_user_message` is already set by the gateway (observed_group_context), the time prefix is also added to `persist_user_message` to avoid losing it.
 

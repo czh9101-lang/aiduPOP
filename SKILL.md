@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.10.1 (DEV 分支) |
+| 版本 | 0.10.2 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -65,7 +65,7 @@ monkey_patch.py (运行时拦截)
 
 | 文件 | 行数 | 职责 | 关键点 |
 |------|------|------|--------|
-| `monkey_patch.py` | 980 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async |
+| `monkey_patch.py` | 980 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>` |
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async |
 | `controller.py` | 636 | 主控制器(单例) | `CardSession` 状态机；`on_cron_deliver_async` 直接 await；`error_message` 属性 |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链 |
@@ -94,7 +94,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.10.1")
+plugin.yaml (唯一版本号: "0.10.2")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -160,6 +160,18 @@ Hermes 用 `spec_from_file_location` 加载插件，会加载仓库根目录的 
 - 实例级：兜底（所有版本）
 
 `_inject_time_prefix` 使用 `threading.local()` 重入守卫防止双重注入。
+
+### 4.9 时间注入格式：XML 标签
+
+时间注入使用 XML 标签格式 `<time>HH:MM:SS</time>`，而非方括号格式 `[HH:MM:SS CST]`：
+
+- **LLM 不模仿**：XML 标签被 LLM 理解为结构化元数据，不会在回复中生成 `<time>` 标签
+- **语义清晰**：方括号格式可能被部分模型忽略为噪声，或在回复中学样
+- **精简**：不含日期（系统提示词已有）和时区后缀（系统提示词已确定），减少 token 开销
+
+**格式对比**：
+- 旧：`[14:30:05 CST] 你好` — 可能被忽略或模仿
+- 新：`<time>14:30:05</time> 你好` — 语义清晰、不被模仿
 
 ---
 
@@ -295,12 +307,13 @@ tests/
   test_patch.py      — Hook 函数单元测试
   test_controller.py — 会话生命周期 + 线性模式 dispatch + 集成测试
   test_cardkit.py    — 卡片 JSON 构建
-  test_config.py     — 配置读取
-  test_flush.py      — 节流调度器
+  test_config.py     — 配置读取（含 inject_time 开关）
+  test_flush.py      — 节流调度器（含线程安全 call_soon_threadsafe 测试）
   test_text.py       — 文本增量追踪
   test_image.py      — 图片解析
   test_linear.py     — 线性 segment 管理
   test_tooluse.py    — 工具调用追踪
+  test_monkey_patch.py — 时间注入格式（XML 标签）、重入守卫、prefix cache 一致性
   test_unavailable_guard.py — 消息不可用保护
 ```
 
@@ -343,6 +356,7 @@ hermes gateway restart
 | v0.9.0 | 2026-05-27 | 内容重复修复、页脚耗时修复、CLI 路径修复、表格限制放宽、api_calls/history_offset |
 | v0.10.0 | 2026-05-28 | 时间注入、/stop 状态显示、错误面板、compression_exhausted、Apple Silicon 修复、补丁隔离、Cron 死锁修复、Cron 表格降级 |
 | v0.10.1 | 2026-05-28 | FlushController 线程安全修复（跑马灯无文字根因）、线性模式首次文字预填充、on_thinking reasoning_dirty 预防性修复 |
+| v0.10.2 | 2026-05-28 | 时间注入格式优化为 XML 标签 `<time>` （避免 LLM 忽略或模仿）、线性模式冗余 stream_element 调用优化 |
 
 ---
 
@@ -350,9 +364,10 @@ hermes gateway restart
 
 - [ ] 拆卡首卡片 `partial` 状态显示
 - [ ] `background_review` 进度消息放入卡片
-- [ ] DEV → V0.9.0 (主分支) 兼容性回归测试
-- [ ] 测试文件同步更新（适配 Cron async、新参数等）
+- [ ] DEV → master 兼容性回归测试
 - [ ] 考虑更多 Hermes 版本的兼容性探测
+- [ ] `inject_time` 时区配置化（当前硬编码 CST/UTC+8）
+- [ ] `_handle_linear_flush_error` 对 `CARDKIT_ELEMENT_LIMIT` 增加断路器（避免无限重试）
 
 ---
 
@@ -371,4 +386,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-05-28 | Version: 0.10.1 DEV*
+*Last updated: 2026-05-28 | Version: 0.10.2 DEV*
