@@ -39,6 +39,8 @@ class TestEnabled:
 
 
 class TestFooterFields:
+    _DEFAULT_FIELDS = [["status", "elapsed", "model", "api_calls"], ["tokens", "context", "history_offset", "compression_exhausted"]]
+
     def test_normal_2d_fields(self) -> None:
         cfg = _make_config({"streaming": {"footer": {"fields": [["a", "b"], ["c"]]}}})
         assert cfg.footer_fields == [["a", "b"], ["c"]]
@@ -49,31 +51,31 @@ class TestFooterFields:
 
     def test_empty_fields_returns_default(self) -> None:
         cfg = _make_config({"streaming": {"footer": {"fields": []}}})
-        assert cfg.footer_fields == [["status", "elapsed", "context", "model"]]
+        assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_no_fields_returns_default(self) -> None:
         cfg = _make_config({"streaming": {"footer": {}}})
-        assert cfg.footer_fields == [["status", "elapsed", "context", "model"]]
+        assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_no_footer_returns_default(self) -> None:
         cfg = _make_config({"streaming": {}})
-        assert cfg.footer_fields == [["status", "elapsed", "context", "model"]]
+        assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_footer_not_dict_returns_default(self) -> None:
         cfg = _make_config({"streaming": {"footer": "invalid"}})
-        assert cfg.footer_fields == [["status", "elapsed", "context", "model"]]
+        assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_no_streaming_section_returns_default(self) -> None:
         cfg = _make_config({})
-        assert cfg.footer_fields == [["status", "elapsed", "context", "model"]]
+        assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_fields_non_list_returns_default(self) -> None:
         cfg = _make_config({"streaming": {"footer": {"fields": "status"}}})
-        assert cfg.footer_fields == [["status", "elapsed", "context", "model"]]
+        assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_fields_int_returns_default(self) -> None:
         cfg = _make_config({"streaming": {"footer": {"fields": 42}}})
-        assert cfg.footer_fields == [["status", "elapsed", "context", "model"]]
+        assert cfg.footer_fields == self._DEFAULT_FIELDS
 
 
 class TestFooterShowLabel:
@@ -217,3 +219,31 @@ class TestPlatformCfg:
         cfg = _make_config({})
         with patch.dict(os.environ, {}, clear=True):
             assert cfg._platform_cfg() == {}
+
+
+class TestInjectTime:
+    def _make_inject_time_config(self, raw: dict[str, Any]) -> Config:
+        """Create a Config with _reload mocked to return given raw dict."""
+        cfg = Config()
+        cfg._reload = lambda: raw  # type: ignore[assignment]
+        return cfg
+
+    def test_inject_time_true(self) -> None:
+        cfg = self._make_inject_time_config({"streaming": {"inject_time": True}})
+        assert cfg.inject_time is True
+
+    def test_inject_time_false(self) -> None:
+        cfg = self._make_inject_time_config({"streaming": {"inject_time": False}})
+        assert cfg.inject_time is False
+
+    def test_inject_time_missing_defaults_false(self) -> None:
+        cfg = self._make_inject_time_config({"streaming": {}})
+        assert cfg.inject_time is False
+
+    def test_inject_time_no_streaming_section(self) -> None:
+        cfg = self._make_inject_time_config({})
+        assert cfg.inject_time is False
+
+    def test_inject_time_streaming_not_dict(self) -> None:
+        cfg = self._make_inject_time_config({"streaming": "invalid"})
+        assert cfg.inject_time is False

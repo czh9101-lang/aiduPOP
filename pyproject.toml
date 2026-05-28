@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-lark-streaming"
-version = "0.9.0"
+dynamic = ["version"]
 description = "Feishu/Lark CardKit v2.0 streaming cards for Hermes Agent — plugin edition"
 readme = "README.md"
 license = {text = "MIT"}
@@ -28,3 +28,7 @@ include = ["hermes_lark_streaming*"]
 
 [tool.setuptools.package-data]
 hermes_lark_streaming = ["../plugin.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

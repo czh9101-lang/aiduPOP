@@ -6,6 +6,7 @@ from hermes_lark_streaming.cardkit import (
     REASONING_ELEMENT_ID,
     REASONING_TEXT_ELEMENT_ID,
     TOOL_PANEL_ELEMENT_ID,
+    _build_error_panel,
     _build_footer_elements,
     _build_reasoning_panel,
     _build_tool_panel,
@@ -116,7 +117,8 @@ class TestDowngradeTables:
 
     def test_over_limit_downgraded(self) -> None:
         table = "| A | B |\n|---|---|\n| 1 | 2 |"
-        text = "\n\n".join([table] * 5)
+        # _MAX_CARD_TABLES = 10, so 12 tables triggers downgrade
+        text = "\n\n".join([table] * 12)
         result = _downgrade_tables(text)
         assert result.count("```") >= 4  # 超限表格被包装为代码块
 
@@ -246,6 +248,64 @@ class TestBuildFooterElements:
 
     def test_no_matching_fields(self) -> None:
         assert _build_footer_elements({}, fields=[["tokens"]]) == []
+
+    def test_compression_exhausted_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"compression_exhausted": True},
+            fields=[["compression_exhausted"]],
+        )
+        assert len(result) >= 2
+        assert "Context Full" in result[1]["content"]
+
+    def test_api_calls_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"api_calls": 5},
+            fields=[["api_calls"]],
+        )
+        assert len(result) >= 2
+        assert "5" in result[1]["content"]
+
+    def test_history_offset_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"history_offset": 10},
+            fields=[["history_offset"]],
+        )
+        assert len(result) >= 2
+        assert "10" in result[1]["content"]
+
+
+# --- 错误面板 ---
+
+
+class TestBuildErrorPanel:
+    def test_error_panel_structure(self) -> None:
+        panel = _build_error_panel("something went wrong")
+        assert panel["tag"] == "collapsible_panel"
+        assert "❌" in panel["header"]["title"]["content"]
+        assert "Error" in panel["header"]["title"]["content"]
+        assert panel["border"]["color"] == "red"
+        assert panel["expanded"] is True
+
+    def test_aborted_panel_structure(self) -> None:
+        panel = _build_error_panel("stopped by user", is_aborted=True)
+        assert panel["tag"] == "collapsible_panel"
+        assert "🛑" in panel["header"]["title"]["content"]
+        assert "Interrupted" in panel["header"]["title"]["content"]
+        assert panel["border"]["color"] == "orange"
+
+    def test_error_message_in_elements(self) -> None:
+        panel = _build_error_panel("my error detail")
+        inner = panel["elements"][0]
+        assert inner["tag"] == "markdown"
+        assert "my error detail" in inner["content"]
+
+    def test_expanded_default_true(self) -> None:
+        panel = _build_error_panel("err")
+        assert panel["expanded"] is True
+
+    def test_custom_expanded(self) -> None:
+        panel = _build_error_panel("err", expanded=False)
+        assert panel["expanded"] is False
 
 
 # --- 推理面板 ---
@@ -484,6 +544,22 @@ class TestBuildCompleteCard:
         elements = card.get("elements", card.get("body", {}).get("elements", []))
         assert any("完成" in str(e) or "Done" in str(e) for e in elements)
 
+    def test_error_message_adds_error_panel(self) -> None:
+        card = build_complete_card(error_message="test error")
+        elements = card.get("elements", card.get("body", {}).get("elements", []))
+        error_panels = [e for e in elements if e.get("tag") == "collapsible_panel"
+                        and "❌" in e.get("header", {}).get("title", {}).get("content", "")]
+        assert len(error_panels) == 1
+        assert "test error" in error_panels[0]["elements"][0]["content"]
+
+    def test_error_message_with_aborted(self) -> None:
+        card = build_complete_card(error_message="stopped", is_aborted=True)
+        elements = card.get("elements", card.get("body", {}).get("elements", []))
+        error_panels = [e for e in elements if e.get("tag") == "collapsible_panel"
+                        and "🛑" in e.get("header", {}).get("title", {}).get("content", "")]
+        assert len(error_panels) == 1
+        assert "stopped" in error_panels[0]["elements"][0]["content"]
+
 
 # --- 线性完成态卡片 ---
 
@@ -583,6 +659,25 @@ class TestBuildLinearCompleteCard:
         )
         summary = card["config"].get("summary", {}).get("content", "")
         assert len(summary) <= 120
+
+    def test_error_message_adds_error_panel(self) -> None:
+        card = build_linear_complete_card(segments=[], all_tool_steps=[], error_message="test error")
+        elements = card["body"]["elements"]
+        error_panels = [e for e in elements if e.get("tag") == "collapsible_panel"
+                        and "❌" in e.get("header", {}).get("title", {}).get("content", "")]
+        assert len(error_panels) == 1
+        assert "test error" in error_panels[0]["elements"][0]["content"]
+
+    def test_error_message_before_segments(self) -> None:
+        card = build_linear_complete_card(
+            segments=[_seg("answer", "hello")],
+            all_tool_steps=[],
+            error_message="oops",
+        )
+        contents = [str(e) for e in card["body"]["elements"]]
+        error_idx = next(i for i, c in enumerate(contents) if "oops" in c)
+        answer_idx = next(i for i, c in enumerate(contents) if "hello" in c)
+        assert error_idx < answer_idx
 
 
 class TestBuildCronCard:
