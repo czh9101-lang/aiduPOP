@@ -210,6 +210,9 @@ class LinearControllerMixin:
                 continue
 
             if not seg.created:
+                # 超限后不再新增元素，只刷已有段的脏文本，等完成阶段整体重建
+                if session.element_limit_hit:
+                    continue
                 estimated = _estimate_segment_elements(seg, all_steps)
                 if (
                     seg.type == "tool"
@@ -241,15 +244,27 @@ class LinearControllerMixin:
                     new_el_total = 0
 
                 if seg.type == "reasoning":
+                    # 预填充推理文本：与 answer 优化同理
+                    _reasoning_content = optimize_markdown_style(seg.text) or " " if seg.text else " "
                     el = _build_reasoning_panel(
-                        " ",
+                        _reasoning_content,
                         seg.elapsed_ms,
                         expanded=True,
                         element_id=seg.el_id,
                         text_element_id=seg.text_el_id,
                     )
+                    if seg.text:
+                        seg.dirty = False  # 文本已在 batch_update 中发送
                 elif seg.type == "answer":
-                    el = _streaming_element(element_id=seg.el_id)
+                    # 预填充文本：避免 batch_update 后再调一次 stream_element，
+                    # 减少首次文字出现的 API 调用次数（省 ~100-200ms）
+                    _ans_content = seg.text or ""
+                    if session.image_resolver:
+                        _ans_content = session.image_resolver.resolve_images(_ans_content)
+                    _ans_content = _downgrade_tables(optimize_markdown_style(_ans_content)) or " "
+                    el = _streaming_element(content=_ans_content, element_id=seg.el_id)
+                    if seg.text:
+                        seg.dirty = False  # 文本已在 batch_update 中发送
                 elif seg.type == "tool":
                     start = seg.tool_offset
                     end = seg.tool_end_offset if seg.tool_end_offset else len(all_steps)
@@ -439,12 +454,11 @@ class LinearControllerMixin:
             for seg in segments:
                 if seg.type == "reasoning" and pre_flush_reasoning_elapsed.get(seg.el_id, 0) > 0:
                     seg.reasoning_finalized = True
-            if new_el_ids:
-                for seg in segments:
-                    if seg.el_id in new_el_ids or not seg.created:
-                        continue
-                    if seg.type in ("reasoning", "answer") and seg.text:
-                        seg.dirty = True
+            # 注：旧版本在 new_el_ids 非空时会强制将所有已创建的
+            # reasoning/answer segment 设 dirty=True（冗余重刷保险）。
+            # v0.10.2 起，预填充优化已在 add_elements 时发送文本内容，
+            # 且后续 delta 到来时 on_answer_delta/on_reasoning_delta 会
+            # 自然标记 dirty，因此不再强制重刷——减少冗余 stream_element 调用。
             for seg in updated_tool_segs:
                 offset_ok = pre_flush_tool_offsets.get(seg.el_id, -1) == seg.tool_end_offset
                 if seg.el_id in new_el_estimates:
@@ -455,7 +469,11 @@ class LinearControllerMixin:
                     seg.dirty = False
         except FeishuAPIError as e:
             _logger.warning("linear batch update failed: %s", e, exc_info=True)
-            self._handle_linear_flush_error(e)
+            handled = await self._handle_linear_flush_error_async(
+                e, session, segments, actions, new_el_ids, new_el_estimates, updated_tool_segs,
+            )
+            if handled:
+                return True  # 错误已处理（如拆卡），flush 可继续
             return False
         return True
 
@@ -605,6 +623,7 @@ class LinearControllerMixin:
         session.element_count = 1  # loading
         session.sequence = 1
         session.split_disabled = False
+        session.element_limit_hit = False  # 拆卡后重置超限标记
         session.split_index = split_idx
         _logger.info(
             "linear split: msg=%s sealed=%d new_card=%s",
@@ -614,15 +633,74 @@ class LinearControllerMixin:
         )
         return True
 
-    def _handle_linear_flush_error(self, e: FeishuAPIError) -> None:
+    async def _handle_linear_flush_error_async(
+        self,
+        e: FeishuAPIError,
+        session: CardSession,
+        segments: list[Segment],
+        actions: list[dict[str, Any]],
+        new_el_ids: set[str],
+        new_el_estimates: dict[str, int],
+        updated_tool_segs: list[Segment],
+    ) -> bool:
+        """处理 batch_update 错误。返回 True 表示错误已处理，flush 可继续。"""
         if e.code == CARDKIT_RATE_LIMITED:
-            return
+            return False
         if e.code == CARDKIT_STREAMING_CLOSED:
-            return
+            return False
         if e.code == CARDKIT_CONTENT_FAILED:
             sub_code = e.extract_sub_code()
             if sub_code == CARDKIT_ELEMENT_LIMIT:
-                _logger.warning("linear card element limit exceeded")
+                _logger.warning(
+                    "linear card element limit exceeded: msg=%s element_count=%d split_disabled=%s",
+                    session.message_id[:12],
+                    session.element_count,
+                    session.split_disabled,
+                )
+                session.element_limit_hit = True
+                # ── 超限触发拆卡 ──
+                # 找到第一个未创建 segment 的索引作为拆分点
+                split_idx = session.split_index
+                for i, seg in enumerate(segments):
+                    if i < session.split_index:
+                        continue
+                    if not seg.created:
+                        split_idx = i
+                        break
+                # 如果所有段都已创建，拆分点在最后一个段之后
+                if split_idx == session.split_index:
+                    # 没有未创建段 → 已有段更新导致超限
+                    # 找最后一个已创建段作为拆分边界
+                    for i in range(len(segments) - 1, session.split_index - 1, -1):
+                        if segments[i].created:
+                            split_idx = i + 1
+                            break
+
+                if split_idx <= session.split_index:
+                    # 没有可拆分的内容 → 标记后等待完成阶段处理
+                    _logger.warning(
+                        "linear element limit: no splittable content, deferring to complete: msg=%s",
+                        session.message_id[:12],
+                    )
+                    return False
+
+                split_ok = await self._do_linear_split(
+                    session, split_idx, actions, new_el_ids, new_el_estimates, updated_tool_segs,
+                )
+                if split_ok:
+                    _logger.info(
+                        "linear element limit triggered split: msg=%s split_at=%d",
+                        session.message_id[:12],
+                        split_idx,
+                    )
+                    return True
+                # 拆卡失败 → 禁用拆卡，标记超限，等完成阶段重建
+                _logger.warning(
+                    "linear element limit split failed, deferring to complete: msg=%s",
+                    session.message_id[:12],
+                )
+                return False
+        return False
 
     async def _do_linear_complete(self, session: CardSession) -> bool:
         """线性模式完成：close streaming + 全量重建卡片（保持 segments 顺序）."""

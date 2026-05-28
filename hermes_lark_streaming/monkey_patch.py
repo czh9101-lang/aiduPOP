@@ -68,6 +68,7 @@ _msg_ctx: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar
 # an old call is still in-flight, the old call's None return indicates
 # the old session was interrupted (not just aborted).
 _started_msg_ids: set[str] = set()
+_started_msg_ids_lock = threading.Lock()
 
 
 def _get_event_message_id() -> str | None:
@@ -118,7 +119,8 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
         chat_id = source.chat_id if hasattr(source, "chat_id") else ""
 
         # Track this message as started (for interrupt detection)
-        _started_msg_ids.add(mid)
+        with _started_msg_ids_lock:
+            _started_msg_ids.add(mid)
 
         # ── START hook ──
         try:
@@ -157,7 +159,8 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                     "card already sent for msg=%s, suppressing gateway reply",
                     mid[:12],
                 )
-                _started_msg_ids.discard(mid)
+                with _started_msg_ids_lock:
+                    _started_msg_ids.discard(mid)
                 return None
 
         # ── ABORT / INTERRUPT detection ──
@@ -168,7 +171,8 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
             if ctx and ctx.get("card_sent"):
                 # Card was sent successfully via on_message_completed.
                 # Only fire interrupt if a newer message started after this one.
-                others = _started_msg_ids - {mid}
+                with _started_msg_ids_lock:
+                    others = _started_msg_ids - {mid}
                 if others:
                     try:
                         from .patch import on_message_interrupted
@@ -194,7 +198,8 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                     pass
 
         # Cleanup tracking
-        _started_msg_ids.discard(mid)
+        with _started_msg_ids_lock:
+            _started_msg_ids.discard(mid)
 
         return result
 
@@ -304,8 +309,19 @@ def _inject_time_prefix(user_message: str | None, persist_user_message: str | No
     """Prepend current time to user_message when inject_time is enabled.
 
     Returns (modified_user_message, modified_persist_user_message).
-    Both are prefixed with ``[HH:MM:SS CST] `` so the DB-stored content
-    matches what the API received — preserving prefix cache consistency.
+    Both are prefixed with ``<time>HH:MM:SS</time>`` so the DB-stored
+    content matches what the API received — preserving prefix cache
+    consistency.
+
+    Uses XML-style tags instead of ``[HH:MM:SS CST]`` because:
+    - LLMs universally understand XML tags as structured metadata, not
+      conversational style — they won't mimic the format in responses.
+    - Bracket-prefixed time (``[14:30:05 CST]``) can be ignored as noise
+      by some models, or worse, mimicked in their output.
+    - The date is omitted because Hermes's system prompt already contains
+      the current date, so only the time portion is needed.
+    - The timezone suffix (CST) is omitted for brevity; the system prompt
+      establishes the timezone context.
 
     Re-entrancy safe: if called again from a nested patch layer (e.g.
     AIAgent.run_conversation → module-level run_conversation), the second
@@ -325,7 +341,7 @@ def _inject_time_prefix(user_message: str | None, persist_user_message: str | No
 
     _cst = timezone(timedelta(hours=8))
     now = datetime.now(_cst)
-    time_prefix = f"[{now.strftime('%H:%M:%S')} CST] "
+    time_prefix = f"<time>{now.strftime('%H:%M:%S')}</time> "
 
     if isinstance(user_message, str):
         user_message = time_prefix + user_message
@@ -348,8 +364,8 @@ def _wrap_run_conversation(orig: Callable) -> Callable:
     """Wrap all 6 streaming callbacks right before run_conversation executes.
 
     When ``streaming.inject_time`` is enabled, prepends the current time
-    (``[HH:MM:SS CST] ``) to ``user_message`` so the model can perceive
-    the current time without calling the ``date`` tool.
+    (``<time>HH:MM:SS</time>``) to ``user_message`` so the model can
+    perceive the current time without calling the ``date`` tool.
 
     The time prefix is also added to ``persist_user_message`` when set, so
     the DB-stored content matches what the API received — preserving
