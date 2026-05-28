@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.10.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.10.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -200,6 +200,12 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 display:
   show_reasoning: true  # 在飞书卡片中显示推理面板
 ```
+
+---
+
+## 开发者指南
+
+> 📖 **[SKILL.md](SKILL.md)** — LLM 快速上手指南。阅读本文档后，你应能立即理解项目架构、关键设计决策、常见陷阱，并高效地进行代码修改或功能扩展。
 
 ---
 

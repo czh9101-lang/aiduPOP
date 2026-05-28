@@ -248,11 +248,13 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         if split.get("reasoning_text") and not split.get("answer_text"):
             session.reasoning_text = split["reasoning_text"] or ""
+            session.reasoning_dirty = True
             if not session.reasoning_start:
                 session.reasoning_start = time.time()
         elif split.get("answer_text"):
             if split.get("reasoning_text"):
                 session.reasoning_text = split["reasoning_text"] or ""
+                session.reasoning_dirty = True
                 if not session.reasoning_start:
                     session.reasoning_start = time.time()
             session.text.on_partial(split["answer_text"] or "")

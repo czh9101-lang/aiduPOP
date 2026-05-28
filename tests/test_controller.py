@@ -394,12 +394,11 @@ class TestDoLinearFlush:
         # step1: elements created
         assert session.linear_state.segments[0].created is True
         assert session.linear_state.segments[1].created is True
-        # step2: dirty cleared for reasoning + answer
+        # step2: dirty cleared for reasoning + answer (pre-fill optimization)
         assert session.linear_state.segments[0].dirty is False
         assert session.linear_state.segments[1].dirty is False
-        # step2: stream_element called with answer text
-        ctrl._client.cardkit_stream_element.assert_called()
-        assert "hello world" in ctrl._client.cardkit_stream_element.call_args[0][2]
+        # step2: stream_element NOT called because text was pre-filled in batch_update (v0.10.1 optimization)
+        ctrl._client.cardkit_stream_element.assert_not_called()
         # step3: tool created
         tool_seg = session.linear_state.segments[2]
         assert tool_seg.created is True
@@ -427,7 +426,8 @@ class TestDoLinearFlush:
         ctrl._client.cardkit_close_streaming.assert_not_called()
         ctrl._client.cardkit_update.assert_not_called()
         ctrl._client.cardkit_batch_update.assert_called_once()
-        assert ctrl._client.cardkit_stream_element.call_count == 2
+        # v0.10.1 optimization: text is pre-filled in batch_update, so stream_element is not called
+        assert ctrl._client.cardkit_stream_element.call_count == 0
 
     @pytest.mark.asyncio
     async def test_split_flushes_pending_actions_then_moves_to_next_card(self) -> None:

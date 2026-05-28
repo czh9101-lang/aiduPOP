@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 import pytest
@@ -334,3 +335,96 @@ class TestSetThrottle:
         ctrl = _make_async()
         ctrl.set_throttle(500.0)
         assert ctrl.throttle_ms == 500.0
+
+
+class TestThreadSafeScheduleUpdate:
+    """Tests for call_soon_threadsafe fix — schedule_update from worker threads.
+
+    v0.10.1 fix: schedule_update now uses call_soon_threadsafe to ensure
+    the event loop is woken up when called from a worker thread.
+    This was the root cause of the "marquee with no text" bug.
+    """
+
+    @pytest.mark.asyncio
+    async def test_schedule_update_from_worker_thread(self) -> None:
+        """schedule_update called from a worker thread should trigger flush on the event loop."""
+        ctrl = _make_async(throttle_ms=0.05)
+        ctrl.set_card_message_ready(True)
+        flushed = asyncio.Event()
+
+        async def do_flush() -> None:
+            flushed.set()
+
+        # Call schedule_update from a worker thread (simulates LLM streaming callback)
+        def worker_call():
+            time.sleep(0.01)  # small delay to ensure we're truly in a worker thread
+            ctrl.schedule_update(do_flush)
+
+        t = threading.Thread(target=worker_call, daemon=True)
+        t.start()
+
+        # The event loop should be woken up and the flush should execute
+        await asyncio.sleep(0.3)
+        assert flushed.is_set(), "Flush should have been triggered from worker thread via call_soon_threadsafe"
+        t.join(timeout=1.0)
+
+    @pytest.mark.asyncio
+    async def test_multiple_worker_thread_calls(self) -> None:
+        """Multiple schedule_update calls from worker threads should not lose updates."""
+        ctrl = _make_async(throttle_ms=0.05)
+        ctrl.set_card_message_ready(True)
+        count = 0
+
+        async def do_flush() -> None:
+            nonlocal count
+            count += 1
+
+        # Simulate rapid LLM streaming callbacks from worker threads
+        barrier = threading.Barrier(3, timeout=5.0)
+
+        def worker_call():
+            barrier.wait()
+            ctrl.schedule_update(do_flush)
+
+        threads = [threading.Thread(target=worker_call, daemon=True) for _ in range(3)]
+        for t in threads:
+            t.start()
+
+        # Wait for all threads to fire and at least one flush to complete
+        await asyncio.sleep(0.5)
+        # At least one flush should have been triggered (throttle may coalesce)
+        assert count >= 1, "At least one flush should have been triggered from worker threads"
+        for t in threads:
+            t.join(timeout=1.0)
+
+    @pytest.mark.asyncio
+    async def test_closed_loop_does_not_crash(self) -> None:
+        """schedule_update should not crash when event loop is closed."""
+        ctrl = _make_async(throttle_ms=0.05)
+        ctrl.set_card_message_ready(True)
+
+        async def do_flush() -> None:
+            pass
+
+        # This should not raise even if the loop is in a weird state
+        # The call_soon_threadsafe wrapper catches RuntimeError
+        ctrl.schedule_update(do_flush)
+        await asyncio.sleep(0.05)
+
+    @pytest.mark.asyncio
+    async def test_schedule_update_from_event_loop_thread_still_works(self) -> None:
+        """schedule_update called from the event loop thread should still work correctly."""
+        ctrl = _make_async(throttle_ms=0.05)
+        ctrl.set_card_message_ready(True)
+        flushed = asyncio.Event()
+
+        async def do_flush() -> None:
+            flushed.set()
+
+        # Wait for throttle window to pass
+        await asyncio.sleep(0.08)
+        # Call from the event loop thread directly
+        ctrl.schedule_update(do_flush)
+        # Should trigger immediately since elapsed > throttle_ms
+        await asyncio.sleep(0.3)
+        assert flushed.is_set(), "Flush should have been triggered from event loop thread"

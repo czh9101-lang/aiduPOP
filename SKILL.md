@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.10.0 (DEV 分支) |
+| 版本 | 0.10.1 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -94,7 +94,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.10.0")
+plugin.yaml (唯一版本号: "0.10.1")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -342,6 +342,7 @@ hermes gateway restart
 | v0.8.6 | 2026-05-26 | Config 读取修复、配置序列化修复、卸载清理 |
 | v0.9.0 | 2026-05-27 | 内容重复修复、页脚耗时修复、CLI 路径修复、表格限制放宽、api_calls/history_offset |
 | v0.10.0 | 2026-05-28 | 时间注入、/stop 状态显示、错误面板、compression_exhausted、Apple Silicon 修复、补丁隔离、Cron 死锁修复、Cron 表格降级 |
+| v0.10.1 | 2026-05-28 | FlushController 线程安全修复（跑马灯无文字根因）、线性模式首次文字预填充、on_thinking reasoning_dirty 预防性修复 |
 
 ---
 
