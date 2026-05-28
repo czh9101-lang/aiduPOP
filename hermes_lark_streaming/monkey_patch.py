@@ -580,97 +580,189 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
 # ── Public entry point ─────────────────────────────────────────────
 
 
+def _detect_hermes_layout() -> dict[str, bool]:
+    """Probe which Hermes internal modules are available.
+
+    Hermes has undergone several internal restructurings:
+
+    - **Pre-v0.10**: ``run_conversation`` was a ~4000-line method inside
+      ``AIAgent`` (``run_agent.py``).  No ``agent/conversation_loop.py``
+      existed.
+    - **v0.10+**: The body was extracted into ``agent/conversation_loop.py``
+      and ``AIAgent.run_conversation`` became a thin forwarder that does
+      ``from agent.conversation_loop import run_conversation``.
+
+    Both layouts are fully supported — the probe just tells us which
+    patch strategy to prefer.
+    """
+    layout = {
+        "has_conversation_loop": False,
+        "has_gateway_run": False,
+        "has_cron_scheduler": False,
+    }
+
+    try:
+        from agent.conversation_loop import run_conversation  # noqa: F401
+        layout["has_conversation_loop"] = True
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        from gateway.run import GatewayRunner  # noqa: F401
+        layout["has_gateway_run"] = True
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        from gateway.cron.scheduler import Scheduler  # noqa: F401
+        layout["has_cron_scheduler"] = True
+    except (ImportError, AttributeError):
+        try:
+            from cron.scheduler import Scheduler  # noqa: F401
+            layout["has_cron_scheduler"] = True
+        except (ImportError, AttributeError):
+            pass
+
+    _logger.info(
+        "hermes-lark-streaming: Hermes layout probe → %s",
+        layout,
+    )
+    return layout
+
+
 def apply_patches() -> None:
     """Apply all runtime monkey patches to ``GatewayRunner`` and ``AIAgent``.
 
     Call exactly once during plugin loading (from ``plugin.register()``).
     Idempotent — protected by a module-level flag.
 
-    Each Hermes internal module import is wrapped in try-except for
-    forward compatibility — Hermes may restructure internal modules
-    across versions.  Missing modules degrade gracefully with a log
-    warning rather than crashing the entire plugin.
+    **Architecture-adaptive patching**: Hermes has been restructured
+    multiple times internally.  This function probes which modules are
+    available and applies the optimal patch strategy for that layout,
+    rather than assuming a specific internal structure.
+
+    Two equivalent patch paths for ``run_conversation``:
+
+    1. **Module-level** (``agent.conversation_loop.run_conversation``) —
+       patches the "water main" so ALL callers are intercepted.  Only
+       available on Hermes v0.10+.
+    2. **Direct AIAgent** (``AIAgent.run_conversation``) — patches the
+       "faucet".  Works on ALL Hermes versions and is functionally
+       equivalent to the module-level patch.
+
+    Both paths call ``_maybe_wrap_callbacks(self)`` and handle
+    ``inject_time``.  The re-entrancy guard in ``_inject_time_prefix``
+    ensures no double-injection when both are active.
     """
     if getattr(apply_patches, "_applied", False):
         return
     apply_patches._applied = True  # type: ignore[attr-defined]
 
+    # ── Probe Hermes layout ──
+    layout = _detect_hermes_layout()
+
     # ── Patch GatewayRunner ──
     # This is the core patch — without it, streaming cards cannot work.
-    try:
-        from gateway.run import GatewayRunner
+    gw_patched = False
+    if layout["has_gateway_run"]:
+        try:
+            from gateway.run import GatewayRunner
 
-        GatewayRunner._handle_message = _wrap_handle_message(GatewayRunner._handle_message)
-        GatewayRunner._handle_message_with_agent = _wrap_handle_message_with_agent(
-            GatewayRunner._handle_message_with_agent
-        )
-        GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
-        _logger.info("hermes-lark-streaming: GatewayRunner patched")
-    except (ImportError, AttributeError) as e:
+            GatewayRunner._handle_message = _wrap_handle_message(GatewayRunner._handle_message)
+            GatewayRunner._handle_message_with_agent = _wrap_handle_message_with_agent(
+                GatewayRunner._handle_message_with_agent
+            )
+            GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
+            gw_patched = True
+            _logger.info("hermes-lark-streaming: GatewayRunner patched ✓")
+        except (ImportError, AttributeError) as e:
+            _logger.error(
+                "hermes-lark-streaming: GatewayRunner patch FAILED — "
+                "gateway.run found but incompatible. "
+                "Streaming cards will NOT work. Error: %s", e,
+            )
+    else:
         _logger.error(
-            "hermes-lark-streaming: GatewayRunner patch FAILED — "
-            "Hermes internal module 'gateway.run' not found or incompatible. "
-            "Streaming cards will NOT work. Error: %s", e,
+            "hermes-lark-streaming: gateway.run NOT FOUND — "
+            "this Hermes version may be too old or installed incorrectly. "
+            "Streaming cards will NOT work. "
+            "Please check: 1) Hermes is running via gateway mode, "
+            "2) Hermes version >= v0.5.0, "
+            "3) Re-run: hermes setup && hermes gateway start",
         )
-        # Still try the direct agent patch below — it may work independently
 
-    # ── Patch agent.conversation_loop (module-level) ──
-    # This patches the module-level run_conversation function so that
-    # _maybe_wrap_callbacks is called before each conversation turn.
-    # In newer Hermes versions this module may not exist — that's OK,
-    # the direct AIAgent patch below serves the same purpose.
+    # ── Patch run_conversation (strategy depends on Hermes layout) ──
+    # Both strategies are functionally equivalent — they both call
+    # _maybe_wrap_callbacks(self) and handle inject_time.
+    # The module-level patch is preferred only because it intercepts
+    # ALL callers, not just AIAgent.
+
     _module_patch_applied = False
-    try:
-        from agent.conversation_loop import run_conversation as _cl_run_conversation
-        import agent.conversation_loop as _cl_mod
+    if layout["has_conversation_loop"]:
+        # Hermes v0.10+: patch the module-level function (preferred)
+        try:
+            from agent.conversation_loop import run_conversation as _cl_run_conversation
+            import agent.conversation_loop as _cl_mod
 
-        _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
-        _module_patch_applied = True
-        _logger.info("hermes-lark-streaming: agent.conversation_loop module patched")
-    except (ImportError, AttributeError) as e:
-        _logger.warning(
-            "hermes-lark-streaming: agent.conversation_loop module not found "
-            "(Hermes v2026+ may have restructured). Falling back to direct "
-            "AIAgent patch. Error: %s", e,
+            _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
+            _module_patch_applied = True
+            _logger.info("hermes-lark-streaming: agent.conversation_loop module patched ✓")
+        except (ImportError, AttributeError) as e:
+            _logger.warning(
+                "hermes-lark-streaming: agent.conversation_loop found but "
+                "patch failed (%s). Falling back to direct AIAgent patch.", e,
+            )
+
+    if not _module_patch_applied:
+        # Hermes <v0.10 OR module patch failed: use direct AIAgent patch
+        _logger.info(
+            "hermes-lark-streaming: using direct AIAgent patch "
+            "(Hermes %s conversation_loop module)",
+            "has no" if not layout["has_conversation_loop"] else "has incompatible",
         )
 
-    # ── Direct AIAgent patch (belt-and-suspenders) ──
-    # This ensures _maybe_wrap_callbacks is called even if the module-level
-    # patch doesn't take effect or the module doesn't exist.
+    # Always apply the direct AIAgent patch as well — it serves as:
+    # 1. The PRIMARY patch when conversation_loop doesn't exist (older Hermes)
+    # 2. A belt-and-suspenders backup when conversation_loop IS patched
+    # The re-entrancy guard in _inject_time_prefix prevents double-injection.
     _apply_direct_agent_patch()
 
-    # ── Cron scheduler (graceful if not found) ──
-    try:
-        from gateway.cron.scheduler import Scheduler
-
-        Scheduler._deliver_result = _wrap_cron_deliver(
-            Scheduler._deliver_result
-        )
-        _logger.info("hermes-lark-streaming: cron scheduler patched")
-    except (ImportError, AttributeError):
+    # ── Cron scheduler ──
+    cron_patched = False
+    if layout["has_cron_scheduler"]:
         try:
-            from cron.scheduler import Scheduler  # alternative import path
+            from gateway.cron.scheduler import Scheduler
 
             Scheduler._deliver_result = _wrap_cron_deliver(
                 Scheduler._deliver_result
             )
-            _logger.info("hermes-lark-streaming: cron scheduler patched (alt path)")
+            cron_patched = True
+            _logger.info("hermes-lark-streaming: cron scheduler patched ✓")
         except (ImportError, AttributeError):
-            _logger.info("hermes-lark-streaming: cron scheduler not found, cron cards disabled")
+            pass
+        if not cron_patched:
+            try:
+                from cron.scheduler import Scheduler  # alternative import path
+
+                Scheduler._deliver_result = _wrap_cron_deliver(
+                    Scheduler._deliver_result
+                )
+                cron_patched = True
+                _logger.info("hermes-lark-streaming: cron scheduler patched (alt path) ✓")
+            except (ImportError, AttributeError):
+                _logger.info("hermes-lark-streaming: cron scheduler not found, cron cards disabled")
 
     # ── Summary ──
-    patch_count = sum([
-        1,  # We always attempt GatewayRunner
-        1 if _module_patch_applied else 0,
-        1 if getattr(apply_patches, "_direct_patch_applied", False) else 0,
-    ])
     _logger.info(
-        "hermes-lark-streaming: patches applied (module_patch=%s, direct_patch_pending=True)",
-        _module_patch_applied,
+        "hermes-lark-streaming: patch summary — "
+        "GatewayRunner=%s, conversation_loop=%s, AIAgent=applied, cron=%s",
+        "✓" if gw_patched else "✗",
+        "✓" if _module_patch_applied else "n/a (direct AIAgent used)",
+        "✓" if cron_patched else "n/a",
     )
 
     # Deferred direct patch: retry AIAgent.run_conversation after Hermes
-    # finishes loading all modules
+    # finishes loading all modules (belt-and-suspenders for lazy imports)
     _schedule_direct_patch()
 
 
