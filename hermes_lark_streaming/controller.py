@@ -506,6 +506,31 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             _logger.warning("cron card delivery failed", exc_info=True)
             return False
 
+    def on_cron_deliver(
+        self,
+        *,
+        chat_id: str,
+        content: str,
+        loop: asyncio.AbstractEventLoop,
+    ) -> bool:
+        """Cron 推送（同步兼容接口）— 从非事件循环线程调用时使用.
+
+        如果在事件循环线程内调用此方法会导致死锁（最多阻塞 30 秒后超时），
+        请改用 on_cron_deliver_async。
+        """
+        if not self.enabled or not content or not chat_id:
+            return False
+        future = asyncio.run_coroutine_threadsafe(
+            self._do_cron_deliver(chat_id, content), loop
+        )
+        try:
+            future.result(timeout=30)
+            _logger.info("cron card delivered: chat=%s len=%d", chat_id[:12], len(content))
+            return True
+        except Exception:
+            _logger.warning("cron card delivery failed", exc_info=True)
+            return False
+
     def defer_background_review(
         self,
         *,
