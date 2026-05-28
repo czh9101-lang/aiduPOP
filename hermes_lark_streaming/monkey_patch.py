@@ -25,6 +25,7 @@ import functools
 import logging
 import threading
 import time
+from datetime import datetime, timezone, timedelta
 from typing import Any, Callable
 
 
@@ -33,6 +34,21 @@ _thread_local_ctx = threading.local()
 _thread_local_ctx.data = None
 
 _logger = logging.getLogger("hermes_lark_streaming")
+
+# ── Module-level Config singleton for inject_time ──────────────────
+# Reused across calls so we don't create a new Config() per message.
+# inject_time uses _reload() (disk re-read) anyway, so a singleton gives
+# the same freshness guarantee without redundant object creation.
+_config = None
+
+
+def _get_config():
+    global _config
+    if _config is None:
+        from .config import Config
+        _config = Config()
+    return _config
+
 
 # ── Context propagation ────────────────────────────────────────────
 # Set in _wrap_run_agent (from event_message_id param), read by callback
@@ -262,8 +278,69 @@ def _wrap_run_agent(orig: Callable) -> Callable:
 # ── AIAgent.run_conversation wrapper (callback interception) ───────
 
 
+# Thread-local re-entrancy guard for _inject_time_prefix.
+# When both the module-level patch and the direct AIAgent patch are active,
+# AIAgent.run_conversation → (direct patch) _inject_time_prefix → orig →
+# agent.conversation_loop.run_conversation → (module patch) _inject_time_prefix.
+# The guard prevents the second call from injecting the prefix again.
+_inject_time_guard = threading.local()
+
+
+def _inject_time_prefix(user_message: str | None, persist_user_message: str | None) -> tuple[str | None, str | None]:
+    """Prepend current time to user_message when inject_time is enabled.
+
+    Returns (modified_user_message, modified_persist_user_message).
+    Both are prefixed with ``[HH:MM:SS CST] `` so the DB-stored content
+    matches what the API received — preserving prefix cache consistency.
+
+    Re-entrancy safe: if called again from a nested patch layer (e.g.
+    AIAgent.run_conversation → module-level run_conversation), the second
+    call is a no-op — the prefix was already added by the outer layer.
+    """
+    # Re-entrancy guard: skip if an outer call already injected time
+    if getattr(_inject_time_guard, 'active', False):
+        return user_message, persist_user_message
+
+    try:
+        cfg = _get_config()
+        if not cfg.inject_time:
+            return user_message, persist_user_message
+    except Exception:
+        _logger.debug("inject_time: config read failed, skipping", exc_info=True)
+        return user_message, persist_user_message
+
+    _cst = timezone(timedelta(hours=8))
+    now = datetime.now(_cst)
+    time_prefix = f"[{now.strftime('%H:%M:%S')} CST] "
+
+    if isinstance(user_message, str):
+        user_message = time_prefix + user_message
+        _logger.info("inject_time: prefixed user_message with %s", time_prefix.strip())
+
+    # Also prefix persist_user_message so DB matches API →
+    # prefix cache consistency is preserved.
+    # This handles the edge case where gateway sets persist_user_message
+    # for group chat observed_group_context.
+    if isinstance(persist_user_message, str):
+        persist_user_message = time_prefix + persist_user_message
+
+    # Mark as injected so nested patch layers skip
+    _inject_time_guard.active = True
+
+    return user_message, persist_user_message
+
+
 def _wrap_run_conversation(orig: Callable) -> Callable:
-    """Wrap all 6 streaming callbacks right before run_conversation executes."""
+    """Wrap all 6 streaming callbacks right before run_conversation executes.
+
+    When ``streaming.inject_time`` is enabled, prepends the current time
+    (``[HH:MM:SS CST] ``) to ``user_message`` so the model can perceive
+    the current time without calling the ``date`` tool.
+
+    The time prefix is also added to ``persist_user_message`` when set, so
+    the DB-stored content matches what the API received — preserving
+    prefix cache consistency across conversation turns.
+    """
 
     @functools.wraps(orig)
     def wrapper(
@@ -276,17 +353,27 @@ def _wrap_run_conversation(orig: Callable) -> Callable:
         persist_user_message=None,
         **kwargs,
     ):
-        _maybe_wrap_callbacks(self)
-        return orig(
-            self,
-            user_message,
-            system_message,
-            conversation_history,
-            task_id,
-            stream_callback,
-            persist_user_message,
-            **kwargs,
+        # ── inject_time: prepend current time to user_message ──
+        user_message, persist_user_message = _inject_time_prefix(
+            user_message, persist_user_message
         )
+
+        _maybe_wrap_callbacks(self)
+        try:
+            return orig(
+                self,
+                user_message,
+                system_message,
+                conversation_history,
+                task_id,
+                stream_callback,
+                persist_user_message,
+                **kwargs,
+            )
+        finally:
+            # Always reset the re-entrancy guard so the next message
+            # in the same thread can be injected again.
+            _inject_time_guard.active = False
 
     return wrapper
 
@@ -572,9 +659,37 @@ def _apply_direct_agent_patch() -> None:
             _logger.info("hermes-lark-streaming: AIAgent.run_conversation already directly patched, skip")
             return
 
-        def _patched_run_conversation(self, user_message, *args, **kwargs):
+        def _patched_run_conversation(
+            self,
+            user_message,
+            system_message=None,
+            conversation_history=None,
+            task_id=None,
+            stream_callback=None,
+            persist_user_message=None,
+            **kwargs,
+        ):
+            # ── inject_time: prepend current time to user_message ──
+            user_message, persist_user_message = _inject_time_prefix(
+                user_message, persist_user_message
+            )
+
             _maybe_wrap_callbacks(self)
-            return _orig_method(self, user_message, *args, **kwargs)
+            try:
+                return _orig_method(
+                    self,
+                    user_message,
+                    system_message,
+                    conversation_history,
+                    task_id,
+                    stream_callback,
+                    persist_user_message,
+                    **kwargs,
+                )
+            finally:
+                # Always reset the re-entrancy guard so the next message
+                # in the same thread can be injected again.
+                _inject_time_guard.active = False
 
         _patched_run_conversation._hls_direct_patched = True
         AIAgent.run_conversation = _patched_run_conversation

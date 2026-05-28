@@ -1,5 +1,30 @@
 # 更新日志 / Changelog
 
+## v0.10.0 (2026-05-28)
+
+| # | 类型 | 功能 | 说明 |
+|---|------|------|------|
+| 1 | Feature | 时间注入（`streaming.inject_time`） | 开启后，每条用户消息前自动添加 `[HH:MM:SS CST] ` 时间前缀，让 AI 模型无需调用 `date` 工具即可感知当前时间 |
+
+**实现原理**：
+- 注入点：`_wrap_run_conversation` 和 `_apply_direct_agent_patch`（双保险）
+- 格式：`[HH:MM:SS CST] <原始消息>`，例：`[14:30:05 CST] 你好`
+- 时间前缀同时添加到 `user_message` 和 `persist_user_message`（若已设置），确保 DB 存储的内容与 API 收到的一致
+
+**Prefix Cache 影响**：
+- **零额外影响**。DB 存储带时间前缀的版本 → 下轮从 DB 加载的历史 = 上轮 API 收到的 → 前缀字节一致 → cache 命中率不变
+- 全程开启/关闭、中途开启/关闭均无额外 cache miss
+
+**Token 开销**：
+- 每条 user message ≈ 5 tokens
+- N 轮对话累计 ≈ (N-1)×5 tokens
+
+**副作用**：
+- 会话查看器（Hermes Web UI）中用户消息将显示时间前缀
+
+**边界情况**：
+- 群聊 `observed_group_context` 场景下 gateway 已设置 `persist_user_message`，时间前缀同时添加到 `persist_user_message` 避免丢失
+
 ## v0.9.0 (2026-05-27)
 
 | # | 类型 | 问题 | 原因 | 修复 |

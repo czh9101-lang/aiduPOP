@@ -28,6 +28,7 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "linear": True,
     "panel_expanded": False,
     "card_ttl_sec": 600,
+    "inject_time": False,
     "footer": {
         "fields": [
             ["status", "elapsed", "model"],

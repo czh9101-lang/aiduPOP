@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.9.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.10.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -137,6 +137,7 @@ streaming:
   linear: true               # Linear mode: single card in-place update with auto card splitting
   panel_expanded: false      # Keep panels (tools, reasoning) expanded in completed cards
   card_ttl_sec: 600         # Card alive detection timeout (seconds)
+  inject_time: false         # Inject current time before user messages (see Time Injection below)
 
   footer:
     fields:
@@ -151,6 +152,18 @@ streaming:
       #                        # Value suddenly decreases → context compression occurred, early dialogue replaced by summary
     show_label: true         # Show field labels (true/false)
 ```
+
+### Time Injection (`inject_time`)
+
+When `streaming.inject_time: true`, the plugin prepends the current time to each user message so the AI model can perceive the current time without calling the `date` tool.
+
+**Format**: `[HH:MM:SS CST] <original message>` (e.g., `[14:30:05 CST] Hello`)
+
+**Key characteristics**:
+- **Prefix cache safe**: The time prefix is written to the conversation database along with the original message, ensuring that the history loaded from the DB in the next turn matches what the API received. This preserves prefix cache consistency — **zero extra cache impact** in all scenarios (always-on, always-off, mid-session enable/disable).
+- **Token overhead**: ~5 tokens per user message; cumulative ~(N-1)×5 tokens for an N-turn conversation.
+- **Side effect**: Conversation viewer (e.g., Hermes web UI) will show the time prefix in user messages.
+- **Edge case handling**: In group chats where `persist_user_message` is already set by the gateway (observed_group_context), the time prefix is also added to `persist_user_message` to avoid losing it.
 
 ### Feishu Credentials
 

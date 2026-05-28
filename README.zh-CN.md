@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.9.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.10.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -132,6 +132,7 @@ streaming:
   linear: true               # 线性模式：单卡片原地更新，支持自动拆卡
   panel_expanded: false      # 完成态卡片中面板（工具、推理）是否保持展开
   card_ttl_sec: 600         # 卡片存活检测超时（秒）
+  inject_time: false         # 在用户消息前注入当前时间（详见下方“时间注入”说明）
 
   footer:
     fields:
@@ -146,6 +147,18 @@ streaming:
       #                        # 值突然变小 → 发生了上下文压缩，早期对话被摘要替代
     show_label: true         # 是否显示字段标签（true/false）
 ```
+
+### 时间注入（`inject_time`）
+
+开启 `streaming.inject_time: true` 后，插件会在每条用户消息前添加当前时间，让 AI 模型无需调用 `date` 工具即可感知当前时间。
+
+**格式**：`[HH:MM:SS CST] <原始消息>`（例：`[14:30:05 CST] 你好`）
+
+**核心特性**：
+- **Prefix Cache 安全**：时间前缀与原始消息一起写入对话数据库，确保下轮从 DB 加载的历史与上轮 API 收到的一致，从而保证前缀缓存一致性——**所有场景下零额外缓存影响**（全程开启、全程关闭、中途开启/关闭）。
+- **Token 开销**：每条 user message ≈ 5 tokens；N 轮对话累计 ≈ (N-1)×5 tokens。
+- **副作用**：会话查看器（如 Hermes Web UI）中用户消息将显示时间前缀。
+- **边界情况处理**：群聊中 gateway 已设置 `persist_user_message`（observed_group_context）时，时间前缀同时添加到 `persist_user_message`，避免时间前缀丢失。
 
 ### 飞书凭据
 

@@ -86,6 +86,20 @@ class Config:
         return fields
 
     @property
+    def inject_time(self) -> bool:
+        """是否在用户消息前注入当前时间，让模型无需调用 date 工具即可感知时间.
+
+        默认关闭。开启后，每条用户消息前会添加 ``[HH:MM:SS CST] `` 前缀，
+        前缀同时写入 DB（保证 prefix cache 一致性）。
+
+        每次都从磁盘重读，因为用户可能在运行时修改配置文件。
+        """
+        sec = self._reload().get("streaming")
+        if not isinstance(sec, dict):
+            return False
+        return bool(sec.get("inject_time", False))
+
+    @property
     def footer_show_label(self) -> bool:
         """Footer 是否显示字段标签."""
         sec = self._streaming_sec()
