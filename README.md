@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.9.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.10.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -19,6 +19,8 @@ English | <a href="README.zh-CN.md">中文版</a>
 Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, tool panels, reasoning, and more.
 
 > Based on [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0, with extensive refactoring and optimizations
+>
+> ⚠️ **Incompatible with the upstream plugin** — if you have the original `Cheerwhy/hermes-lark-streaming` installed, please uninstall it first before installing this version.
 
 ---
 
@@ -33,8 +35,11 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 - **Message Protection** — Auto-terminates updates when messages are deleted/recalled, avoiding invalid API calls
 - **Image Parsing** — Auto-detects markdown image references, downloads and uploads to replace with Feishu img_key
 - **Interrupt Handling** — Handles /stop command and message interrupts, displays interrupt status card and auto-starts new session
-- **Cron Push** — Scheduled task results pushed as Feishu cards with Markdown rendering preserved
+- **Cron Push** — Scheduled task results pushed as Feishu CardKit cards with Markdown rendering
 - **i18n** — Built-in Chinese/English bilingual card text (status, tool panel, thinking labels, etc.), auto-switches based on Feishu client language
+- **Error/Interrupt Display** — Errors and /stop interrupts show as collapsible red/orange panels in card body (not just footer), with 🛑 Stopped / ❌ Error status
+- **Time Injection** — Optionally prepend current time to each user message, so the AI model can perceive the current time without calling the `date` tool
+- **Config Backup** — Automatically backs up config.yaml before first modification (config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming)
 - **Plugin Lifecycle** — Install/uninstall via `hermes plugins install/uninstall`, no source file modification required
 - **Runtime Patches** — Uses monkey patching instead of AST injection, does not modify source files on disk
 
@@ -47,7 +52,6 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 ### Prerequisites
 
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) (running, with Feishu platform configured)
-- Python >= 3.11
 - Hermes CLI with plugin system support (`hermes plugins` command available)
 
 ### Installation
@@ -72,28 +76,34 @@ hermes gateway restart
 ### Uninstallation
 
 ```bash
-# 1. Clean up injected config first (while plugin code is still available)
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup
+# 1. Clean up injected config (while plugin code is still available)
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+$HERMES_PYTHON -m hermes_lark_streaming cleanup
 
-# 2. Remove plugin files
+# 2. Remove plugin
 hermes plugins uninstall hermes-lark-streaming
 
 # 3. Restart gateway
 hermes gateway restart
 ```
 
+> **Why not `python3 -m`?** Hermes runs in its own virtual environment. The system `python3` does not have the plugin's dependencies (e.g. `PyYAML`, `lark-oapi`), so `python3 -m hermes_lark_streaming` will likely fail. Use `HERMES_PYTHON` (Hermes venv's Python) instead. If Hermes is installed in a non-default path, adjust accordingly.
+
 ### Verify Installation
 
 ```bash
 # Check plugin status
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status
-
-# Verify environment compatibility
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming verify
+hermes plugins list
 
 # View gateway logs
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
+
+# Verify plugin config & credentials (uses Hermes's Python)
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+$HERMES_PYTHON -m hermes_lark_streaming status
 ```
+
+> **Troubleshooting**: If no card effect appears after installation, check: (1) `hermes plugins list` shows the plugin as enabled; (2) no backup directory exists under `~/.hermes/plugins/` (remove any `*.bak` directories); (3) Feishu credentials are configured (see [Feishu Credentials](#feishu-credentials)).
 
 ---
 
@@ -101,7 +111,7 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 
 All configuration items are located under the `streaming:` section in `~/.hermes/config.yaml`.
 
-> **Auto-injection**: When this plugin is first loaded, it automatically adds the `streaming:` section to your `config.yaml` top-level with the defaults below. On uninstall, this section is automatically removed. You only need to manually edit if you want to override specific values.
+> **Auto-injection**: When this plugin is first loaded, it automatically adds the `streaming:` section to your `config.yaml` top-level with the defaults below. On uninstall, run the `cleanup` command (see [Uninstallation](#uninstallation)) first to remove this section.
 
 > **Note**: Hermes also has a native `display.streaming: false` config which controls **CLI/TUI terminal** output. This is unrelated to this plugin's streaming cards.
 
@@ -137,20 +147,36 @@ streaming:
   linear: true               # Linear mode: single card in-place update with auto card splitting
   panel_expanded: false      # Keep panels (tools, reasoning) expanded in completed cards
   card_ttl_sec: 600         # Card alive detection timeout (seconds)
+  inject_time: false         # Inject current time before user messages (see Time Injection below)
 
   footer:
     fields:
-      - status
-      - elapsed
-      - model
-      - tokens
-      - context
-      # - api_calls          # Number of API calls in this session (not added by default, add manually if needed)
-      # - history_offset     # Conversation turn offset (not added by default, add manually if needed)
-      #                        # Larger value → longer conversation history, AI has more context
-      #                        # Value suddenly decreases → context compression occurred, early dialogue replaced by summary
+      - [status, elapsed, model, api_calls]
+      - [tokens, context, history_offset, compression_exhausted]
+      # Available fields:
+      #   status      — Reply status (✅ Completed / ❌ Error / 🛑 Stopped)
+      #   elapsed     — AI response elapsed time
+      #   model       — Model name used
+      #   api_calls   — Number of API calls in this session
+      #   tokens      — Token usage (↑ input ↓ output)
+      #   context     — Context window usage (used/total percentage)
+      #   history_offset — Conversation history offset; larger = longer history, sudden decrease = context compression
+      #   compression_exhausted — Context window is full, compression can no longer fit (⚠ Context Full)
+      # Each inner list is one row in the footer; fields only shown when they have values
     show_label: true         # Show field labels (true/false)
 ```
+
+### Time Injection (`inject_time`)
+
+When `streaming.inject_time: true`, the plugin prepends the current time to each user message so the AI model can perceive the current time without calling the `date` tool.
+
+**Format**: `[HH:MM:SS CST] <original message>` (e.g., `[14:30:05 CST] Hello`)
+
+**Key characteristics**:
+- **Prefix cache safe**: The time prefix is written to the conversation database along with the original message, ensuring that the history loaded from the DB in the next turn matches what the API received. This preserves prefix cache consistency — **zero extra cache impact** in all scenarios (always-on, always-off, mid-session enable/disable).
+- **Token overhead**: ~5 tokens per user message; cumulative ~(N-1)×5 tokens for an N-turn conversation.
+- **Side effect**: Conversation viewer (e.g., Hermes web UI) will show the time prefix in user messages.
+- **Edge case handling**: In group chats where `persist_user_message` is already set by the gateway (observed_group_context), the time prefix is also added to `persist_user_message` to avoid losing it.
 
 ### Feishu Credentials
 
@@ -177,34 +203,6 @@ The reasoning panel visibility is controlled by `display.show_reasoning` or `dis
 display:
   show_reasoning: true  # Show reasoning panel in Feishu cards
 ```
-
----
-
-## FAQ
-
-### Plugin Loading Failed
-
-**Problem**: No card effect after installation, Hermes still replies plain text
-
-**Solution**:
-1. Check if plugin is correctly installed: `hermes plugins list`
-2. View gateway logs: `grep hermes_lark_streaming ~/.hermes/logs/agent.log`
-3. Verify Feishu credentials: `$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`
-4. Check for backup directory interference: `ls -la ~/.hermes/plugins/ | grep bak`, delete if exists
-
-### Card Element Limit Exceeded
-
-**Problem**: Card update fails during long conversations
-
-**Solution**: Enable linear mode (`streaming.linear: true`), plugin will auto-split cards
-
-### Table Display Issues
-
-**Problem**: When AI response contains many tables, some tables display as raw Markdown instead of formatted tables
-
-**Cause**: Feishu cards have a limit on the number of table elements; tables exceeding the limit are downgraded to code blocks
-
-**Solution**: v0.9.0 has increased the table downgrade threshold from 3 to 10, which covers most scenarios. If you still encounter this issue, adjust `_MAX_CARD_TABLES` in `cardkit_md.py`
 
 ---
 

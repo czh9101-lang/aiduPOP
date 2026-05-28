@@ -642,6 +642,7 @@ class LinearControllerMixin:
         linear_state = session.linear_state
         is_error = session.state == FAILED
         is_aborted = session.state == ABORTED
+        error_message = getattr(session, "error_message", "")
         all_tool_steps = session.tool_use.build_display_steps()
 
         if linear_state is not None:
@@ -665,6 +666,7 @@ class LinearControllerMixin:
             footer_data=session.footer,
             is_error=is_error,
             is_aborted=is_aborted,
+            error_message=error_message,
             footer_fields=self._cfg.footer_fields,
             footer_show_label=self._cfg.footer_show_label,
             panel_expanded=self._cfg.panel_expanded,

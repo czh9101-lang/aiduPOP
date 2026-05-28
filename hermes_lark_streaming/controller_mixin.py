@@ -304,6 +304,7 @@ class ControllerMixin:
 
         is_error = session.state == FAILED
         is_aborted = session.state == ABORTED
+        error_message = getattr(session, "error_message", "")
         card = build_complete_card(
             text=display,
             reasoning_text=session.reasoning_text if self._cfg.show_reasoning else "",
@@ -314,6 +315,7 @@ class ControllerMixin:
             has_cardkit=session.use_cardkit,
             is_error=is_error,
             is_aborted=is_aborted,
+            error_message=error_message,
             footer_fields=self._cfg.footer_fields,
             footer_show_label=self._cfg.footer_show_label,
             panel_expanded=self._cfg.panel_expanded,

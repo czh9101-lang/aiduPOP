@@ -111,6 +111,9 @@ def on_message_completed(
     context: dict[str, Any] | None = None,
     api_calls: int = 0,
     history_offset: int = 0,
+    compression_exhausted: bool = False,
+    aborted: bool = False,
+    error_message: str = "",
 ) -> bool:
     """[注入点 2] return 前 — message.completed."""
     return bool(
@@ -123,6 +126,9 @@ def on_message_completed(
             context=context,
             api_calls=api_calls,
             history_offset=history_offset,
+            compression_exhausted=compression_exhausted,
+            aborted=aborted,
+            error_message=error_message,
         )
     )
 
@@ -204,7 +210,7 @@ def on_message_interrupted(
     )
 
 
-def on_cron_deliver(
+async def on_cron_deliver(
     *,
     chat_id: str,
     content: str,
@@ -217,7 +223,7 @@ def on_cron_deliver(
         ctrl = get_controller()
         if not ctrl.enabled:
             return False
-        return bool(ctrl.on_cron_deliver(chat_id=chat_id, content=content, loop=loop))
+        return bool(await ctrl.on_cron_deliver_async(chat_id=chat_id, content=content, loop=loop))
     except Exception as exc:
         _logger.warning("on_cron_deliver error: %s", exc, exc_info=True)
         return False

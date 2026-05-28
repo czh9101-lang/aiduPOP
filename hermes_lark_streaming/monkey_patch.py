@@ -22,9 +22,15 @@ from __future__ import annotations
 
 import contextvars
 import functools
+import importlib
+import importlib.util
 import logging
+import os
+import sys
 import threading
 import time
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -33,6 +39,21 @@ _thread_local_ctx = threading.local()
 _thread_local_ctx.data = None
 
 _logger = logging.getLogger("hermes_lark_streaming")
+
+# ── Module-level Config singleton for inject_time ──────────────────
+# Reused across calls so we don't create a new Config() per message.
+# inject_time uses _reload() (disk re-read) anyway, so a singleton gives
+# the same freshness guarantee without redundant object creation.
+_config = None
+
+
+def _get_config():
+    global _config
+    if _config is None:
+        from .config import Config
+        _config = Config()
+    return _config
+
 
 # ── Context propagation ────────────────────────────────────────────
 # Set in _wrap_run_agent (from event_message_id param), read by callback
@@ -232,6 +253,12 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 # 所以 result.get("_response_time", 0) 永远返回 0。
                 _elapsed = time.monotonic() - ctx.get("_msg_start_time", time.monotonic())
 
+                # ── 检查是否被中断（/stop 或新消息打断） ──
+                # Hermes 的 /stop 不会让 _run_agent 返回 None，而是返回
+                # interrupted=True / partial=True 的 result。
+                # 此时应该显示"已停止"而非"已完成"。
+                is_interrupted = result.get("interrupted", False) or result.get("partial", False)
+
                 card_sent = on_message_completed(
                     message_id=ctx["message_id"],
                     answer=result.get("final_response", ""),
@@ -247,6 +274,9 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     },
                     api_calls=result.get("api_calls", 0),
                     history_offset=result.get("history_offset", 0),
+                    compression_exhausted=result.get("compression_exhausted", False),
+                    aborted=is_interrupted,
+                    error_message=result.get("error") or result.get("interrupt_message", ""),
                 )
                 if card_sent:
                     result["already_sent"] = True
@@ -262,8 +292,69 @@ def _wrap_run_agent(orig: Callable) -> Callable:
 # ── AIAgent.run_conversation wrapper (callback interception) ───────
 
 
+# Thread-local re-entrancy guard for _inject_time_prefix.
+# When both the module-level patch and the direct AIAgent patch are active,
+# AIAgent.run_conversation → (direct patch) _inject_time_prefix → orig →
+# agent.conversation_loop.run_conversation → (module patch) _inject_time_prefix.
+# The guard prevents the second call from injecting the prefix again.
+_inject_time_guard = threading.local()
+
+
+def _inject_time_prefix(user_message: str | None, persist_user_message: str | None) -> tuple[str | None, str | None]:
+    """Prepend current time to user_message when inject_time is enabled.
+
+    Returns (modified_user_message, modified_persist_user_message).
+    Both are prefixed with ``[HH:MM:SS CST] `` so the DB-stored content
+    matches what the API received — preserving prefix cache consistency.
+
+    Re-entrancy safe: if called again from a nested patch layer (e.g.
+    AIAgent.run_conversation → module-level run_conversation), the second
+    call is a no-op — the prefix was already added by the outer layer.
+    """
+    # Re-entrancy guard: skip if an outer call already injected time
+    if getattr(_inject_time_guard, 'active', False):
+        return user_message, persist_user_message
+
+    try:
+        cfg = _get_config()
+        if not cfg.inject_time:
+            return user_message, persist_user_message
+    except Exception:
+        _logger.debug("inject_time: config read failed, skipping", exc_info=True)
+        return user_message, persist_user_message
+
+    _cst = timezone(timedelta(hours=8))
+    now = datetime.now(_cst)
+    time_prefix = f"[{now.strftime('%H:%M:%S')} CST] "
+
+    if isinstance(user_message, str):
+        user_message = time_prefix + user_message
+        _logger.info("inject_time: prefixed user_message with %s", time_prefix.strip())
+
+    # Also prefix persist_user_message so DB matches API →
+    # prefix cache consistency is preserved.
+    # This handles the edge case where gateway sets persist_user_message
+    # for group chat observed_group_context.
+    if isinstance(persist_user_message, str):
+        persist_user_message = time_prefix + persist_user_message
+
+    # Mark as injected so nested patch layers skip
+    _inject_time_guard.active = True
+
+    return user_message, persist_user_message
+
+
 def _wrap_run_conversation(orig: Callable) -> Callable:
-    """Wrap all 6 streaming callbacks right before run_conversation executes."""
+    """Wrap all 6 streaming callbacks right before run_conversation executes.
+
+    When ``streaming.inject_time`` is enabled, prepends the current time
+    (``[HH:MM:SS CST] ``) to ``user_message`` so the model can perceive
+    the current time without calling the ``date`` tool.
+
+    The time prefix is also added to ``persist_user_message`` when set, so
+    the DB-stored content matches what the API received — preserving
+    prefix cache consistency across conversation turns.
+    """
 
     @functools.wraps(orig)
     def wrapper(
@@ -276,17 +367,27 @@ def _wrap_run_conversation(orig: Callable) -> Callable:
         persist_user_message=None,
         **kwargs,
     ):
-        _maybe_wrap_callbacks(self)
-        return orig(
-            self,
-            user_message,
-            system_message,
-            conversation_history,
-            task_id,
-            stream_callback,
-            persist_user_message,
-            **kwargs,
+        # ── inject_time: prepend current time to user_message ──
+        user_message, persist_user_message = _inject_time_prefix(
+            user_message, persist_user_message
         )
+
+        _maybe_wrap_callbacks(self)
+        try:
+            return orig(
+                self,
+                user_message,
+                system_message,
+                conversation_history,
+                task_id,
+                stream_callback,
+                persist_user_message,
+                **kwargs,
+            )
+        finally:
+            # Always reset the re-entrancy guard so the next message
+            # in the same thread can be injected again.
+            _inject_time_guard.active = False
 
     return wrapper
 
@@ -461,7 +562,7 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
             try:
                 from .patch import on_cron_deliver
 
-                if on_cron_deliver(
+                if await on_cron_deliver(
                     chat_id=chat_id,
                     content=cleaned_delivery_content.strip(),
                     loop=loop,
@@ -481,7 +582,193 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
     return wrapper
 
 
+# ── Namespace-collision-safe module resolver ────────────────────────
+
+
+def _resolve_hermes_agent_module() -> tuple[Any, Any] | None:
+    """Resolve Hermes's ``agent.conversation_loop`` module reliably.
+
+    This function works around a **namespace collision** bug on Apple
+    Silicon Macs where a PyPI package named ``agent`` shadows Hermes's
+    own ``agent`` package.  The symptom is::
+
+        ModuleNotFoundError: No module named 'agent.conversation_loop'
+
+    (Python finds *an* ``agent`` package, just not Hermes's one.)
+
+    Resolution strategy (in order of priority):
+
+    1. **sys.modules cache** — if Hermes already imported
+      ``agent.conversation_loop``, it's sitting in ``sys.modules``.
+      Reading it from there bypasses the import machinery entirely and
+      is immune to any path / namespace issues.
+    2. **Anchor-based discovery** — use a known Hermes module
+      (``gateway.run`` or ``run_agent``) as a filesystem anchor to
+      locate the ``agent/`` directory, then load it directly with
+      ``importlib``.
+    3. **Standard import** — ``from agent.conversation_loop import …``
+      as a last resort (works when there's no collision).
+
+    Returns ``(conversation_loop_module, run_conversation_func)`` or
+    ``None`` if the module cannot be found.
+    """
+    # ── Strategy 1: sys.modules ──
+    # Hermes MUST have imported agent.conversation_loop before loading
+    # plugins (it's used by run_agent.py which gateway.run imports).
+    # If it's here, just use it — no path issues possible.
+    cl_mod = sys.modules.get("agent.conversation_loop")
+    if cl_mod is not None:
+        func = getattr(cl_mod, "run_conversation", None)
+        if func is not None:
+            _logger.info(
+                "hermes-lark-streaming: agent.conversation_loop resolved "
+                "via sys.modules (path=%s)",
+                getattr(cl_mod, "__file__", "?"),
+            )
+            return cl_mod, func
+        else:
+            _logger.warning(
+                "hermes-lark-streaming: agent.conversation_loop found in "
+                "sys.modules but has no 'run_conversation' attribute"
+            )
+
+    # ── Strategy 2: Anchor-based discovery ──
+    # Use known Hermes modules to find the repo root, then load
+    # agent/conversation_loop.py directly by file path.
+    for anchor_name in ("gateway.run", "run_agent"):
+        anchor = sys.modules.get(anchor_name)
+        if anchor is None:
+            try:
+                anchor = importlib.import_module(anchor_name)
+            except ImportError:
+                continue
+
+        anchor_file = getattr(anchor, "__file__", None)
+        if not anchor_file:
+            continue
+
+        # gateway/run.py → repo root;  run_agent.py → repo root
+        repo_root = Path(anchor_file).resolve().parent
+        if anchor_name == "gateway.run":
+            repo_root = repo_root.parent
+
+        cl_file = repo_root / "agent" / "conversation_loop.py"
+        if not cl_file.is_file():
+            _logger.debug(
+                "hermes-lark-streaming: anchor %s → %s, but %s not found",
+                anchor_name, repo_root, cl_file,
+            )
+            continue
+
+        _logger.info(
+            "hermes-lark-streaming: found conversation_loop.py via anchor "
+            "%s → %s", anchor_name, cl_file,
+        )
+
+        # Load the module directly by file path, bypassing the
+        # ``agent`` namespace entirely.
+        spec = importlib.util.spec_from_file_location(
+            "agent.conversation_loop",  # canonical name
+            str(cl_file),
+        )
+        if spec is None or spec.loader is None:
+            continue
+
+        try:
+            mod = importlib.util.module_from_spec(spec)
+            # Register in sys.modules so subsequent imports find it
+            sys.modules["agent.conversation_loop"] = mod
+            # Also ensure the parent 'agent' package can find it
+            agent_pkg = sys.modules.get("agent")
+            if agent_pkg is not None:
+                if not hasattr(agent_pkg, "conversation_loop"):
+                    agent_pkg.conversation_loop = mod  # type: ignore[attr-defined]
+            spec.loader.exec_module(mod)
+            func = getattr(mod, "run_conversation", None)
+            if func is not None:
+                _logger.info(
+                    "hermes-lark-streaming: agent.conversation_loop loaded "
+                    "via anchor-based discovery ✓",
+                )
+                return mod, func
+        except Exception as e:
+            _logger.warning(
+                "hermes-lark-streaming: anchor-based load of "
+                "agent.conversation_loop failed: %s", e,
+                exc_info=True,
+            )
+
+    # ── Strategy 3: Standard import ──
+    try:
+        from agent.conversation_loop import run_conversation as _func
+        import agent.conversation_loop as _mod
+        _logger.info(
+            "hermes-lark-streaming: agent.conversation_loop resolved "
+            "via standard import",
+        )
+        return _mod, _func
+    except (ImportError, AttributeError) as e:
+        _logger.warning(
+            "hermes-lark-streaming: agent.conversation_loop standard "
+            "import failed: %s. This is likely caused by a namespace "
+            "collision (another Python package named 'agent' shadowing "
+            "Hermes's 'agent'). Try: pip uninstall agent", e,
+        )
+
+    return None
+
+
 # ── Public entry point ─────────────────────────────────────────────
+
+
+def _detect_hermes_layout() -> dict[str, bool]:
+    """Probe which Hermes internal modules are available.
+
+    Hermes has undergone several internal restructurings:
+
+    - **Pre-v0.10**: ``run_conversation`` was a ~4000-line method inside
+      ``AIAgent`` (``run_agent.py``).  No ``agent/conversation_loop.py``
+      existed.
+    - **v0.10+**: The body was extracted into ``agent/conversation_loop.py``
+      and ``AIAgent.run_conversation`` became a thin forwarder that does
+      ``from agent.conversation_loop import run_conversation``.
+
+    Both layouts are fully supported — the probe just tells us which
+    patch strategy to prefer.
+    """
+    layout = {
+        "has_conversation_loop": False,
+        "has_gateway_run": False,
+        "has_cron_scheduler": False,
+    }
+
+    # Use _resolve_hermes_agent_module() instead of bare import —
+    # this handles the Apple Silicon namespace collision bug.
+    resolved = _resolve_hermes_agent_module()
+    if resolved is not None:
+        layout["has_conversation_loop"] = True
+
+    try:
+        from gateway.run import GatewayRunner  # noqa: F401
+        layout["has_gateway_run"] = True
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        from gateway.cron.scheduler import Scheduler  # noqa: F401
+        layout["has_cron_scheduler"] = True
+    except (ImportError, AttributeError):
+        try:
+            from cron.scheduler import Scheduler  # noqa: F401
+            layout["has_cron_scheduler"] = True
+        except (ImportError, AttributeError):
+            pass
+
+    _logger.info(
+        "hermes-lark-streaming: Hermes layout probe → %s",
+        layout,
+    )
+    return layout
 
 
 def apply_patches() -> None:
@@ -489,55 +776,137 @@ def apply_patches() -> None:
 
     Call exactly once during plugin loading (from ``plugin.register()``).
     Idempotent — protected by a module-level flag.
+
+    **Architecture-adaptive patching**: Hermes has been restructured
+    multiple times internally.  This function probes which modules are
+    available and applies the optimal patch strategy for that layout,
+    rather than assuming a specific internal structure.
+
+    Two equivalent patch paths for ``run_conversation``:
+
+    1. **Module-level** (``agent.conversation_loop.run_conversation``) —
+       patches the "water main" so ALL callers are intercepted.  Only
+       available on Hermes v0.10+.
+    2. **Direct AIAgent** (``AIAgent.run_conversation``) — patches the
+       "faucet".  Works on ALL Hermes versions and is functionally
+       equivalent to the module-level patch.
+
+    Both paths call ``_maybe_wrap_callbacks(self)`` and handle
+    ``inject_time``.  The re-entrancy guard in ``_inject_time_prefix``
+    ensures no double-injection when both are active.
     """
     if getattr(apply_patches, "_applied", False):
         return
     apply_patches._applied = True  # type: ignore[attr-defined]
 
-    from gateway.run import GatewayRunner
+    # ── Probe Hermes layout ──
+    layout = _detect_hermes_layout()
 
-    GatewayRunner._handle_message = _wrap_handle_message(GatewayRunner._handle_message)
-    GatewayRunner._handle_message_with_agent = _wrap_handle_message_with_agent(
-        GatewayRunner._handle_message_with_agent
-    )
-    GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
+    # ── Patch GatewayRunner ──
+    # This is the core patch — without it, streaming cards cannot work.
+    gw_patched = False
+    if layout["has_gateway_run"]:
+        try:
+            from gateway.run import GatewayRunner
 
-    from agent.conversation_loop import run_conversation as _cl_run_conversation
+            GatewayRunner._handle_message = _wrap_handle_message(GatewayRunner._handle_message)
+            GatewayRunner._handle_message_with_agent = _wrap_handle_message_with_agent(
+                GatewayRunner._handle_message_with_agent
+            )
+            GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
+            gw_patched = True
+            _logger.info("hermes-lark-streaming: GatewayRunner patched ✓")
+        except (ImportError, AttributeError) as e:
+            _logger.error(
+                "hermes-lark-streaming: GatewayRunner patch FAILED — "
+                "gateway.run found but incompatible. "
+                "Streaming cards will NOT work. Error: %s", e,
+            )
+    else:
+        _logger.error(
+            "hermes-lark-streaming: gateway.run NOT FOUND — "
+            "this Hermes version may be too old or installed incorrectly. "
+            "Streaming cards will NOT work. "
+            "Please check: 1) Hermes is running via gateway mode, "
+            "2) Hermes version >= v0.5.0, "
+            "3) Re-run: hermes setup && hermes gateway start",
+        )
 
-    import agent.conversation_loop as _cl_mod
-    _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
+    # ── Patch run_conversation (strategy depends on Hermes layout) ──
+    # Both strategies are functionally equivalent — they both call
+    # _maybe_wrap_callbacks(self) and handle inject_time.
+    # The module-level patch is preferred only because it intercepts
+    # ALL callers, not just AIAgent.
 
-    # Also try to patch AIAgent.run_conversation directly (belt-and-suspenders)
-    # This ensures _maybe_wrap_callbacks is called even if the module-level
-    # patch doesn't take effect in the running process.
+    _module_patch_applied = False
+    if layout["has_conversation_loop"]:
+        # Hermes v0.10+: patch the module-level function (preferred)
+        # Use _resolve_hermes_agent_module() to get the module safely,
+        # bypassing any namespace collision.
+        resolved = _resolve_hermes_agent_module()
+        if resolved is not None:
+            _cl_mod, _cl_run_conversation = resolved
+            try:
+                _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
+                _module_patch_applied = True
+                _logger.info("hermes-lark-streaming: agent.conversation_loop module patched ✓")
+            except (AttributeError, TypeError) as e:
+                _logger.warning(
+                    "hermes-lark-streaming: agent.conversation_loop found but "
+                    "patch failed (%s). Falling back to direct AIAgent patch.", e,
+                )
+
+    if not _module_patch_applied:
+        # Hermes <v0.10 OR module patch failed: use direct AIAgent patch
+        _logger.info(
+            "hermes-lark-streaming: using direct AIAgent patch "
+            "(Hermes %s conversation_loop module)",
+            "has no" if not layout["has_conversation_loop"] else "has incompatible",
+        )
+
+    # Always apply the direct AIAgent patch as well — it serves as:
+    # 1. The PRIMARY patch when conversation_loop doesn't exist (older Hermes)
+    # 2. A belt-and-suspenders backup when conversation_loop IS patched
+    # The re-entrancy guard in _inject_time_prefix prevents double-injection.
     _apply_direct_agent_patch()
 
-    # ── Cron scheduler (graceful if not found) ──
-    try:
-        from gateway.cron.scheduler import Scheduler
-
-        Scheduler._deliver_result = _wrap_cron_deliver(
-            Scheduler._deliver_result
-        )
-        _logger.info("hermes-lark-streaming: cron scheduler patched")
-    except (ImportError, AttributeError):
+    # ── Cron scheduler ──
+    cron_patched = False
+    if layout["has_cron_scheduler"]:
         try:
-            from cron.scheduler import Scheduler  # alternative import path
+            from gateway.cron.scheduler import Scheduler
 
             Scheduler._deliver_result = _wrap_cron_deliver(
                 Scheduler._deliver_result
             )
-            _logger.info("hermes-lark-streaming: cron scheduler patched (alt path)")
+            cron_patched = True
+            _logger.info("hermes-lark-streaming: cron scheduler patched ✓")
         except (ImportError, AttributeError):
-            _logger.info("hermes-lark-streaming: cron scheduler not found, cron cards disabled")
+            pass
+        if not cron_patched:
+            try:
+                from cron.scheduler import Scheduler  # alternative import path
 
-    _logger.info("hermes-lark-streaming: all runtime patches applied")
-    _logger.info("hermes-lark-streaming: about to call _schedule_direct_patch")
+                Scheduler._deliver_result = _wrap_cron_deliver(
+                    Scheduler._deliver_result
+                )
+                cron_patched = True
+                _logger.info("hermes-lark-streaming: cron scheduler patched (alt path) ✓")
+            except (ImportError, AttributeError):
+                _logger.info("hermes-lark-streaming: cron scheduler not found, cron cards disabled")
+
+    # ── Summary ──
+    _logger.info(
+        "hermes-lark-streaming: patch summary — "
+        "GatewayRunner=%s, conversation_loop=%s, AIAgent=applied, cron=%s",
+        "✓" if gw_patched else "✗",
+        "✓" if _module_patch_applied else "n/a (direct AIAgent used)",
+        "✓" if cron_patched else "n/a",
+    )
 
     # Deferred direct patch: retry AIAgent.run_conversation after Hermes
-    # finishes loading all modules
+    # finishes loading all modules (belt-and-suspenders for lazy imports)
     _schedule_direct_patch()
-    _logger.info("hermes-lark-streaming: _schedule_direct_patch returned")
 
 
 def _schedule_direct_patch() -> None:
@@ -572,9 +941,37 @@ def _apply_direct_agent_patch() -> None:
             _logger.info("hermes-lark-streaming: AIAgent.run_conversation already directly patched, skip")
             return
 
-        def _patched_run_conversation(self, user_message, *args, **kwargs):
+        def _patched_run_conversation(
+            self,
+            user_message,
+            system_message=None,
+            conversation_history=None,
+            task_id=None,
+            stream_callback=None,
+            persist_user_message=None,
+            **kwargs,
+        ):
+            # ── inject_time: prepend current time to user_message ──
+            user_message, persist_user_message = _inject_time_prefix(
+                user_message, persist_user_message
+            )
+
             _maybe_wrap_callbacks(self)
-            return _orig_method(self, user_message, *args, **kwargs)
+            try:
+                return _orig_method(
+                    self,
+                    user_message,
+                    system_message,
+                    conversation_history,
+                    task_id,
+                    stream_callback,
+                    persist_user_message,
+                    **kwargs,
+                )
+            finally:
+                # Always reset the re-entrancy guard so the next message
+                # in the same thread can be injected again.
+                _inject_time_guard.active = False
 
         _patched_run_conversation._hls_direct_patched = True
         AIAgent.run_conversation = _patched_run_conversation

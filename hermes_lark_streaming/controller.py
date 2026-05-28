@@ -57,6 +57,7 @@ class CardSession:
         "deferred_background_review_lock",
         "deferred_background_reviews",
         "element_count",
+        "error_message",
         "flush",
         "footer",
         "guard",
@@ -121,6 +122,7 @@ class CardSession:
         self.element_count: int = 0
         self.split_disabled = False
         self.split_index: int = 0
+        self.error_message: str = ""
 
 
 class StreamCardController(ControllerMixin, LinearControllerMixin):
@@ -419,6 +421,9 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         context: dict | None = None,
         api_calls: int = 0,
         history_offset: int = 0,
+        compression_exhausted: bool = False,
+        aborted: bool = False,
+        error_message: str = "",
     ) -> bool:
         """消息处理完成 — 构建终端卡片."""
         if not self.enabled:
@@ -454,6 +459,17 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         if answer:
             session.text.on_deliver(answer)
 
+        # ── 设置 session 状态 ──
+        # 当 monkey_patch 检测到 interrupted/partial 时传入 aborted=True，
+        # 此时 session 状态应为 ABORTED，这样完成卡片会显示 "🛑 已停止"。
+        if aborted and session.state not in _TERMINAL:
+            session.state = ABORTED
+
+        # ── 保存错误/中断消息 ──
+        # 用于在卡片正文中展示（而非仅页脚）
+        if error_message:
+            session.error_message = error_message
+
         session.footer = {
             "duration": duration,
             "model": model,
@@ -463,10 +479,32 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             **({"context_max": context.get("max_tokens")} if context else {}),
             **({"api_calls": api_calls} if api_calls else {}),
             **({"history_offset": history_offset} if history_offset else {}),
+            **({"compression_exhausted": compression_exhausted} if compression_exhausted else {}),
         }
 
         self._complete_session(session)
         return True
+
+    async def on_cron_deliver_async(
+        self,
+        *,
+        chat_id: str,
+        content: str,
+        loop: asyncio.AbstractEventLoop,
+    ) -> bool:
+        """Cron 推送 — 包装为静态卡片发送，成功返回 True.
+
+        异步版本：直接 await 协程，避免 run_coroutine_threadsafe 在事件循环线程中死锁。
+        """
+        if not self.enabled or not content or not chat_id:
+            return False
+        try:
+            await self._do_cron_deliver(chat_id, content)
+            _logger.info("cron card delivered: chat=%s len=%d", chat_id[:12], len(content))
+            return True
+        except Exception:
+            _logger.warning("cron card delivery failed", exc_info=True)
+            return False
 
     def on_cron_deliver(
         self,
@@ -475,7 +513,11 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         content: str,
         loop: asyncio.AbstractEventLoop,
     ) -> bool:
-        """Cron 推送 — 包装为静态卡片发送，成功返回 True."""
+        """Cron 推送（同步兼容接口）— 从非事件循环线程调用时使用.
+
+        如果在事件循环线程内调用此方法会导致死锁（最多阻塞 30 秒后超时），
+        请改用 on_cron_deliver_async。
+        """
         if not self.enabled or not content or not chat_id:
             return False
         future = asyncio.run_coroutine_threadsafe(

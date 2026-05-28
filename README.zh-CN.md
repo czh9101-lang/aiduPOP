@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.9.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.10.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -19,6 +19,8 @@
 为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、工具面板、推理过程等。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
+>
+> ⚠️ **与上游插件不兼容** — 如已安装原版 `Cheerwhy/hermes-lark-streaming`，请先卸载后再安装本插件。
 
 ---
 
@@ -33,8 +35,11 @@
 - **消息保护** — 检测消息被删除/撤回后自动终止更新，避免无效 API 调用
 - **图片解析** — 自动识别 markdown 图片引用，下载并上传替换为飞书 img_key
 - **中断处理** — 处理 /stop 命令和消息中断，显示中断状态卡片并自动开启新会话
-- **Cron 推送** — 定时任务结果以飞书卡片形式推送，保留 Markdown 渲染
+- **Cron 推送** — 定时任务结果以飞书 CardKit 卡片形式推送，保留 Markdown 渲染
 - **多语言** — 内置中英文双语卡片文本（状态、工具面板、思考标签等），根据飞书客户端语言自动切换
+- **错误/中断展示** — 错误和 /stop 中断以可折叠的红/橙面板显示在卡片正文中（而非仅页脚），带 🛑 已停止 / ❌ 出错状态
+- **时间注入** — 可选在每条用户消息前添加当前时间，让 AI 模型无需调用 `date` 工具即可感知当前时间
+- **配置备份** — 首次修改 config.yaml 前自动备份（config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming）
 - **插件生命周期** — 通过 `hermes plugins install/uninstall` 安装/卸载，无需修改源文件
 - **运行时补丁** — 使用 monkey patching 而非 AST 注入，不修改磁盘上的源文件
 
@@ -47,7 +52,6 @@
 ### 前置要求
 
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent)（已运行，已配置飞书平台）
-- Python >= 3.11
 - Hermes CLI 支持插件系统（可用 `hermes plugins` 命令）
 
 ### 安装
@@ -69,8 +73,9 @@ hermes gateway restart
 ### 卸载
 
 ```bash
-# 1. 先清理注入的配置（插件代码还在，可以跑）
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup
+# 1. 先清理注入的配置（插件代码还在时执行）
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+$HERMES_PYTHON -m hermes_lark_streaming cleanup
 
 # 2. 卸载插件
 hermes plugins uninstall hermes-lark-streaming
@@ -79,24 +84,31 @@ hermes plugins uninstall hermes-lark-streaming
 hermes gateway restart
 ```
 
+> **为什么不用 `python3 -m`？** Hermes 运行在自建的虚拟环境中，系统 `python3` 没有插件的依赖（如 `PyYAML`、`lark-oapi`），因此 `python3 -m hermes_lark_streaming` 大概率会失败。请使用 `HERMES_PYTHON`（Hermes 虚拟环境的 Python）。若 Hermes 安装在非默认路径，请相应调整。
+
 ### 验证安装
 
 ```bash
 # 检查插件状态
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status
-
-# 验证环境兼容性
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming verify
+hermes plugins list
 
 # 查看日志
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
+
+# 验证插件配置和凭据（使用 Hermes 的 Python）
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+$HERMES_PYTHON -m hermes_lark_streaming status
 ```
+
+> **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无备份目录干扰（删除 `*.bak` 目录）；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。
 
 ---
 
 ## 配置说明
 
 所有配置项位于 `~/.hermes/config.yaml` 的 `streaming:` 节下。
+
+> **自动注入**：插件首次加载时，会自动在 `config.yaml` 顶层添加 `streaming:` 配置段（使用下方默认值）。卸载时，请先运行 `cleanup` 命令（见[卸载](#卸载)）清除该配置段。
 
 > **注意**：Hermes 原生也有 `display.streaming: false` 配置项，该配置控制 **CLI/TUI 终端**输出（响应是否在终端流式显示），与本插件的流式卡片**无关**。本插件只读取 `streaming:` 节。
 
@@ -132,20 +144,36 @@ streaming:
   linear: true               # 线性模式：单卡片原地更新，支持自动拆卡
   panel_expanded: false      # 完成态卡片中面板（工具、推理）是否保持展开
   card_ttl_sec: 600         # 卡片存活检测超时（秒）
+  inject_time: false         # 在用户消息前注入当前时间（详见下方"时间注入"说明）
 
   footer:
     fields:
-      - status
-      - elapsed
-      - model
-      - tokens
-      - context
-      # - api_calls          # 本轮对话的 API 调用次数（默认不添加，需要时自行添加后重启网关）
-      # - history_offset     # 对话轮次偏移量（默认不添加，需要时自行添加后重启网关）
-      #                        # 值越大 → 对话历史越长，AI 已有更多上下文
-      #                        # 值突然变小 → 发生了上下文压缩，早期对话被摘要替代
+      - [status, elapsed, model, api_calls]
+      - [tokens, context, history_offset, compression_exhausted]
+      # 可用字段说明：
+      #   status      — 回复状态（✅ 已完成 / ❌ 出错 / 🛑 已停止）
+      #   elapsed     — AI 回复耗时
+      #   model       — 使用的模型名称
+      #   api_calls   — 本轮对话的 API 调用次数
+      #   tokens      — Token 用量（↑ 输入 ↓ 输出）
+      #   context     — 上下文窗口用量（已用/总量 百分比）
+      #   history_offset — 对话历史偏移量；值越大对话越长，值突然变小说明发生了上下文压缩
+      #   compression_exhausted — 上下文已满，即使压缩也无法适应上下文窗口时显示（⚠ 上下文已满）
+      # 每个内层列表为页脚的一行，字段仅在有值时显示
     show_label: true         # 是否显示字段标签（true/false）
 ```
+
+### 时间注入（`inject_time`）
+
+开启 `streaming.inject_time: true` 后，插件会在每条用户消息前添加当前时间，让 AI 模型无需调用 `date` 工具即可感知当前时间。
+
+**格式**：`[HH:MM:SS CST] <原始消息>`（例：`[14:30:05 CST] 你好`）
+
+**核心特性**：
+- **Prefix Cache 安全**：时间前缀与原始消息一起写入对话数据库，确保下轮从 DB 加载的历史与上轮 API 收到的一致，从而保证前缀缓存一致性——**所有场景下零额外缓存影响**（全程开启、全程关闭、中途开启/关闭）。
+- **Token 开销**：每条 user message ≈ 5 tokens；N 轮对话累计 ≈ (N-1)×5 tokens。
+- **副作用**：会话查看器（如 Hermes Web UI）中用户消息将显示时间前缀。
+- **边界情况处理**：群聊中 gateway 已设置 `persist_user_message`（observed_group_context）时，时间前缀同时添加到 `persist_user_message`，避免时间前缀丢失。
 
 ### 飞书凭据
 
@@ -175,36 +203,10 @@ display:
 
 ---
 
-## 常见问题
-
-### 插件加载失败
-
-**问题**：安装后无卡片效果，Hermes 仍回复纯文本
-
-**解决**：
-1. 检查插件是否正确安装：`hermes plugins list`
-2. 查看日志：`grep hermes_lark_streaming ~/.hermes/logs/agent.log`
-3. 验证飞书凭据：`$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`
-4. 检查是否存在备份目录干扰：`ls -la ~/.hermes/plugins/ | grep bak`，如有则删除
-
-### 卡片元素超限
-
-**问题**：长对话导致卡片更新失败
-
-**解决**：启用线性模式（`streaming.linear: true`），插件会自动拆卡处理
-
-### 表格显示异常
-
-**问题**：AI 回复中的表格数量较多时，部分表格显示为 Markdown 源码而非表格样式
-
-**原因**：飞书卡片对表格元素数量有限制，超限表格会被降级为代码块显示
-
-**解决**：v0.9.0 已将表格降级阈值从 3 调整为 10，绝大多数场景不再触发降级。如仍遇到此问题，可在 `cardkit_md.py` 中调整 `_MAX_CARD_TABLES` 值
-
----
-
 ## 更新日志
 
 > 完整版本历史请查看 [CHANGELOG.md](CHANGELOG.md)
+
+---
 
 ## 致谢
