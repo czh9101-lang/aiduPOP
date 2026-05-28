@@ -210,7 +210,7 @@ def on_message_interrupted(
     )
 
 
-def on_cron_deliver(
+async def on_cron_deliver(
     *,
     chat_id: str,
     content: str,
@@ -223,7 +223,7 @@ def on_cron_deliver(
         ctrl = get_controller()
         if not ctrl.enabled:
             return False
-        return bool(ctrl.on_cron_deliver(chat_id=chat_id, content=content, loop=loop))
+        return bool(await ctrl.on_cron_deliver_async(chat_id=chat_id, content=content, loop=loop))
     except Exception as exc:
         _logger.warning("on_cron_deliver error: %s", exc, exc_info=True)
         return False

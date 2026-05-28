@@ -562,7 +562,7 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
             try:
                 from .patch import on_cron_deliver
 
-                if on_cron_deliver(
+                if await on_cron_deliver(
                     chat_id=chat_id,
                     content=cleaned_delivery_content.strip(),
                     loop=loop,

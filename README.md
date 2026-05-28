@@ -19,6 +19,8 @@ English | <a href="README.zh-CN.md">中文版</a>
 Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, tool panels, reasoning, and more.
 
 > Based on [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0, with extensive refactoring and optimizations
+>
+> ⚠️ **Incompatible with the upstream plugin** — if you have the original `Cheerwhy/hermes-lark-streaming` installed, please uninstall it first before installing this version.
 
 ---
 
@@ -33,7 +35,7 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 - **Message Protection** — Auto-terminates updates when messages are deleted/recalled, avoiding invalid API calls
 - **Image Parsing** — Auto-detects markdown image references, downloads and uploads to replace with Feishu img_key
 - **Interrupt Handling** — Handles /stop command and message interrupts, displays interrupt status card and auto-starts new session
-- **Cron Push** — Scheduled task results pushed as Feishu cards with Markdown rendering preserved
+- **Cron Push** — Scheduled task results pushed as Feishu CardKit cards with Markdown rendering
 - **i18n** — Built-in Chinese/English bilingual card text (status, tool panel, thinking labels, etc.), auto-switches based on Feishu client language
 - **Error/Interrupt Display** — Errors and /stop interrupts show as collapsible red/orange panels in card body (not just footer), with 🛑 Stopped / ❌ Error status
 - **Time Injection** — Optionally prepend current time to each user message, so the AI model can perceive the current time without calling the `date` tool

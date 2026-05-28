@@ -12,6 +12,8 @@
 | 6 | Feature | 配置文件自动备份 | 卸载后无法恢复原始配置 | 首次修改 `config.yaml` 前自动备份为 `config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming`，仅备份一次 |
 | 7 | Bug | Apple Silicon Mac 报 `ModuleNotFoundError: No module named 'agent.conversation_loop'` | PyPI 第三方包 `agent` 遮蔽 Hermes 自身的 `agent` 包 | 新增 `_resolve_hermes_agent_module()` 三级模块解析：① sys.modules 缓存 → ② 锚点发现 → ③ 标准 import 回退；模块缺失时安全降级 |
 | 8 | Chore | `apply_patches()` 中任何 import 失败导致整个插件崩溃 | V0.9.0 无 try/except，单个模块失败后全部补丁不执行 | 所有 import 包裹 try/except，单个模块补丁失败不影响其他补丁 |
+| 9 | Bug | Cron 推送卡片从未生效，每次静默回退为纯文本 | `_wrap_cron_deliver` 为 async，内部同步调用 `on_cron_deliver` → `run_coroutine_threadsafe().result(30)` 阻塞事件循环导致 30 秒死锁超时 | 全链路改为 async：`on_cron_deliver` → `on_cron_deliver_async` → 直接 `await _do_cron_deliver()`，消除阻塞 |
+| 10 | Bug | Cron 推送卡片中表格超限后渲染失败 | `build_cron_card` 缺少 `_downgrade_tables()` 调用 | 与 `build_complete_card` / `build_streaming_card` 一致，添加 `_downgrade_tables()` |
 
 ## v0.9.0 (2026-05-27)
 

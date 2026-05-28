@@ -695,7 +695,7 @@ def build_cron_card(content: str) -> dict[str, Any]:
     summary = content[:120].replace("\n", " ").replace("```", "").strip()
     if summary:
         card["config"]["summary"] = {"content": summary}
-    for chunk in _split_long_text(optimize_markdown_style(content)):
+    for chunk in _split_long_text(_downgrade_tables(optimize_markdown_style(content))):
         if chunk.strip():
             card["body"]["elements"].append({"tag": "markdown", "content": chunk})
     return card
