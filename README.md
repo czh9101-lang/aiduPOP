@@ -75,7 +75,8 @@ hermes gateway restart
 
 ```bash
 # 1. Clean up injected config (while plugin code is still available)
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+$HERMES_PYTHON -m hermes_lark_streaming cleanup
 
 # 2. Remove plugin
 hermes plugins uninstall hermes-lark-streaming
@@ -84,7 +85,7 @@ hermes plugins uninstall hermes-lark-streaming
 hermes gateway restart
 ```
 
-> **Why not `python3 -m`?** Hermes runs in its own virtual environment. The system `python3` does not have the plugin's dependencies (e.g. `PyYAML`, `lark-oapi`), so `python3 -m hermes_lark_streaming` will likely fail. Use the Python from Hermes's venv instead: `$(dirname $(readlink -f $(which hermes)))/python`
+> **Why not `python3 -m`?** Hermes runs in its own virtual environment. The system `python3` does not have the plugin's dependencies (e.g. `PyYAML`, `lark-oapi`), so `python3 -m hermes_lark_streaming` will likely fail. Use `HERMES_PYTHON` (Hermes venv's Python) instead. If Hermes is installed in a non-default path, adjust accordingly.
 
 ### Verify Installation
 
@@ -96,7 +97,8 @@ hermes plugins list
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
 
 # Verify plugin config & credentials (uses Hermes's Python)
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+$HERMES_PYTHON -m hermes_lark_streaming status
 ```
 
 > **Troubleshooting**: If no card effect appears after installation, check: (1) `hermes plugins list` shows the plugin as enabled; (2) no backup directory exists under `~/.hermes/plugins/` (remove any `*.bak` directories); (3) Feishu credentials are configured (see [Feishu Credentials](#feishu-credentials)).

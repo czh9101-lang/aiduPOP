@@ -72,7 +72,8 @@ hermes gateway restart
 
 ```bash
 # 1. 先清理注入的配置（插件代码还在时执行）
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+$HERMES_PYTHON -m hermes_lark_streaming cleanup
 
 # 2. 卸载插件
 hermes plugins uninstall hermes-lark-streaming
@@ -81,7 +82,7 @@ hermes plugins uninstall hermes-lark-streaming
 hermes gateway restart
 ```
 
-> **为什么不用 `python3 -m`？** Hermes 运行在自建的虚拟环境中，系统 `python3` 没有插件的依赖（如 `PyYAML`、`lark-oapi`），因此 `python3 -m hermes_lark_streaming` 大概率会失败。请使用 Hermes 虚拟环境的 Python：`$(dirname $(readlink -f $(which hermes)))/python`
+> **为什么不用 `python3 -m`？** Hermes 运行在自建的虚拟环境中，系统 `python3` 没有插件的依赖（如 `PyYAML`、`lark-oapi`），因此 `python3 -m hermes_lark_streaming` 大概率会失败。请使用 `HERMES_PYTHON`（Hermes 虚拟环境的 Python）。若 Hermes 安装在非默认路径，请相应调整。
 
 ### 验证安装
 
@@ -93,7 +94,8 @@ hermes plugins list
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
 
 # 验证插件配置和凭据（使用 Hermes 的 Python）
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status
+HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+$HERMES_PYTHON -m hermes_lark_streaming status
 ```
 
 > **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无备份目录干扰（删除 `*.bak` 目录）；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。
