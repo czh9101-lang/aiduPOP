@@ -585,27 +585,58 @@ def apply_patches() -> None:
 
     Call exactly once during plugin loading (from ``plugin.register()``).
     Idempotent — protected by a module-level flag.
+
+    Each Hermes internal module import is wrapped in try-except for
+    forward compatibility — Hermes may restructure internal modules
+    across versions.  Missing modules degrade gracefully with a log
+    warning rather than crashing the entire plugin.
     """
     if getattr(apply_patches, "_applied", False):
         return
     apply_patches._applied = True  # type: ignore[attr-defined]
 
-    from gateway.run import GatewayRunner
+    # ── Patch GatewayRunner ──
+    # This is the core patch — without it, streaming cards cannot work.
+    try:
+        from gateway.run import GatewayRunner
 
-    GatewayRunner._handle_message = _wrap_handle_message(GatewayRunner._handle_message)
-    GatewayRunner._handle_message_with_agent = _wrap_handle_message_with_agent(
-        GatewayRunner._handle_message_with_agent
-    )
-    GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
+        GatewayRunner._handle_message = _wrap_handle_message(GatewayRunner._handle_message)
+        GatewayRunner._handle_message_with_agent = _wrap_handle_message_with_agent(
+            GatewayRunner._handle_message_with_agent
+        )
+        GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
+        _logger.info("hermes-lark-streaming: GatewayRunner patched")
+    except (ImportError, AttributeError) as e:
+        _logger.error(
+            "hermes-lark-streaming: GatewayRunner patch FAILED — "
+            "Hermes internal module 'gateway.run' not found or incompatible. "
+            "Streaming cards will NOT work. Error: %s", e,
+        )
+        # Still try the direct agent patch below — it may work independently
 
-    from agent.conversation_loop import run_conversation as _cl_run_conversation
+    # ── Patch agent.conversation_loop (module-level) ──
+    # This patches the module-level run_conversation function so that
+    # _maybe_wrap_callbacks is called before each conversation turn.
+    # In newer Hermes versions this module may not exist — that's OK,
+    # the direct AIAgent patch below serves the same purpose.
+    _module_patch_applied = False
+    try:
+        from agent.conversation_loop import run_conversation as _cl_run_conversation
+        import agent.conversation_loop as _cl_mod
 
-    import agent.conversation_loop as _cl_mod
-    _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
+        _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
+        _module_patch_applied = True
+        _logger.info("hermes-lark-streaming: agent.conversation_loop module patched")
+    except (ImportError, AttributeError) as e:
+        _logger.warning(
+            "hermes-lark-streaming: agent.conversation_loop module not found "
+            "(Hermes v2026+ may have restructured). Falling back to direct "
+            "AIAgent patch. Error: %s", e,
+        )
 
-    # Also try to patch AIAgent.run_conversation directly (belt-and-suspenders)
+    # ── Direct AIAgent patch (belt-and-suspenders) ──
     # This ensures _maybe_wrap_callbacks is called even if the module-level
-    # patch doesn't take effect in the running process.
+    # patch doesn't take effect or the module doesn't exist.
     _apply_direct_agent_patch()
 
     # ── Cron scheduler (graceful if not found) ──
@@ -627,13 +658,20 @@ def apply_patches() -> None:
         except (ImportError, AttributeError):
             _logger.info("hermes-lark-streaming: cron scheduler not found, cron cards disabled")
 
-    _logger.info("hermes-lark-streaming: all runtime patches applied")
-    _logger.info("hermes-lark-streaming: about to call _schedule_direct_patch")
+    # ── Summary ──
+    patch_count = sum([
+        1,  # We always attempt GatewayRunner
+        1 if _module_patch_applied else 0,
+        1 if getattr(apply_patches, "_direct_patch_applied", False) else 0,
+    ])
+    _logger.info(
+        "hermes-lark-streaming: patches applied (module_patch=%s, direct_patch_pending=True)",
+        _module_patch_applied,
+    )
 
     # Deferred direct patch: retry AIAgent.run_conversation after Hermes
     # finishes loading all modules
     _schedule_direct_patch()
-    _logger.info("hermes-lark-streaming: _schedule_direct_patch returned")
 
 
 def _schedule_direct_patch() -> None:

@@ -179,7 +179,7 @@ def register(ctx: "PluginContext") -> None:
         from .monkey_patch import apply_patches
 
         apply_patches()
-        _logger.info("hermes-lark-streaming: patches applied successfully")
+        _logger.info("hermes-lark-streaming: patches applied (check logs for per-module status)")
     except Exception:
         _logger.exception("hermes-lark-streaming: failed to apply patches")
 
