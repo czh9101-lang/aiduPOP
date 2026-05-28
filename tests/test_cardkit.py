@@ -709,3 +709,31 @@ class TestBuildCronCard:
         content = "| A | B |\n|---|---|\n| 1 | 2 |"
         card = build_cron_card(content)
         assert "| A | B |" in card["body"]["elements"][0]["content"]
+
+    def test_many_tables_triggers_downgrade(self) -> None:
+        from hermes_lark_streaming.cardkit import build_cron_card
+
+        table = "| A | B |\n|---|---|\n| 1 | 2 |"
+        # _MAX_CARD_TABLES = 10, so 12 tables triggers _downgrade_tables
+        content = "\n\n".join([table] * 12)
+        card = build_cron_card(content)
+        # Excess tables are wrapped in code blocks by _downgrade_tables
+        combined = " ".join(e["content"] for e in card["body"]["elements"])
+        assert "```" in combined
+
+    def test_long_content_split_into_multiple_elements(self) -> None:
+        from hermes_lark_streaming.cardkit import build_cron_card
+
+        # Content longer than 2400 chars should be split by _split_long_text
+        content = "x" * 3000
+        card = build_cron_card(content)
+        assert len(card["body"]["elements"]) > 1
+
+    def test_headings_downgraded_in_cron_card(self) -> None:
+        from hermes_lark_streaming.cardkit import build_cron_card
+
+        content = "# Title\nSome text"
+        card = build_cron_card(content)
+        # optimize_markdown_style downgrades h1 → h4
+        combined = " ".join(e["content"] for e in card["body"]["elements"])
+        assert "#### Title" in combined

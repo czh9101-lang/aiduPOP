@@ -1,5 +1,29 @@
 # 更新日志 / Changelog
 
+## v0.11.0 (2026-05-29)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 飞书卡片元素超限后卡片"卡死"，后续更新全部失败 | `_handle_linear_flush_error` 收到 `CARDKIT_ELEMENT_LIMIT` 错误后仅打日志，无任何恢复措施；下次 flush 继续往同一张卡塞内容 → 继续超限 → 无限循环直到 AI 输出完成 | 超限时自动触发拆卡：封存当前卡，开新卡继续流式输出；设置 `element_limit_hit` 标志，拆卡前跳过新增段避免继续超限；拆卡成功后重置标志和元素计数 |
+| 2 | Bug | 拆卡失败后元素再超限 = 死局 | `split_disabled=True`（拆卡失败降级）后，元素超限无路可走 | 超限拆卡不受 `split_disabled` 限制（`_do_linear_split` 内部已有降级逻辑）；即使拆卡也失败，`element_limit_hit` 标志确保只刷已有段的脏文本，等完成阶段整体重建 |
+| 3 | Perf | `inject_time` / `show_reasoning` 每次属性访问都读磁盘 | `_reload()` 每次调用都执行 `Path.read_text()` + `yaml.safe_load()`，流式输出期间每 100ms 可能触发多次，高频场景下不必要 | 新增 `_reload_cached()` 方法，带 5 秒 TTL 缓存：5 秒内复用上次读取结果，避免高频属性访问反复读磁盘；配置变更最多延迟 5 秒生效 |
+| 4 | Bug | 并发消息可能漏判中断 | `_started_msg_ids` 是全局 `set`，两个消息同时到达时 `add` / `discard` / 差集运算非原子，可能漏判中断 | 所有 `_started_msg_ids` 操作加 `threading.Lock` 保护，确保并发安全 |
+
+## v0.10.2 (2026-05-28)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Perf | 时间注入格式 `[HH:MM:SS CST]` 被部分 LLM 忽略或模仿 | 方括号格式缺乏语义标记，某些模型将其视为噪声忽略，或在回复中模仿相同格式 | 改用 XML 标签格式 `<time>HH:MM:SS</time>`：LLM 普遍理解 XML 标签为结构化元数据，不会在回复中模仿；同时移除 CST 时区后缀（系统提示词已含时区上下文）和日期（系统提示词已含当前日期），减少 token 开销 |
+| 2 | Perf | 线性模式预填充后已发送 segment 被冗余重刷 | `_do_linear_batch_update` 中 `new_el_ids` 非空时，对已创建的 reasoning/answer segment 强制设 `dirty=True`，即使文本未变更也会触发冗余 `stream_element` 调用 | 仅对自上次 flush 以来文本有实际变更的已创建 segment 设 `dirty=True`，减少不必要的 API 调用 |
+
+## v0.10.1 (2026-05-28)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 流式卡片跑马灯无文字，等很久才出文字，看到时已完成 | `FlushController.schedule_update` 使用 `call_soon` / `call_later` 从 LLM worker 线程调度到事件循环，这两个方法 **不唤醒事件循环**（缺少 `_write_to_self()`），导致回调虽入队列但永远不被及时处理 | `schedule_update` 改用 `call_soon_threadsafe` 调度到事件循环线程，确保每次 flush 请求立即唤醒事件循环；新增 `_schedule_update_on_loop()` 内部方法 |
+| 2 | Perf | 首次文字出现慢 ~200ms | 线性模式创建 answer/reasoning 元素时内容为空，需额外一次 `stream_element` API 调用才出文字 | `batch_update` 时预填充已累积的文本内容，省去首次 `stream_element` 调用 |
+| 3 | Bug | `on_thinking` 设置 `reasoning_text` 后未标记 `reasoning_dirty=True`，导致 `_do_update_card` 跳过更新 | 遗漏赋值 | 补充 `session.reasoning_dirty = True`（当前代码路径未激活，预防性修复） |
+
 ## v0.10.0 (2026-05-28)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

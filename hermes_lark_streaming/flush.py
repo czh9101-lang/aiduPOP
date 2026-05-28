@@ -4,6 +4,7 @@
 - 异常后正确设置 last_update_time
 - wait_for_flush 支持
 - card_message_ready gate
+- 线程安全：schedule_update 可从 worker 线程调用
 """
 
 from __future__ import annotations
@@ -26,6 +27,11 @@ class FlushController:
     """带互斥锁 + 延迟刷新的通用节流调度器.
 
     不包含飞书业务逻辑，只负责决定何时执行回调.
+
+    **线程安全**: ``schedule_update`` 可从任意线程（worker thread 或
+    event loop thread）安全调用。内部通过 ``call_soon_threadsafe``
+    确保节流逻辑和回调调度始终在事件循环线程上执行，避免
+    ``call_soon``/``call_later`` 跨线程调用无法唤醒事件循环的问题。
     """
 
     def __init__(self, throttle_ms: float = CARDKIT_MS) -> None:
@@ -58,6 +64,28 @@ class FlushController:
         """请求一次节流后的卡片刷新.
 
         do_flush: async callable，执行实际 API 调用.
+
+        **线程安全**: 可从 worker thread 或 event loop thread 调用。
+        使用 ``call_soon_threadsafe`` 确保事件循环被唤醒。
+        """
+        if self._completed or not self._card_message_ready:
+            return
+        # ── 线程安全：通过 call_soon_threadsafe 调度到事件循环线程 ──
+        # 直接使用 call_soon / call_later 在 worker thread 中调用时，
+        # 回调虽然加入了 _ready 队列，但不会触发 _write_to_self() 唤醒
+        # 事件循环，导致回调永远不会被及时处理——直到有其他事件
+        # （如定时器、I/O）自然唤醒循环。
+        # 这正是 "跑马灯无文字，等很久才出文字" 的根因。
+        try:
+            self._loop.call_soon_threadsafe(self._schedule_update_on_loop, do_flush)
+        except RuntimeError:
+            pass  # Event loop already closed
+
+    def _schedule_update_on_loop(self, do_flush: Callable[[], Awaitable[None]]) -> None:
+        """在事件循环线程上执行节流逻辑.
+
+        由 ``schedule_update`` 通过 ``call_soon_threadsafe`` 调度，
+        保证 ``call_later`` / ``call_soon`` 均在事件循环线程上执行。
         """
         if self._completed or not self._card_message_ready:
             return

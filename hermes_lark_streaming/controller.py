@@ -57,6 +57,7 @@ class CardSession:
         "deferred_background_review_lock",
         "deferred_background_reviews",
         "element_count",
+        "element_limit_hit",
         "error_message",
         "flush",
         "footer",
@@ -120,6 +121,7 @@ class CardSession:
         self.linear = False
         self.linear_state: LinearState | None = None
         self.element_count: int = 0
+        self.element_limit_hit = False
         self.split_disabled = False
         self.split_index: int = 0
         self.error_message: str = ""
@@ -248,11 +250,13 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         if split.get("reasoning_text") and not split.get("answer_text"):
             session.reasoning_text = split["reasoning_text"] or ""
+            session.reasoning_dirty = True
             if not session.reasoning_start:
                 session.reasoning_start = time.time()
         elif split.get("answer_text"):
             if split.get("reasoning_text"):
                 session.reasoning_text = split["reasoning_text"] or ""
+                session.reasoning_dirty = True
                 if not session.reasoning_start:
                     session.reasoning_start = time.time()
             session.text.on_partial(split["answer_text"] or "")
