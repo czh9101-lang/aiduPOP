@@ -1,15 +1,22 @@
 """Plugin entry point — register(ctx) for Hermes plugin system.
 
 On registration:
+- Backs up ``config.yaml`` before first modification (format: config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming)
 - Ensures ``config.yaml`` has a clean top-level ``streaming`` section
   with the minimal required defaults so streaming cards work out of the box.
 - Ensures ``hermes-lark-streaming`` is listed in ``plugins.enabled``.
+
+On unregistration:
+- Removes the ``streaming`` section and ``plugins.enabled`` entry from config.yaml
+  (does NOT restore the backup — user can manually restore if needed).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +28,8 @@ if TYPE_CHECKING:
 _logger = logging.getLogger("hermes_lark_streaming")
 
 _HERMES_CONFIG_PATH = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
+
+_PLUGIN_NAME = "hermes-lark-streaming"
 
 # Default streaming config injected into config.yaml on first load
 _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
@@ -37,6 +46,34 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
         "show_label": True,
     },
 }
+
+
+def _backup_config() -> None:
+    """Back up config.yaml before first modification.
+
+    Backup filename format: config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming
+    Only creates one backup per plugin installation (skips if a backup already exists).
+    """
+    if not _HERMES_CONFIG_PATH.exists():
+        return
+
+    # Check if a backup for this plugin already exists
+    backup_pattern = f"config.yaml.*.{_PLUGIN_NAME}"
+    parent = _HERMES_CONFIG_PATH.parent
+    existing_backups = list(parent.glob(backup_pattern))
+    if existing_backups:
+        _logger.info("Backup already exists: %s, skipping", existing_backups[0].name)
+        return
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_name = f"config.yaml.{timestamp}.{_PLUGIN_NAME}"
+    backup_path = parent / backup_name
+
+    try:
+        shutil.copy2(_HERMES_CONFIG_PATH, backup_path)
+        _logger.info("Backed up config.yaml to %s", backup_path)
+    except Exception:
+        _logger.exception("Failed to back up config.yaml to %s", backup_path)
 
 
 def _prepare_config(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -68,6 +105,9 @@ def _ensure_streaming_config() -> None:
 
         # Ensure streaming section exists
         if "streaming" not in raw:
+            # Back up config.yaml before first modification
+            _backup_config()
+
             raw["streaming"] = dict(_DEFAULT_STREAMING_CONFIG)
             changed = True
             _logger.info("Injected top-level streaming config into %s", _HERMES_CONFIG_PATH)
@@ -76,10 +116,13 @@ def _ensure_streaming_config() -> None:
         plugins = raw.get("plugins")
         if isinstance(plugins, dict):
             enabled = plugins.get("enabled")
-            if isinstance(enabled, list) and "hermes-lark-streaming" not in enabled:
-                enabled.append("hermes-lark-streaming")
+            if isinstance(enabled, list) and _PLUGIN_NAME not in enabled:
+                # Back up if not already done (e.g. streaming section existed but plugin wasn't listed)
+                _backup_config()
+
+                enabled.append(_PLUGIN_NAME)
                 changed = True
-                _logger.info("Added hermes-lark-streaming to plugins.enabled")
+                _logger.info("Added %s to plugins.enabled", _PLUGIN_NAME)
 
         if changed:
             prepped = _prepare_config(raw)
