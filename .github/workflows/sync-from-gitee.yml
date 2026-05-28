@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      workflows: write
 
     steps:
       - name: Checkout GitHub repo
@@ -42,12 +43,12 @@ jobs:
           git fetch gitee
 
           BRANCH=$(git branch --show-current)
-          git checkout "$BRANCH"
 
-          # 冲突时以 Gitee 为准
-          if ! git merge gitee/master --no-edit --strategy-option theirs; then
-            echo "⚠️ Merge failed, forcing Gitee version"
-            git merge --abort
+          if git merge gitee/master --no-edit --strategy-option theirs 2>/dev/null; then
+            echo "✅ Merge succeeded"
+          else
+            echo "⚠️ Merge conflict, resetting to Gitee version"
+            git merge --abort 2>/dev/null || true
             git reset --hard gitee/master
           fi
 
