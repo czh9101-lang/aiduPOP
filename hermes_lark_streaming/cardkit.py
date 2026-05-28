@@ -251,6 +251,49 @@ def _build_reasoning_panel(
     return panel
 
 
+def _build_error_panel(
+    error_message: str,
+    *,
+    is_aborted: bool = False,
+    expanded: bool = True,
+) -> dict:
+    """Build a collapsible error/interrupt panel — visually consistent with
+    reasoning and tool panels.
+
+    - Error (API failure, tool crash): red border, ❌ title, expanded by default
+    - Interrupt (/stop or new message): orange border, 🛑 title, expanded by default
+    """
+    if is_aborted:
+        en_label, zh_label = _T["interrupt_panel"]
+        border_color = "orange"
+    else:
+        en_label, zh_label = _T["error_panel"]
+        border_color = "red"
+
+    panel = _collapsible_panel(
+        expanded=expanded,
+        title_el={
+            "tag": "plain_text",
+            "content": f"{'🛑' if is_aborted else '❌'} {en_label}",
+            "i18n_content": _i18n(
+                f"{'🛑' if is_aborted else '❌'} {en_label}",
+                f"{'🛑' if is_aborted else '❌'} {zh_label}",
+            ),
+            "text_color": "red" if not is_aborted else "orange",
+            "text_size": "notation",
+        },
+        elements=[{
+            "tag": "markdown",
+            "content": error_message,
+            "text_size": "notation",
+        }],
+        vertical_spacing="8px",
+    )
+    # Override border color to red/orange for visual emphasis
+    panel["border"]["color"] = border_color
+    return panel
+
+
 def _build_footer_elements(
     footer_data: dict | None,
     is_error: bool = False,
@@ -522,13 +565,12 @@ def build_complete_card(
     if tool_steps:
         elements.append(_build_tool_panel(tool_steps, tool_elapsed_ms, expanded=panel_expanded))
 
-    # ── 错误/中断消息展示 ──
-    # 在正文区域显示错误或中断原因（红色提示块）
+    # ── 错误/中断面板 ──
+    # 可折叠面板，与推理面板、工具面板视觉风格一致
     if error_message:
-        elements.append({
-            "tag": "markdown",
-            "content": f"<font color='red'>⚠ {error_message}</font>",
-        })
+        elements.append(_build_error_panel(
+            error_message, is_aborted=is_aborted, expanded=True,
+        ))
 
     content = _downgrade_tables(optimize_markdown_style(text or _T["done"][0]))
     for chunk in _split_long_text(content):
@@ -582,12 +624,11 @@ def build_linear_complete_card(
     elements: list[dict] = []
     has_answer = False
 
-    # ── 错误/中断消息展示 ──
+    # ── 错误/中断面板 ──
     if error_message:
-        elements.append({
-            "tag": "markdown",
-            "content": f"<font color='red'>⚠ {error_message}</font>",
-        })
+        elements.append(_build_error_panel(
+            error_message, is_aborted=is_aborted, expanded=True,
+        ))
 
     for seg in segments:
         if seg.type == "reasoning":

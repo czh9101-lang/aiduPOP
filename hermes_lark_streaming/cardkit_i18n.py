@@ -29,6 +29,8 @@ _T: dict[str, tuple[str, str]] = {
     "done": ("Done.", "完成。"),
     "api_calls": ("API", "API"),
     "history_offset": ("Offset", "偏移量"),
+    "error_panel": ("Error", "错误信息"),
+    "interrupt_panel": ("Interrupted", "中断信息"),
     "compression_exhausted": ("⚠ Context Full", "⚠ 上下文已满"),
 }
 
