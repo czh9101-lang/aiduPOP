@@ -22,10 +22,15 @@ from __future__ import annotations
 
 import contextvars
 import functools
+import importlib
+import importlib.util
 import logging
+import os
+import sys
 import threading
 import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -251,7 +256,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 # ── 检查是否被中断（/stop 或新消息打断） ──
                 # Hermes 的 /stop 不会让 _run_agent 返回 None，而是返回
                 # interrupted=True / partial=True 的 result。
-                # 此时应该显示“已停止”而非“已完成”。
+                # 此时应该显示"已停止"而非"已完成"。
                 is_interrupted = result.get("interrupted", False) or result.get("partial", False)
 
                 card_sent = on_message_completed(
@@ -577,6 +582,142 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
     return wrapper
 
 
+# ── Namespace-collision-safe module resolver ────────────────────────
+
+
+def _resolve_hermes_agent_module() -> tuple[Any, Any] | None:
+    """Resolve Hermes's ``agent.conversation_loop`` module reliably.
+
+    This function works around a **namespace collision** bug on Apple
+    Silicon Macs where a PyPI package named ``agent`` shadows Hermes's
+    own ``agent`` package.  The symptom is::
+
+        ModuleNotFoundError: No module named 'agent.conversation_loop'
+
+    (Python finds *an* ``agent`` package, just not Hermes's one.)
+
+    Resolution strategy (in order of priority):
+
+    1. **sys.modules cache** — if Hermes already imported
+      ``agent.conversation_loop``, it's sitting in ``sys.modules``.
+      Reading it from there bypasses the import machinery entirely and
+      is immune to any path / namespace issues.
+    2. **Anchor-based discovery** — use a known Hermes module
+      (``gateway.run`` or ``run_agent``) as a filesystem anchor to
+      locate the ``agent/`` directory, then load it directly with
+      ``importlib``.
+    3. **Standard import** — ``from agent.conversation_loop import …``
+      as a last resort (works when there's no collision).
+
+    Returns ``(conversation_loop_module, run_conversation_func)`` or
+    ``None`` if the module cannot be found.
+    """
+    # ── Strategy 1: sys.modules ──
+    # Hermes MUST have imported agent.conversation_loop before loading
+    # plugins (it's used by run_agent.py which gateway.run imports).
+    # If it's here, just use it — no path issues possible.
+    cl_mod = sys.modules.get("agent.conversation_loop")
+    if cl_mod is not None:
+        func = getattr(cl_mod, "run_conversation", None)
+        if func is not None:
+            _logger.info(
+                "hermes-lark-streaming: agent.conversation_loop resolved "
+                "via sys.modules (path=%s)",
+                getattr(cl_mod, "__file__", "?"),
+            )
+            return cl_mod, func
+        else:
+            _logger.warning(
+                "hermes-lark-streaming: agent.conversation_loop found in "
+                "sys.modules but has no 'run_conversation' attribute"
+            )
+
+    # ── Strategy 2: Anchor-based discovery ──
+    # Use known Hermes modules to find the repo root, then load
+    # agent/conversation_loop.py directly by file path.
+    for anchor_name in ("gateway.run", "run_agent"):
+        anchor = sys.modules.get(anchor_name)
+        if anchor is None:
+            try:
+                anchor = importlib.import_module(anchor_name)
+            except ImportError:
+                continue
+
+        anchor_file = getattr(anchor, "__file__", None)
+        if not anchor_file:
+            continue
+
+        # gateway/run.py → repo root;  run_agent.py → repo root
+        repo_root = Path(anchor_file).resolve().parent
+        if anchor_name == "gateway.run":
+            repo_root = repo_root.parent
+
+        cl_file = repo_root / "agent" / "conversation_loop.py"
+        if not cl_file.is_file():
+            _logger.debug(
+                "hermes-lark-streaming: anchor %s → %s, but %s not found",
+                anchor_name, repo_root, cl_file,
+            )
+            continue
+
+        _logger.info(
+            "hermes-lark-streaming: found conversation_loop.py via anchor "
+            "%s → %s", anchor_name, cl_file,
+        )
+
+        # Load the module directly by file path, bypassing the
+        # ``agent`` namespace entirely.
+        spec = importlib.util.spec_from_file_location(
+            "agent.conversation_loop",  # canonical name
+            str(cl_file),
+        )
+        if spec is None or spec.loader is None:
+            continue
+
+        try:
+            mod = importlib.util.module_from_spec(spec)
+            # Register in sys.modules so subsequent imports find it
+            sys.modules["agent.conversation_loop"] = mod
+            # Also ensure the parent 'agent' package can find it
+            agent_pkg = sys.modules.get("agent")
+            if agent_pkg is not None:
+                if not hasattr(agent_pkg, "conversation_loop"):
+                    agent_pkg.conversation_loop = mod  # type: ignore[attr-defined]
+            spec.loader.exec_module(mod)
+            func = getattr(mod, "run_conversation", None)
+            if func is not None:
+                _logger.info(
+                    "hermes-lark-streaming: agent.conversation_loop loaded "
+                    "via anchor-based discovery ✓",
+                )
+                return mod, func
+        except Exception as e:
+            _logger.warning(
+                "hermes-lark-streaming: anchor-based load of "
+                "agent.conversation_loop failed: %s", e,
+                exc_info=True,
+            )
+
+    # ── Strategy 3: Standard import ──
+    try:
+        from agent.conversation_loop import run_conversation as _func
+        import agent.conversation_loop as _mod
+        _logger.info(
+            "hermes-lark-streaming: agent.conversation_loop resolved "
+            "via standard import",
+        )
+        return _mod, _func
+    except (ImportError, AttributeError) as e:
+        _logger.warning(
+            "hermes-lark-streaming: agent.conversation_loop standard "
+            "import failed: %s. This is likely caused by a namespace "
+            "collision (another Python package named 'agent' shadowing "
+            "Hermes's 'agent'). Try: pip uninstall agent", e,
+        )
+
+    return None
+
+
 # ── Public entry point ─────────────────────────────────────────────
 
 
@@ -601,11 +742,11 @@ def _detect_hermes_layout() -> dict[str, bool]:
         "has_cron_scheduler": False,
     }
 
-    try:
-        from agent.conversation_loop import run_conversation  # noqa: F401
+    # Use _resolve_hermes_agent_module() instead of bare import —
+    # this handles the Apple Silicon namespace collision bug.
+    resolved = _resolve_hermes_agent_module()
+    if resolved is not None:
         layout["has_conversation_loop"] = True
-    except (ImportError, AttributeError):
-        pass
 
     try:
         from gateway.run import GatewayRunner  # noqa: F401
@@ -700,18 +841,20 @@ def apply_patches() -> None:
     _module_patch_applied = False
     if layout["has_conversation_loop"]:
         # Hermes v0.10+: patch the module-level function (preferred)
-        try:
-            from agent.conversation_loop import run_conversation as _cl_run_conversation
-            import agent.conversation_loop as _cl_mod
-
-            _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
-            _module_patch_applied = True
-            _logger.info("hermes-lark-streaming: agent.conversation_loop module patched ✓")
-        except (ImportError, AttributeError) as e:
-            _logger.warning(
-                "hermes-lark-streaming: agent.conversation_loop found but "
-                "patch failed (%s). Falling back to direct AIAgent patch.", e,
-            )
+        # Use _resolve_hermes_agent_module() to get the module safely,
+        # bypassing any namespace collision.
+        resolved = _resolve_hermes_agent_module()
+        if resolved is not None:
+            _cl_mod, _cl_run_conversation = resolved
+            try:
+                _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
+                _module_patch_applied = True
+                _logger.info("hermes-lark-streaming: agent.conversation_loop module patched ✓")
+            except (AttributeError, TypeError) as e:
+                _logger.warning(
+                    "hermes-lark-streaming: agent.conversation_loop found but "
+                    "patch failed (%s). Falling back to direct AIAgent patch.", e,
+                )
 
     if not _module_patch_applied:
         # Hermes <v0.10 OR module patch failed: use direct AIAgent patch
