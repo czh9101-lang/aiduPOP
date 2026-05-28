@@ -4,14 +4,14 @@
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
-| 1 | Feature | 时间注入（`streaming.inject_time`） | — | 开启后，每条用户消息前自动添加 `[HH:MM:SS CST] ` 时间前缀，让 AI 模型无需调用 `date` 工具即可感知当前时间。时间前缀同时写入 DB（`persist_user_message`），保证前缀缓存一致性；双重注入防护（`threading.local()` + `finally` 重置） |
-| 2 | Bug | `/stop` 后卡片状态显示"已完成"而非"已停止" | `_run_agent` 返回 `interrupted=True` / `partial=True` 时，`on_message_completed` 未传入中断标记 | 检测 `result.interrupted` / `result.partial`，传入 `aborted=True`，卡片显示 🛑 已停止 |
-| 3 | Feature | 错误/中断消息在卡片正文展示 | 原先错误信息仅在页脚显示，不够醒目 | `result.error` 和 `result.interrupt_message` 以可折叠红色/橙色面板显示在卡片正文中（❌ Error / 🛑 Stopped），与推理面板、工具面板视觉风格一致 |
-| 4 | Feature | 页脚新增 `compression_exhausted` 字段 | — | 上下文压缩耗尽时显示 ⚠ 上下文已满 / ⚠ Context Full，提示用户 AI 可能丢失早期对话 |
+| 1 | Feature | 时间注入（`streaming.inject_time`） | — | 每条用户消息前自动添加 `[HH:MM:SS CST]` 时间前缀，同时写入 DB 保证前缀缓存一致性；`threading.local()` + `finally` 双重防护 |
+| 2 | Bug | `/stop` 后卡片状态显示"已完成"而非"已停止" | `on_message_completed` 未传入中断标记 | 检测 `result.interrupted` / `result.partial`，传入 `aborted=True`，卡片显示 🛑 已停止 |
+| 3 | Feature | 错误/中断消息在卡片正文展示 | 原先错误信息仅在页脚显示，不够醒目 | `result.error` 和 `result.interrupt_message` 以可折叠红色/橙色面板显示在卡片正文中，与推理面板、工具面板视觉风格一致 |
+| 4 | Feature | 页脚新增 `compression_exhausted` 字段 | — | 上下文压缩耗尽时显示 ⚠ 上下文已满 |
 | 5 | Chore | 默认页脚字段调整 | — | 调整为 `[status, elapsed, model, api_calls]` + `[tokens, context, history_offset, compression_exhausted]`；`show_label` 默认 `true` |
 | 6 | Feature | 配置文件自动备份 | 卸载后无法恢复原始配置 | 首次修改 `config.yaml` 前自动备份为 `config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming`，仅备份一次 |
-| 7 | Bug | Apple Silicon Mac 报 `ModuleNotFoundError: No module named 'agent.conversation_loop'` | PyPI 第三方包 `agent`（0.1.3）遮蔽 Hermes 自身的 `agent` 包，Python import 找到错误的包 | 新增 `_resolve_hermes_agent_module()` 三级模块解析策略：① `sys.modules` 缓存直接读取 → ② 锚点发现（`gateway.run`/`run_agent` 定位文件路径） → ③ 标准 import 回退；同时 `apply_patches()` 改为架构自适应补丁（`_detect_hermes_layout()`），模块缺失时安全降级而非崩溃 |
-| 8 | Chore | `apply_patches()` 中任何 import 失败导致整个插件崩溃 | V0.9.0 中 `from agent.conversation_loop import ...` 无 try/except，失败后 GatewayRunner/AIAgent/cron 补丁全部不执行 | 所有 import 包裹 try/except，单个模块补丁失败不影响其他补丁，日志清晰标记 ✓/✗/n/a 状态 |
+| 7 | Bug | Apple Silicon Mac 报 `ModuleNotFoundError: No module named 'agent.conversation_loop'` | PyPI 第三方包 `agent` 遮蔽 Hermes 自身的 `agent` 包 | 新增 `_resolve_hermes_agent_module()` 三级模块解析：① sys.modules 缓存 → ② 锚点发现 → ③ 标准 import 回退；模块缺失时安全降级 |
+| 8 | Chore | `apply_patches()` 中任何 import 失败导致整个插件崩溃 | V0.9.0 无 try/except，单个模块失败后全部补丁不执行 | 所有 import 包裹 try/except，单个模块补丁失败不影响其他补丁 |
 
 ## v0.9.0 (2026-05-27)
 
