@@ -143,11 +143,16 @@ streaming:
     fields:
       - [status, elapsed, model, api_calls]
       - [tokens, context, history_offset, compression_exhausted]
-      # Available fields: status, elapsed, model, tokens, context, api_calls, history_offset, compression_exhausted
-      # Each inner list is one row in the footer
-      # history_offset: larger value → longer conversation history; sudden decrease → context compression
-      # api_calls: number of API calls in this session
-      # compression_exhausted: shown when context compression can no longer fit the window (⚠ Compressed)
+      # Available fields:
+      #   status      — Reply status (✅ Completed / ❌ Error / 🛑 Stopped)
+      #   elapsed     — AI response elapsed time
+      #   model       — Model name used
+      #   api_calls   — Number of API calls in this session
+      #   tokens      — Token usage (↑ input ↓ output)
+      #   context     — Context window usage (used/total percentage)
+      #   history_offset — Conversation history offset; larger = longer history, sudden decrease = context compression
+      #   compression_exhausted — Context window is full, compression can no longer fit (⚠ Context Full)
+      # Each inner list is one row in the footer; fields only shown when they have values
     show_label: true         # Show field labels (true/false)
 ```
 

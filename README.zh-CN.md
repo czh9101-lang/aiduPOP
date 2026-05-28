@@ -138,11 +138,16 @@ streaming:
     fields:
       - [status, elapsed, model, api_calls]
       - [tokens, context, history_offset, compression_exhausted]
-      # 可用字段：status, elapsed, model, tokens, context, api_calls, history_offset, compression_exhausted
-      # 每个内层列表为页脚的一行
-      # history_offset：值越大 → 对话历史越长；值突然变小 → 发生了上下文压缩
-      # api_calls：本轮对话的 API 调用次数
-      # compression_exhausted：上下文压缩已耗尽，无法再适应上下文窗口时显示（⚠ 已压缩）
+      # 可用字段说明：
+      #   status      — 回复状态（✅ 已完成 / ❌ 出错 / 🛑 已停止）
+      #   elapsed     — AI 回复耗时
+      #   model       — 使用的模型名称
+      #   api_calls   — 本轮对话的 API 调用次数
+      #   tokens      — Token 用量（↑ 输入 ↓ 输出）
+      #   context     — 上下文窗口用量（已用/总量 百分比）
+      #   history_offset — 对话历史偏移量；值越大对话越长，值突然变小说明发生了上下文压缩
+      #   compression_exhausted — 上下文已满，即使压缩也无法适应上下文窗口时显示（⚠ 上下文已满）
+      # 每个内层列表为页脚的一行，字段仅在有值时显示
     show_label: true         # 是否显示字段标签（true/false）
 ```
 

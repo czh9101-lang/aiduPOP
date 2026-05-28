@@ -29,7 +29,7 @@ _T: dict[str, tuple[str, str]] = {
     "done": ("Done.", "完成。"),
     "api_calls": ("API", "API"),
     "history_offset": ("Offset", "偏移量"),
-    "compression_exhausted": ("⚠ Compressed", "⚠ 已压缩"),
+    "compression_exhausted": ("⚠ Context Full", "⚠ 上下文已满"),
 }
 
 

@@ -254,7 +254,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 # 此时应该显示“已停止”而非“已完成”。
                 is_interrupted = result.get("interrupted", False) or result.get("partial", False)
 
-                if is_interrupted:
+                card_sent = on_message_completed(
                     message_id=ctx["message_id"],
                     answer=result.get("final_response", ""),
                     duration=_elapsed,
