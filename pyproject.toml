@@ -28,3 +28,7 @@ include = ["hermes_lark_streaming*"]
 
 [tool.setuptools.package-data]
 hermes_lark_streaming = ["../plugin.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

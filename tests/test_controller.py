@@ -998,3 +998,68 @@ class TestCronDeliver:
             assert result is False
         finally:
             loop.call_soon_threadsafe(loop.stop)
+
+
+class TestOnCompleted:
+    """on_completed 新增参数测试: compression_exhausted, aborted, error_message."""
+
+    def test_aborted_sets_session_state(self) -> None:
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_abort")
+        session.state = STREAMING
+        session.card_id = "card_abort"
+        ctrl._sessions["msg_abort"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(message_id="msg_abort", aborted=True)
+
+        assert session.state == ABORTED
+
+    def test_error_message_saved_on_session(self) -> None:
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_err")
+        session.state = STREAMING
+        session.card_id = "card_err"
+        ctrl._sessions["msg_err"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(message_id="msg_err", error_message="API timeout")
+
+        assert session.error_message == "API timeout"
+
+    def test_compression_exhausted_in_footer(self) -> None:
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_ctx")
+        session.state = STREAMING
+        session.card_id = "card_ctx"
+        ctrl._sessions["msg_ctx"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(
+                message_id="msg_ctx",
+                compression_exhausted=True,
+            )
+
+        assert session.footer.get("compression_exhausted") is True
+
+    def test_card_session_has_error_message_attribute(self) -> None:
+        session = _make_session("msg_attr")
+        assert hasattr(session, "error_message")
+        assert session.error_message == ""
+
+    def test_aborted_and_error_message_together(self) -> None:
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_both")
+        session.state = STREAMING
+        session.card_id = "card_both"
+        ctrl._sessions["msg_both"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(
+                message_id="msg_both",
+                aborted=True,
+                error_message="User stopped",
+            )
+
+        assert session.state == ABORTED
+        assert session.error_message == "User stopped"
