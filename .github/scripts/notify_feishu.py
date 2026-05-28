@@ -19,7 +19,6 @@ RUN_ID = os.environ.get("RUN_ID", "")
 SERVER_URL = os.environ.get("SERVER_URL", "https://github.com")
 TRIGGER = os.environ.get("TRIGGER", "")
 FORCE = os.environ.get("FORCE", "false")
-HAS_CHANGES = os.environ.get("HAS_CHANGES", "false")
 
 run_url = f"{SERVER_URL}/{REPO}/actions/runs/{RUN_ID}"
 trigger_label = "⏰ 定时同步" if TRIGGER == "schedule" else "👆 手动触发"
