@@ -2,38 +2,21 @@
 
 ## v0.10.0 (2026-05-28)
 
-| # | 类型 | 功能 | 说明 |
-|---|------|------|------|
-| 1 | Feature | 时间注入（`streaming.inject_time`） | 开启后，每条用户消息前自动添加 `[HH:MM:SS CST] ` 时间前缀，让 AI 模型无需调用 `date` 工具即可感知当前时间 |
-| 2 | Bug | `/stop` 后卡片状态显示"已完成"而非"已停止" | 检测 `result.interrupted` / `result.partial`，传入 `aborted=True` 使卡片显示 🛑 已停止 |
-| 3 | Feature | 错误/中断消息在卡片正文展示 | `result.error` 和 `result.interrupt_message` 现在会以红色提示块显示在卡片正文中（而非仅页脚） |
-| 4 | Feature | 页脚新增 `compression_exhausted` 字段 | 上下文压缩耗尽时显示 ⚠ 已压缩 / ⚠ Compressed，提示用户 AI 可能丢失早期对话 |
-| 5 | Chore | 默认页脚字段调整 | `[status, elapsed, model, api_calls]` + `[tokens, context, history_offset, compression_exhausted]`；`show_label` 默认 `true` |
-
-**时间注入实现原理**：
-- 注入点：`_wrap_run_conversation` 和 `_apply_direct_agent_patch`（双保险）
-- 格式：`[HH:MM:SS CST] <原始消息>`，例：`[14:30:05 CST] 你好`
-- 时间前缀同时添加到 `user_message` 和 `persist_user_message`（若已设置），确保 DB 存储的内容与 API 收到的一致
-- 双重注入防护：`threading.local()` 标志位 + `finally` 重置，防止两层 patch 同时生效时重复注入
-
-**Prefix Cache 影响**：
-- **零额外影响**。DB 存储带时间前缀的版本 → 下轮从 DB 加载的历史 = 上轮 API 收到的 → 前缀字节一致 → cache 命中率不变
-- 全程开启/关闭、中途开启/关闭均无额外 cache miss
-
-**Token 开销**：
-- 每条 user message ≈ 5 tokens
-- N 轮对话累计 ≈ (N-1)×5 tokens
-
-**副作用**：
-- 会话查看器（Hermes Web UI）中用户消息将显示时间前缀
-
-**边界情况**：
-- 群聊 `observed_group_context` 场景下 gateway 已设置 `persist_user_message`，时间前缀同时添加到 `persist_user_message` 避免丢失
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | 时间注入（`streaming.inject_time`） | — | 开启后，每条用户消息前自动添加 `[HH:MM:SS CST] ` 时间前缀，让 AI 模型无需调用 `date` 工具即可感知当前时间。时间前缀同时写入 DB（`persist_user_message`），保证前缀缓存一致性；双重注入防护（`threading.local()` + `finally` 重置） |
+| 2 | Bug | `/stop` 后卡片状态显示"已完成"而非"已停止" | `_run_agent` 返回 `interrupted=True` / `partial=True` 时，`on_message_completed` 未传入中断标记 | 检测 `result.interrupted` / `result.partial`，传入 `aborted=True`，卡片显示 🛑 已停止 |
+| 3 | Feature | 错误/中断消息在卡片正文展示 | 原先错误信息仅在页脚显示，不够醒目 | `result.error` 和 `result.interrupt_message` 以可折叠红色/橙色面板显示在卡片正文中（❌ Error / 🛑 Stopped），与推理面板、工具面板视觉风格一致 |
+| 4 | Feature | 页脚新增 `compression_exhausted` 字段 | — | 上下文压缩耗尽时显示 ⚠ 上下文已满 / ⚠ Context Full，提示用户 AI 可能丢失早期对话 |
+| 5 | Chore | 默认页脚字段调整 | — | 调整为 `[status, elapsed, model, api_calls]` + `[tokens, context, history_offset, compression_exhausted]`；`show_label` 默认 `true` |
+| 6 | Feature | 配置文件自动备份 | 卸载后无法恢复原始配置 | 首次修改 `config.yaml` 前自动备份为 `config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming`，仅备份一次 |
+| 7 | Bug | Apple Silicon Mac 报 `ModuleNotFoundError: No module named 'agent.conversation_loop'` | PyPI 第三方包 `agent`（0.1.3）遮蔽 Hermes 自身的 `agent` 包，Python import 找到错误的包 | 新增 `_resolve_hermes_agent_module()` 三级模块解析策略：① `sys.modules` 缓存直接读取 → ② 锚点发现（`gateway.run`/`run_agent` 定位文件路径） → ③ 标准 import 回退；同时 `apply_patches()` 改为架构自适应补丁（`_detect_hermes_layout()`），模块缺失时安全降级而非崩溃 |
+| 8 | Chore | `apply_patches()` 中任何 import 失败导致整个插件崩溃 | V0.9.0 中 `from agent.conversation_loop import ...` 无 try/except，失败后 GatewayRunner/AIAgent/cron 补丁全部不执行 | 所有 import 包裹 try/except，单个模块补丁失败不影响其他补丁，日志清晰标记 ✓/✗/n/a 状态 |
 
 ## v0.9.0 (2026-05-27)
 
-| # | 类型 | 问题 | 原因 | 修复 |
-|---|------|------|------|------|
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
 | 1 | Bug | 卡片内容重复显示 | `interim_assistant_callback` 和 `stream_delta_callback` 包裹同一段文本，原版有 `already_streamed` 守卫防重，monkey patch 无法访问该参数 | 去掉 `interim_assistant_callback` 的 `_thinking_wrapper` 包裹，思考内容仍由 `reasoning_callback`（原生模型推理）处理 |
 | 2 | Bug | 页脚耗时(elapsed)始终不显示 | `_response_time` 是 `_handle_message_with_agent` 的局部变量，不在 `_run_agent` 返回的 `agent_result` 中，`result.get("_response_time", 0)` 永远返回 0，`duration=0` 时 `_render_footer_field` 返回 None 不渲染 | 使用 `time.monotonic()` 自计时，在消息开始时记录 `_msg_start_time`，完成时计算差值作为耗时 |
 | 3 | Bug | CLI 命令 `python -m hermes_lark_streaming` 报模块找不到 | 非标准安装路径下 `hermes_lark_streaming` 不在 `sys.path` 中 | `__main__.py` 新增 `_ensure_importable()` 函数，自动搜索 HERMES_HOME/plugins、site-packages 等常见路径；各子命令添加 ImportError 容错；简化 usage 信息 |
@@ -42,18 +25,18 @@
 
 ## v0.8.6 (2026-05-26)
 
-| # | 问题 | 原因 | 修复 |
-|---|------|------|------|
-| 1 | 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` | `register()` 自动注入顶层 `streaming` 配置段 |
-| 2 | 配置文件格式错误 | `footer.fields` 被序列化为二维数组格式 | `_prepare_config()` 展平为一维列表后写入 |
-| 3 | 卸载后配置残留 | Hermes 的 `plugins uninstall` 只删目录不调 `unregister` | 新增 `cleanup` 命令，先清配置再卸载 |
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 安装后无卡片效果 | 插件 Config 读不到顶层 `streaming` 配置，`enabled` 始终为 `False` | `register()` 自动注入顶层 `streaming` 配置段 |
+| 2 | Bug | 配置文件格式错误 | `footer.fields` 被序列化为二维数组格式 | `_prepare_config()` 展平为一维列表后写入 |
+| 3 | Bug | 卸载后配置残留 | Hermes 的 `plugins uninstall` 只删目录不调 `unregister` | 新增 `cleanup` 命令，先清配置再卸载 |
 
 ## v0.8.5 (2026-05-26)
 
-| # | 问题 | 原因 | 修复 |
-|---|------|------|------|
-| fix1 | 插件加载失败 | 仓库缺少根目录 `__init__.py` | 新增根目录 `__init__.py` 桥接导入 |
-| fix2 | 卡片内容重复 | 回调被多次包装，每段文本被处理两次 | 防重复包装守卫 `_hls_wrapped` 标记 |
-| fix3 | 语法异常 | `setattr` 错位缩进到 `except` 内部 | 修复缩进位置 |
-| fix4 | 后续消息无流式更新 | `contextvars` 不跨线程，`_set_thread_local_ctx()` 未定义 | 引入 `threading.local()` fallback |
-| fix5 | 重启后所有消息无流式更新 | 备份目录干扰命名空间 + `_set_thread_local_ctx()` 未定义 | 删除备份目录 + 定义 `_thread_local_ctx` + 双重保险直接 patch |
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 插件加载失败 | 仓库缺少根目录 `__init__.py` | 新增根目录 `__init__.py` 桥接导入 |
+| 2 | Bug | 卡片内容重复 | 回调被多次包装，每段文本被处理两次 | 防重复包装守卫 `_hls_wrapped` 标记 |
+| 3 | Bug | 语法异常 | `setattr` 错位缩进到 `except` 内部 | 修复缩进位置 |
+| 4 | Bug | 后续消息无流式更新 | `contextvars` 不跨线程，`_set_thread_local_ctx()` 未定义 | 引入 `threading.local()` fallback |
+| 5 | Bug | 重启后所有消息无流式更新 | 备份目录干扰命名空间 + `_set_thread_local_ctx()` 未定义 | 删除备份目录 + 定义 `_thread_local_ctx` + 双重保险直接 patch |

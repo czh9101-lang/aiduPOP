@@ -37,6 +37,10 @@
 - **多语言** — 内置中英文双语卡片文本（状态、工具面板、思考标签等），根据飞书客户端语言自动切换
 - **插件生命周期** — 通过 `hermes plugins install/uninstall` 安装/卸载，无需修改源文件
 - **运行时补丁** — 使用 monkey patching 而非 AST 注入，不修改磁盘上的源文件
+- **错误/中断展示** — 错误和 /stop 中断现在以可折叠的红/橙面板显示在卡片正文中（而非仅页脚），带 🛑 已停止 / ❌ 出错状态
+- **配置备份** — 首次修改 config.yaml 前自动备份（config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming）
+- **命名空间冲突修复** — 通过三级模块解析（sys.modules → 锚点发现 → 标准导入）解决 Apple 芯片 Mac 上的 `ModuleNotFoundError: No module named 'agent.conversation_loop'` 问题
+- **架构自适应补丁** — 启动时探测 Hermes 布局并应用最优补丁策略，模块缺失时优雅降级
 
 ![功能预览](assets/img1.png)
 
@@ -66,11 +70,19 @@ hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
 hermes gateway restart
 ```
 
+安装 DEV 分支（最新功能，可能不太稳定）：
+
+```bash
+git clone -b DEV --depth 1 https://gitee.com/Aowen-Nowor/hermes-lark-streaming.git ~/.hermes/plugins/hermes-lark-streaming
+hermes plugins enable hermes-lark-streaming
+hermes gateway restart
+```
+
 ### 卸载
 
 ```bash
-# 1. 先清理注入的配置（插件代码还在，可以跑）
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup
+# 1. 先清理注入的配置（插件代码还在时执行）
+python3 -m hermes_lark_streaming cleanup
 
 # 2. 卸载插件
 hermes plugins uninstall hermes-lark-streaming
@@ -79,24 +91,30 @@ hermes plugins uninstall hermes-lark-streaming
 hermes gateway restart
 ```
 
+> 如果 `python3 -m hermes_lark_streaming` 找不到，可使用：`$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup`
+
 ### 验证安装
 
 ```bash
 # 检查插件状态
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status
+python3 -m hermes_lark_streaming status
 
 # 验证环境兼容性
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming verify
+python3 -m hermes_lark_streaming verify
 
 # 查看日志
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
 ```
+
+> 如果 `python3 -m hermes_lark_streaming` 找不到，可使用：`$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`（或 `verify`）
 
 ---
 
 ## 配置说明
 
 所有配置项位于 `~/.hermes/config.yaml` 的 `streaming:` 节下。
+
+> **自动注入**：插件首次加载时，会自动在 `config.yaml` 顶层添加 `streaming:` 配置段（使用下方默认值）。卸载时，请先运行 `python3 -m hermes_lark_streaming cleanup` 清除该配置段。
 
 > **注意**：Hermes 原生也有 `display.streaming: false` 配置项，该配置控制 **CLI/TUI 终端**输出（响应是否在终端流式显示），与本插件的流式卡片**无关**。本插件只读取 `streaming:` 节。
 
@@ -132,7 +150,7 @@ streaming:
   linear: true               # 线性模式：单卡片原地更新，支持自动拆卡
   panel_expanded: false      # 完成态卡片中面板（工具、推理）是否保持展开
   card_ttl_sec: 600         # 卡片存活检测超时（秒）
-  inject_time: false         # 在用户消息前注入当前时间（详见下方“时间注入”说明）
+  inject_time: false         # 在用户消息前注入当前时间（详见下方"时间注入"说明）
 
   footer:
     fields:
@@ -200,8 +218,10 @@ display:
 **解决**：
 1. 检查插件是否正确安装：`hermes plugins list`
 2. 查看日志：`grep hermes_lark_streaming ~/.hermes/logs/agent.log`
-3. 验证飞书凭据：`$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`
+3. 验证飞书凭据：`python3 -m hermes_lark_streaming status`
 4. 检查是否存在备份目录干扰：`ls -la ~/.hermes/plugins/ | grep bak`，如有则删除
+
+> 如果 `python3 -m hermes_lark_streaming` 找不到，可使用：`$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`
 
 ### 卡片元素超限
 
@@ -217,10 +237,20 @@ display:
 
 **解决**：v0.9.0 已将表格降级阈值从 3 调整为 10，绝大多数场景不再触发降级。如仍遇到此问题，可在 `cardkit_md.py` 中调整 `_MAX_CARD_TABLES` 值
 
+### Apple Silicon Mac 命名空间冲突
+
+**问题**：Apple 芯片（M 系列）Mac 上安装插件后报错 `ModuleNotFoundError: No module named 'agent.conversation_loop'`
+
+**原因**：PyPI 上存在名为 `agent` 的第三方 Python 包，遮蔽了 Hermes 自身的 `agent` 包，导致 Python import 找到错误的包。
+
+**解决**：v0.10.0+ 已内置三级模块解析策略，可自动绕过此问题。请更新到最新版本。如问题仍然存在，可尝试：`pip uninstall agent`
+
 ---
 
 ## 更新日志
 
 > 完整版本历史请查看 [CHANGELOG.md](CHANGELOG.md)
+
+---
 
 ## 致谢

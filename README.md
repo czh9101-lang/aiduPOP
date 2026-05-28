@@ -37,6 +37,10 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 - **i18n** — Built-in Chinese/English bilingual card text (status, tool panel, thinking labels, etc.), auto-switches based on Feishu client language
 - **Plugin Lifecycle** — Install/uninstall via `hermes plugins install/uninstall`, no source file modification required
 - **Runtime Patches** — Uses monkey patching instead of AST injection, does not modify source files on disk
+- **Error/Interrupt Display** — Errors and /stop interrupts now show as collapsible red/orange panels in card body (not just footer), with 🛑 Stopped / ❌ Error status
+- **Config Backup** — Automatically backs up config.yaml before first modification (config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming)
+- **Namespace Collision Fix** — Resolved `ModuleNotFoundError: No module named 'agent.conversation_loop'` on Apple Silicon Macs via 3-tier module resolution (sys.modules → anchor-based discovery → standard import)
+- **Architecture-Adaptive Patching** — Probes Hermes layout at startup and applies optimal patch strategy, graceful fallback when modules are missing
 
 ![Feature Preview](assets/img1.png)
 
@@ -69,31 +73,43 @@ Enter `Y` when prompted to enable the plugin, then restart the gateway:
 hermes gateway restart
 ```
 
+To install the DEV branch (latest features, may be less stable):
+
+```bash
+git clone -b DEV --depth 1 https://gitee.com/Aowen-Nowor/hermes-lark-streaming.git ~/.hermes/plugins/hermes-lark-streaming
+hermes plugins enable hermes-lark-streaming
+hermes gateway restart
+```
+
 ### Uninstallation
 
 ```bash
-# 1. Clean up injected config first (while plugin code is still available)
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup
+# 1. Clean up injected config (while plugin code is still available)
+python3 -m hermes_lark_streaming cleanup
 
-# 2. Remove plugin files
+# 2. Remove plugin
 hermes plugins uninstall hermes-lark-streaming
 
 # 3. Restart gateway
 hermes gateway restart
 ```
 
+> If `python3 -m hermes_lark_streaming` is not found, use: `$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming cleanup`
+
 ### Verify Installation
 
 ```bash
 # Check plugin status
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status
+python3 -m hermes_lark_streaming status
 
 # Verify environment compatibility
-$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming verify
+python3 -m hermes_lark_streaming verify
 
 # View gateway logs
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
 ```
+
+> If `python3 -m hermes_lark_streaming` is not found, use: `$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status` (or `verify`)
 
 ---
 
@@ -101,7 +117,7 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 
 All configuration items are located under the `streaming:` section in `~/.hermes/config.yaml`.
 
-> **Auto-injection**: When this plugin is first loaded, it automatically adds the `streaming:` section to your `config.yaml` top-level with the defaults below. On uninstall, this section is automatically removed. You only need to manually edit if you want to override specific values.
+> **Auto-injection**: When this plugin is first loaded, it automatically adds the `streaming:` section to your `config.yaml` top-level with the defaults below. On uninstall, run `python3 -m hermes_lark_streaming cleanup` first to remove this section.
 
 > **Note**: Hermes also has a native `display.streaming: false` config which controls **CLI/TUI terminal** output. This is unrelated to this plugin's streaming cards.
 
@@ -205,8 +221,10 @@ display:
 **Solution**:
 1. Check if plugin is correctly installed: `hermes plugins list`
 2. View gateway logs: `grep hermes_lark_streaming ~/.hermes/logs/agent.log`
-3. Verify Feishu credentials: `$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`
+3. Verify Feishu credentials: `python3 -m hermes_lark_streaming status`
 4. Check for backup directory interference: `ls -la ~/.hermes/plugins/ | grep bak`, delete if exists
+
+> If `python3 -m hermes_lark_streaming` is not found, use: `$(dirname $(readlink -f $(which hermes)))/python -m hermes_lark_streaming status`
 
 ### Card Element Limit Exceeded
 
@@ -221,6 +239,14 @@ display:
 **Cause**: Feishu cards have a limit on the number of table elements; tables exceeding the limit are downgraded to code blocks
 
 **Solution**: v0.9.0 has increased the table downgrade threshold from 3 to 10, which covers most scenarios. If you still encounter this issue, adjust `_MAX_CARD_TABLES` in `cardkit_md.py`
+
+### Apple Silicon Mac: ModuleNotFoundError
+
+**Problem**: On Apple Silicon (M-series) Macs, plugin installation fails with `ModuleNotFoundError: No module named 'agent.conversation_loop'`
+
+**Cause**: A third-party Python package named `agent` on PyPI shadows Hermes's own `agent` package in the Python import path.
+
+**Solution**: v0.10.0+ has a 3-tier module resolution strategy that automatically bypasses this issue. Update to the latest version. If the issue persists, try: `pip uninstall agent`
 
 ---
 
