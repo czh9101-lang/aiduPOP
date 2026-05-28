@@ -1063,3 +1063,139 @@ class TestOnCompleted:
 
         assert session.state == ABORTED
         assert session.error_message == "User stopped"
+
+
+# ── on_cron_deliver_async 测试 ──
+
+
+class TestCronDeliverAsync:
+    """on_cron_deliver_async 异步版 cron 推送测试."""
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_disabled(self) -> None:
+        ctrl = StreamCardController()
+        ctrl._cfg = MagicMock()
+        ctrl._cfg.enabled = False
+        loop = asyncio.new_event_loop()
+        try:
+            result = await ctrl.on_cron_deliver_async(
+                chat_id="c1", content="text", loop=loop,
+            )
+            assert result is False
+        finally:
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_empty_content(self) -> None:
+        ctrl = StreamCardController()
+        ctrl._cfg = MagicMock()
+        ctrl._cfg.enabled = True
+        loop = asyncio.new_event_loop()
+        try:
+            result = await ctrl.on_cron_deliver_async(
+                chat_id="c1", content="", loop=loop,
+            )
+            assert result is False
+        finally:
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_empty_chat_id(self) -> None:
+        ctrl = StreamCardController()
+        ctrl._cfg = MagicMock()
+        ctrl._cfg.enabled = True
+        loop = asyncio.new_event_loop()
+        try:
+            result = await ctrl.on_cron_deliver_async(
+                chat_id="", content="hello", loop=loop,
+            )
+            assert result is False
+        finally:
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_success(self) -> None:
+        ctrl = _setup_ctrl()
+        loop = asyncio.new_event_loop()
+        try:
+            with patch.object(ctrl, "_do_cron_deliver", new_callable=AsyncMock):
+                result = await ctrl.on_cron_deliver_async(
+                    chat_id="c1", content="hello", loop=loop,
+                )
+            assert result is True
+        finally:
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_exception(self) -> None:
+        ctrl = _setup_ctrl()
+        loop = asyncio.new_event_loop()
+        try:
+            with patch.object(
+                ctrl, "_do_cron_deliver", new_callable=AsyncMock, side_effect=RuntimeError("API error"),
+            ):
+                result = await ctrl.on_cron_deliver_async(
+                    chat_id="c1", content="hello", loop=loop,
+                )
+            assert result is False
+        finally:
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_awaits_do_cron_deliver(self) -> None:
+        """验证 _do_cron_deliver 被 await 而非 run_coroutine_threadsafe."""
+        ctrl = _setup_ctrl()
+        loop = asyncio.new_event_loop()
+        try:
+            mock_deliver = AsyncMock()
+            with patch.object(ctrl, "_do_cron_deliver", mock_deliver):
+                await ctrl.on_cron_deliver_async(
+                    chat_id="c1", content="hello", loop=loop,
+                )
+            mock_deliver.assert_awaited_once_with("c1", "hello")
+        finally:
+            loop.close()
+
+
+# ── on_aborted 测试 ──
+
+
+class TestOnAborted:
+    """on_aborted 中断处理测试."""
+
+    def test_sets_aborted_state(self) -> None:
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_aborted")
+        session.state = STREAMING
+        ctrl._sessions["msg_aborted"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_aborted(message_id="msg_aborted")
+
+        assert session.state == ABORTED
+
+    def test_calls_complete_session(self) -> None:
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_complete")
+        session.state = STREAMING
+        ctrl._sessions["msg_complete"] = session
+
+        with patch.object(ctrl, "_complete_session") as mock_complete:
+            ctrl.on_aborted(message_id="msg_complete")
+            mock_complete.assert_called_once_with(session)
+
+    def test_skips_when_disabled(self) -> None:
+        ctrl = StreamCardController()
+        ctrl._cfg = MagicMock()
+        ctrl._cfg.enabled = False
+
+        with patch.object(ctrl, "_complete_session") as mock_complete:
+            ctrl.on_aborted(message_id="msg_skip")
+            mock_complete.assert_not_called()
+
+    def test_skips_when_no_session(self) -> None:
+        ctrl = _setup_ctrl()
+
+        with patch.object(ctrl, "_complete_session") as mock_complete:
+            ctrl.on_aborted(message_id="nonexistent")
+            mock_complete.assert_not_called()

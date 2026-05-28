@@ -247,3 +247,31 @@ class TestInjectTime:
     def test_inject_time_streaming_not_dict(self) -> None:
         cfg = self._make_inject_time_config({"streaming": "invalid"})
         assert cfg.inject_time is False
+
+
+class TestLinear:
+    def test_linear_true(self) -> None:
+        cfg = _make_config({"streaming": {"linear": True}})
+        assert cfg.linear is True
+
+    def test_linear_false(self) -> None:
+        cfg = _make_config({"streaming": {"linear": False}})
+        assert cfg.linear is False
+
+    def test_linear_missing_defaults_true(self) -> None:
+        cfg = _make_config({"streaming": {}})
+        assert cfg.linear is True
+
+
+class TestPanelExpanded:
+    def test_panel_expanded_true(self) -> None:
+        cfg = _make_config({"streaming": {"panel_expanded": True}})
+        assert cfg.panel_expanded is True
+
+    def test_panel_expanded_false(self) -> None:
+        cfg = _make_config({"streaming": {"panel_expanded": False}})
+        assert cfg.panel_expanded is False
+
+    def test_panel_expanded_missing_defaults_false(self) -> None:
+        cfg = _make_config({"streaming": {}})
+        assert cfg.panel_expanded is False
