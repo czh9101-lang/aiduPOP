@@ -1,6 +1,24 @@
 # 更新日志 / Changelog
 
-## v0.12.0 (2026-03-04)
+## v0.12.2 (2026-05-29)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 拆卡后依旧超元素：Answer 估算恒为 1，拆卡判断失效 | `_estimate_segment_elements` 对 answer 恒返回 1，但封卡时 answer 会被 `_split_long_text` 拆成 N 个 markdown 元素；流式阶段判断"不超限"，封卡时实际超限 | 修正 answer 估算：按封卡时 `_split_long_text` 实际分块数计算元素数，确保流式阶段拆卡判断基于封卡真实元素数 |
+| 2 | Bug | 单个 Answer 超大时无法内部拆分，只能强行塞入当前卡 | 只有 Tool segment 有内部拆分能力（`split_tool_segment`），Answer segment 缺少对应的拆分机制 | 新增 `split_answer_segment`：按文本块边界拆分 answer segment；新增 `_find_answer_split_offset`：找到当前卡能容纳的最大文本块数；在 `_do_linear_flush` 中增加 answer 内部拆分触发逻辑（对标 tool 的内部拆分） |
+| 3 | Bug | 已创建的 Answer 文本增长后估算不更新，可能导致拆卡延迟 | answer 创建时 `element_estimate = 1`，后续文本增长不再重新估算，`element_count` 中的旧值偏低 | 在 `_do_linear_flush` 步骤 0 增加 answer 估算动态更新：每次 flush 前对已创建的 dirty answer segment 重新估算并更新 `element_count`；增长后超限则触发 answer 内部拆分 + 拆卡 |
+| 4 | Bug | 拆卡后相邻 Answer segment 不会触发继续拆卡 | `_do_linear_flush` 中只在相邻 tool segment 边界触发拆卡，相邻 answer segment 被忽略 | 扩展拆卡触发条件：相邻 answer segment 也触发拆卡（与 tool segment 一致） |
+
+## v0.12.0 (2026-05-29)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Docs | README 功能特性列表改为效果图展示 | 功能特性文字列表不够直观，效果图一目了然 | 中英文 README 的"功能特性 / Features"节替换为"效果预览 / Effect Preview"，仅保留 img1 效果图 |
+| 2 | Bug | Cron 推送卡片从未生效（补丁签名不匹配） | 旧代码 `Scheduler._deliver_result = ...` 必然 `AttributeError`（`_deliver_result` 是模块级函数，不是 `Scheduler` 类方法）；旧 wrapper 签名 `(self, platform_name, chat_id, ...)` 与实际 `(job, content, adapters, loop)` 不匹配 | 改为 patch 模块级函数 `cron.scheduler._deliver_result`；采用临时替换 Feishu adapter 的 `send` 方法策略，卡片替换纯文本（无重复消息），失败时自动降级为纯文本 |
+| 3 | Feature | `/background` 后台任务完成后以卡片形式推送 | 后台任务（`/background`、`/bg`、`/btw`）完成后仅发送纯文本"✅ Background task complete" | 新增 `_wrap_run_background_task` 包装器：使用 `task_id` 作为卡片 message_id；支持话题内回复（thread_id 自动传递）；流式效果（思考、工具调用、回答实时更新）；完成后显示终端卡片（含 footer 信息）；自动抑制原始纯文本消息 |
+| 4 | Feature | 页脚新增 `cache` 字段，显示缓存命中率 | — | 格式：`💾 136.3K/137.4K (99%)`（缓存命中/总输入 tokens × 命中率%）；默认页脚字段精简为 `[status, elapsed, model, cache, compression_exhausted]`；`api_calls`、`tokens`、`context`、`history_offset` 不再默认显示（仍可在 config.yaml 手动添加）；新增 i18n：`Cache {}` / `缓存 {}` |
+
+## v0.11.0 (2026-05-29)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
@@ -9,7 +27,6 @@
 | 3 | Perf | `inject_time` / `show_reasoning` 每次属性访问都读磁盘 | `_reload()` 每次调用都执行 `Path.read_text()` + `yaml.safe_load()`，流式输出期间每 100ms 可能触发多次，高频场景下不必要 | 新增 `_reload_cached()` 方法，带 5 秒 TTL 缓存：5 秒内复用上次读取结果，避免高频属性访问反复读磁盘；配置变更最多延迟 5 秒生效 |
 | 4 | Bug | 并发消息可能漏判中断 | `_started_msg_ids` 是全局 `set`，两个消息同时到达时 `add` / `discard` / 差集运算非原子，可能漏判中断 | 所有 `_started_msg_ids` 操作加 `threading.Lock` 保护，确保并发安全 |
 | 5 | Bug | `on_completed` 被 hermes 双调触发 300317 sequence 冲突 | hermes 两条路径（`_process_message_background` 的 finally + `pop_post_delivery_callback`）在同一 msg_id 上调用 `on_completed`，竞态窗口内两次调用触发 300317 | 新增 `COMPLETING` 状态，状态转移在 `await` 之前同步执行防止双调竞态；300317 错误视为幂等成功（设置 `state=COMPLETED` 并返回 `True`）；`_was_aborted` 保存中断标记供完成方法在 `COMPLETING` 状态下获取 |
-| 6 | Docs | README 功能特性列表改为效果图展示 | 功能特性文字列表不够直观，效果图一目了然 | 中英文 README 的"功能特性 / Features"节替换为"效果预览 / Effect Preview"，仅保留 img1 效果图 |
 
 ## v0.10.2 (2026-05-28)
 

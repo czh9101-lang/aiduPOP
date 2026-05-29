@@ -411,6 +411,17 @@ def _render_footer_field(
             return en_val, zh_val
         return None, None
 
+    if name == "cache":
+        cache_read = data.get("cache_read_tokens", 0) or 0
+        input_total = data.get("input_tokens", 0) or 0
+        if cache_read and input_total:
+            hit_pct = int(cache_read / input_total * 100)
+            v = f"💾 {_compact(cache_read)}/{_compact(input_total)} ({hit_pct}%)"
+            if show_label:
+                return _T["cache"][0].format(v), _T["cache"][1].format(v)
+            return v, v
+        return None, None
+
     return None, None
 
 

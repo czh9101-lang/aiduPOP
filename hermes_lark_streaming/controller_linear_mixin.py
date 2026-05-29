@@ -20,6 +20,7 @@ from .cardkit import (
 from .cardkit_i18n import _T, _i18n
 from .cardkit_md import (
     _downgrade_tables,
+    _split_long_text,
     optimize_markdown_style,
 )
 from .controller_mixin import (
@@ -57,10 +58,19 @@ _FOOTER_RESERVE = 2  # footer 元素预留（hr + markdown）
 
 
 def _estimate_segment_elements(seg: Segment, all_steps: list[dict[str, Any]]) -> int:
-    """估算单个 segment 新增的卡片元素数."""
+    """估算单个 segment 封卡时实际占用的卡片元素数.
+
+    流式阶段 answer 虽只占 1 个 streaming markdown element，
+    但封卡时会被 `_split_long_text` 拆成 N 个 markdown 元素。
+    估算必须对齐封卡实际元素数，否则拆卡判断失效——
+    流式阶段判断"不超限"，封卡时实际超限。
+    """
     if seg.type == "reasoning":
         return 4  # collapsible_panel + plain_text + standard_icon + markdown
     elif seg.type == "answer":
+        if seg.text:
+            content = _downgrade_tables(optimize_markdown_style(seg.text))
+            return max(len(_split_long_text(content)), 1)
         return 1
     elif seg.type == "tool":
         return _estimate_tool_elements(
@@ -178,6 +188,12 @@ class LinearControllerMixin:
                 session.state = STREAMING
             if session.linear and session.linear_state and session.linear_state.has_dirty:
                 self._schedule_linear_flush(session)
+            # ── Signal card readiness ──
+            # Must be set AFTER card_id/card_msg_id are assigned and
+            # session state is transitioned out of CREATING.
+            # _do_linear_complete_inner awaits this event to ensure
+            # the card exists before attempting close_streaming + update.
+            session._card_ready.set()
             _logger.info(
                 "linear card created: msg=%s linear=%s card_id=%s",
                 session.message_id[:12],
@@ -187,6 +203,8 @@ class LinearControllerMixin:
         except Exception:
             _logger.exception("_do_create_linear_card failed")
             session.state = FAILED
+            # Signal readiness even on failure so awaiters don't deadlock
+            session._card_ready.set()
 
     async def _do_linear_flush(self, session: CardSession) -> None:
         """线性模式幂等 flush：按 segment 顺序处理结构性变更，超阈值时拆卡."""
@@ -199,6 +217,50 @@ class LinearControllerMixin:
         assert self._client is not None
         segments = linear_state.segments
         all_steps = session.tool_use.build_display_steps()
+
+        # ── 步骤 0: 重新估算已创建 answer segment 的元素数 ──
+        # answer 在流式阶段只有一个 streaming element，但封卡时会被 _split_long_text
+        # 拆成 N 个 markdown 元素。文本增长后旧估算可能偏低，需要动态更新 element_count
+        # 以确保拆卡判断基于封卡时的实际元素数。
+        # 如果增长后超限，先做 answer 内部拆分再拆卡。
+        for i, seg in enumerate(segments[session.split_index:]):
+            real_i = i + session.split_index
+            if seg.created and seg.type == "answer" and seg.dirty:
+                new_est = _estimate_segment_elements(seg, all_steps)
+                if new_est != seg.element_estimate:
+                    delta = new_est - seg.element_estimate
+                    session.element_count += delta
+                    seg.element_estimate = new_est
+                    _logger.debug(
+                        "answer estimate updated: msg=%s el=%s old=%d new=%d",
+                        session.message_id[:12], seg.el_id,
+                        new_est - delta, new_est,
+                    )
+                # 增长后超限 → answer 内部拆分 + 拆卡
+                if (
+                    session.element_count + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
+                    and not session.split_disabled
+                ):
+                    split_offset = self._find_answer_split_offset(
+                        session.element_count - seg.element_estimate, seg,
+                    )
+                    if split_offset is not None:
+                        linear_state.split_answer_segment(real_i, split_offset)
+                        seg.element_estimate = _estimate_segment_elements(seg, all_steps)
+                        # 新 segment 的估算
+                        new_seg = segments[real_i + 1]
+                        new_seg_est = _estimate_segment_elements(new_seg, all_steps)
+                        new_seg.element_estimate = new_seg_est
+                        # 拆卡：封当前卡到 real_i+1，新卡从 real_i+1 开始
+                        split_ok = await self._do_linear_split(
+                            session, real_i + 1, [], set(), {}, [],
+                        )
+                        if not split_ok:
+                            return
+                        # 拆卡后重新获取 segments 和 all_steps（状态已变化）
+                        segments = linear_state.segments
+                        all_steps = session.tool_use.build_display_steps()
+                        break
 
         # ── 步骤 1: batch_update — 按 segment 顺序处理结构性变更 ──
         actions: list[dict[str, Any]] = []
@@ -216,6 +278,7 @@ class LinearControllerMixin:
                 if session.element_limit_hit:
                     continue
                 estimated = _estimate_segment_elements(seg, all_steps)
+                # ── Tool 内部拆分：按 step 边界拆 ──
                 if (
                     seg.type == "tool"
                     and session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
@@ -229,6 +292,19 @@ class LinearControllerMixin:
                     if split_offset is not None:
                         linear_state.split_tool_segment(i, split_offset)
                         estimated = _estimate_segment_elements(seg, all_steps)
+                # ── Answer 内部拆分：按文本块边界拆 ──
+                if (
+                    seg.type == "answer"
+                    and session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
+                    and not session.split_disabled
+                ):
+                    split_offset = self._find_answer_split_offset(
+                        session.element_count + new_el_total, seg,
+                    )
+                    if split_offset is not None:
+                        linear_state.split_answer_segment(i, split_offset)
+                        estimated = _estimate_segment_elements(seg, all_steps)
+                # ── 超阈值 → 拆卡 ──
                 if (
                     session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
                     and session.element_count + new_el_total > 1
@@ -288,6 +364,11 @@ class LinearControllerMixin:
                     and i + 1 < len(segments)
                     and segments[i + 1].type == "tool"
                     and segments[i + 1].tool_offset == seg.tool_end_offset
+                    and not session.split_disabled
+                ) or (
+                    seg.type == "answer"
+                    and i + 1 < len(segments)
+                    and segments[i + 1].type == "answer"
                     and not session.split_disabled
                 ):
                     split_ok = await self._do_linear_split(
@@ -494,6 +575,32 @@ class LinearControllerMixin:
             estimate = _estimate_tool_elements(start, split_offset, all_steps)
             if base_count + estimate + _FOOTER_RESERVE <= _ELEMENT_THRESHOLD:
                 return split_offset
+        return None
+
+    def _find_answer_split_offset(
+        self,
+        base_count: int,
+        seg: Segment,
+    ) -> int | None:
+        """寻找 answer 文本拆分点，让当前卡保留尽可能多的文本块.
+
+        按 `_split_long_text` 的实际分块边界拆分：
+        1. 将 answer 文本按 2400 字符分块
+        2. 从后往前找，找到当前卡能容纳的最大块数
+        3. 反推字符偏移量作为拆分点
+        """
+        if not seg.text:
+            return None
+        content = _downgrade_tables(optimize_markdown_style(seg.text))
+        chunks = _split_long_text(content)
+        if len(chunks) <= 1:
+            return None
+        # 从后往前找：保留尽可能多的 chunks 在当前卡
+        for keep in range(len(chunks), 0, -1):
+            if base_count + keep + _FOOTER_RESERVE <= _ELEMENT_THRESHOLD:
+                # 反推字符偏移：前 keep 个 chunk 的总长度
+                char_offset = sum(len(c) for c in chunks[:keep])
+                return char_offset
         return None
 
     async def _maybe_rollover_tool_segment(
@@ -718,6 +825,30 @@ class LinearControllerMixin:
 
         await session.flush.wait_for_flush()
         session.flush.mark_completed()
+
+        # ── Wait for card creation to finish ──
+        # When on_completed fires before _do_create_linear_card finishes
+        # (e.g. agent fails fast with HTTP 401), card_id is still None.
+        # Without this await, the card would stay in streaming mode forever
+        # because we skip close_streaming when card_id is None.
+        try:
+            await asyncio.wait_for(session._card_ready.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            _logger.warning(
+                "linear complete: card creation timed out, msg=%s",
+                session.message_id[:12],
+            )
+
+        # If card creation failed, we cannot render a completion card.
+        # Return False so card_sent=False → gateway sends its own text reply.
+        if not session.card_id and not session.card_msg_id:
+            _logger.info(
+                "linear complete: no card to complete, msg=%s state=%s",
+                session.message_id[:12],
+                session.state,
+            )
+            session.state = FAILED
+            return False
 
         linear_state = session.linear_state
         is_error = session.state == FAILED

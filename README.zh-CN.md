@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.12.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.12.2-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 <a href="README.md">English</a> | 中文版
 </p>
 
-为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、工具面板、推理过程等。
+为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、工具面板、推理过程、后台任务卡片等。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >
@@ -131,17 +131,18 @@ streaming:
 
   footer:
     fields:
-      - [status, elapsed, model, api_calls]
-      - [tokens, context, history_offset, compression_exhausted]
+      - [status, elapsed, model, cache, compression_exhausted]
       # 可用字段说明：
       #   status      — 回复状态（✅ 已完成 / ❌ 出错 / 🛑 已停止）
       #   elapsed     — AI 回复耗时
       #   model       — 使用的模型名称
-      #   api_calls   — 本轮对话的 API 调用次数
+      #   cache       — 缓存命中率（💾 缓存命中/总输入 命中率%）
+      #   compression_exhausted — 上下文已满（⚠ 上下文已满）
+      # 以下字段默认不显示 — 在 fields 列表中添加即可启用：
       #   tokens      — Token 用量（↑ 输入 ↓ 输出）
       #   context     — 上下文窗口用量（已用/总量 百分比）
+      #   api_calls   — 本轮对话的 API 调用次数
       #   history_offset — 对话历史偏移量；值越大对话越长，值突然变小说明发生了上下文压缩
-      #   compression_exhausted — 上下文已满，即使压缩也无法适应上下文窗口时显示（⚠ 上下文已满）
       # 每个内层列表为页脚的一行，字段仅在有值时显示
     show_label: true         # 是否显示字段标签（true/false）
 ```
