@@ -464,6 +464,9 @@ def _maybe_wrap_callbacks(agent) -> None:
         return
 
     # ── ANSWER: wrap stream_delta_callback ──
+    # Track the last consumed text hash for dedup with interim_assistant_callback.
+    _stream_consumed_texts: dict[str, str] = {}
+
     if getattr(agent, "stream_delta_callback", None):
         _orig = agent.stream_delta_callback
 
@@ -476,6 +479,8 @@ def _maybe_wrap_callbacks(agent) -> None:
                         "answer_wrapper: consumed text len=%d eid=%s",
                         len(text), eid[:12],
                     )
+                    # Record consumed text for dedup with interim_assistant_callback
+                    _stream_consumed_texts[eid] = text
                     return
                 else:
                     _logger.debug(
@@ -491,12 +496,32 @@ def _maybe_wrap_callbacks(agent) -> None:
     else:
         _logger.debug("_maybe_wrap_callbacks: NO stream_delta_callback on agent")
 
-    # ── THINKING: 不包裹 interim_assistant_callback ──
-    # 原因：Hermes 内部 on_thinking 和 on_answer 可能处理同一段文本，
-    # 原版 AST 注入有 already_streamed 守卫防重，但 monkey patch 无法访问该参数。
-    # 如果两层都包裹，会导致内容重复显示（thinking 一次 + answer 一次）。
-    # 思考内容仍由 reasoning_callback（原生模型推理）处理。
-    # 详见：Bug fix 1 — 重复内容问题
+    # ── THINKING: wrap interim_assistant_callback ──
+    # Routes interim content (status messages, thinking text) to the card.
+    # Dedup: skip if the text was already consumed by stream_delta_callback,
+    # which happens when Hermes processes the same text through both callbacks.
+    # Unlike the old approach (emoji prefix matching), dedup is based on
+    # structural tracking — we compare against what stream_delta already consumed.
+    if getattr(agent, "interim_assistant_callback", None):
+        _orig_interim = agent.interim_assistant_callback
+
+        def _thinking_wrapper(text, *args, **kwargs):
+            try:
+                # Dedup: skip if stream_delta_callback already consumed this text
+                last_consumed = _stream_consumed_texts.get(eid, "")
+                if text and text != last_consumed:
+                    from .patch import on_thinking_delta
+                    on_thinking_delta(message_id=eid, text=text)
+            except Exception:
+                _logger.debug("thinking_wrapper: exception", exc_info=True)
+            # Always call original so Hermes internal state stays consistent
+            return _orig_interim(text, *args, **kwargs)
+
+        agent.interim_assistant_callback = _thinking_wrapper
+        setattr(agent.interim_assistant_callback, "_hls_wrapper", True)
+        _logger.debug("_maybe_wrap_callbacks: interim_assistant_callback wrapped")
+    else:
+        _logger.debug("_maybe_wrap_callbacks: NO interim_assistant_callback on agent")
 
     # ── TOOL: wrap tool_progress_callback ──
     if getattr(agent, "tool_progress_callback", None):
@@ -523,7 +548,7 @@ def _maybe_wrap_callbacks(agent) -> None:
     # Mark wrapper functions so guard can detect them next time
     if getattr(agent, "stream_delta_callback", None):
         setattr(agent.stream_delta_callback, "_hls_wrapper", True)
-    # 不再标记 interim_assistant_callback（未包裹）
+    # interim_assistant_callback is already marked above (in its wrapper block)
     if getattr(agent, "tool_progress_callback", None):
         setattr(agent.tool_progress_callback, "_hls_wrapper", True)
     if getattr(agent, "reasoning_callback", None):

@@ -103,6 +103,8 @@ class ControllerMixin:
             session.flush.set_card_message_ready(True)
             if session.state == CREATING:
                 session.state = STREAMING
+            # Signal card readiness so _do_complete_inner can proceed
+            session._card_ready.set()
             _logger.info(
                 "card created: msg=%s cardkit=%s card_id=%s",
                 session.message_id[:12],
@@ -112,6 +114,8 @@ class ControllerMixin:
         except Exception:
             _logger.exception("_do_create_card failed")
             session.state = FAILED
+            # Signal readiness even on failure so awaiters don't deadlock
+            session._card_ready.set()
 
     async def _do_update_card(self, session: CardSession) -> None:
         if session.state not in (CREATING, STREAMING, COMPLETING):
@@ -284,6 +288,28 @@ class ControllerMixin:
 
         await session.flush.wait_for_flush()
         session.flush.mark_completed()
+
+        # ── Wait for card creation to finish ──
+        # Same race condition fix as linear mode: when on_completed fires
+        # before _do_create_card finishes, card_id/card_msg_id are still None.
+        try:
+            await asyncio.wait_for(session._card_ready.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            _logger.warning(
+                "complete: card creation timed out, msg=%s",
+                session.message_id[:12],
+            )
+
+        # If card creation failed, we cannot render a completion card.
+        # Return False so card_sent=False → gateway sends its own text reply.
+        if not session.card_id and not session.card_msg_id:
+            _logger.info(
+                "complete: no card to complete, msg=%s state=%s",
+                session.message_id[:12],
+                session.state,
+            )
+            session.state = FAILED
+            return False
 
         display = session.text.display_text
         _logger.info(

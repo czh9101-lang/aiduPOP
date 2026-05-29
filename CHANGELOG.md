@@ -1,5 +1,14 @@
 # 更新日志 / Changelog
 
+## v0.12.1 (2026-05-29)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | Agent 快速失败时卡片卡跑马灯，永远无法退出流式模式 | `on_completed` 在卡片创建完成前触发（竞态条件），`card_id` 仍为 None，`_do_linear_complete_inner` 跳过 `close_streaming` 调用，卡片永远停留在 loading 状态 | 新增 `_card_ready: asyncio.Event` 同步机制：卡片创建完成后 set 事件；`_do_linear_complete_inner` / `_do_complete_inner` 在执行前 `await _card_ready.wait()`（超时 30s）；卡片创建失败路径也 set 事件避免死锁 |
+| 2 | Bug | 错误/状态消息（⚠️ 🔄 ❌）不在卡片内显示，以纯文本发送 | `interim_assistant_callback` 未被包装，所有中间状态消息绕过卡片系统直接走 Hermes 原始回调 | 重新包装 `interim_assistant_callback`：通过 `on_thinking_delta` 路由到卡片；去重基于结构化追踪（`_stream_consumed_texts` 对比 `stream_delta_callback` 已消费文本），而非基于 emoji 前缀匹配；始终调用原始回调保持 Hermes 内部状态一致 |
+| 3 | Bug | `card_sent=True` 误报：卡片从未成功显示但网关文本回复被抑制 | `on_completed` 无条件返回 True（只要 session 存在），即使 card_id 为 None 也会抑制网关文本回复，导致用户"什么都看不到" | 卡片完成失败时通过 `_send_text_fallback` 直接发送文本回复作为兜底；新增 `_do_linear_complete_with_fallback` / `_do_complete_with_fallback` 包装器；当卡片不可用时确保用户至少看到文本内容；新增 `FeishuClient.reply_text` 方法 |
+| 4 | Bug | 卡片创建失败后完成流程仍尝试操作不存在的 card_id | `_do_linear_complete_inner` 不检查 card_id 是否为 None 就尝试 `close_streaming` | 新增 `card_id` 和 `card_msg_id` 的空值检查：两者均为 None 时直接返回 False（设置 state=FAILED），不再尝试 API 操作 |
+
 ## v0.12.0 (2026-03-04)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

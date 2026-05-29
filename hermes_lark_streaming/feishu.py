@@ -147,6 +147,25 @@ class FeishuClient:
             return str(resp.data.message_id)
         raise FeishuAPIError("reply_card: response missing message_id")
 
+    async def reply_text(self, message_id: str, text: str) -> str:
+        """回复纯文本消息，返回 message_id."""
+        request = (
+            ReplyMessageRequest.builder()
+            .message_id(message_id)
+            .request_body(
+                ReplyMessageRequestBody.builder()
+                .msg_type("text")
+                .content(self._dumps({"text": text}))
+                .build()
+            )
+            .build()
+        )
+        resp = await self._client.im.v1.message.areply(request)
+        self._check(resp, "reply_text")
+        if resp.data and resp.data.message_id:
+            return str(resp.data.message_id)
+        raise FeishuAPIError("reply_text: response missing message_id")
+
     async def reply_card_by_id(self, message_id: str, card_id: str) -> str:
         """通过 card_id 回复 CardKit 卡片消息，返回 message_id."""
         request = (

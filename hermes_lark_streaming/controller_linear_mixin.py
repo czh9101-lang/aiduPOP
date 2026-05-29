@@ -178,6 +178,12 @@ class LinearControllerMixin:
                 session.state = STREAMING
             if session.linear and session.linear_state and session.linear_state.has_dirty:
                 self._schedule_linear_flush(session)
+            # ── Signal card readiness ──
+            # Must be set AFTER card_id/card_msg_id are assigned and
+            # session state is transitioned out of CREATING.
+            # _do_linear_complete_inner awaits this event to ensure
+            # the card exists before attempting close_streaming + update.
+            session._card_ready.set()
             _logger.info(
                 "linear card created: msg=%s linear=%s card_id=%s",
                 session.message_id[:12],
@@ -187,6 +193,8 @@ class LinearControllerMixin:
         except Exception:
             _logger.exception("_do_create_linear_card failed")
             session.state = FAILED
+            # Signal readiness even on failure so awaiters don't deadlock
+            session._card_ready.set()
 
     async def _do_linear_flush(self, session: CardSession) -> None:
         """线性模式幂等 flush：按 segment 顺序处理结构性变更，超阈值时拆卡."""
@@ -718,6 +726,30 @@ class LinearControllerMixin:
 
         await session.flush.wait_for_flush()
         session.flush.mark_completed()
+
+        # ── Wait for card creation to finish ──
+        # When on_completed fires before _do_create_linear_card finishes
+        # (e.g. agent fails fast with HTTP 401), card_id is still None.
+        # Without this await, the card would stay in streaming mode forever
+        # because we skip close_streaming when card_id is None.
+        try:
+            await asyncio.wait_for(session._card_ready.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            _logger.warning(
+                "linear complete: card creation timed out, msg=%s",
+                session.message_id[:12],
+            )
+
+        # If card creation failed, we cannot render a completion card.
+        # Return False so card_sent=False → gateway sends its own text reply.
+        if not session.card_id and not session.card_msg_id:
+            _logger.info(
+                "linear complete: no card to complete, msg=%s state=%s",
+                session.message_id[:12],
+                session.state,
+            )
+            session.state = FAILED
+            return False
 
         linear_state = session.linear_state
         is_error = session.state == FAILED

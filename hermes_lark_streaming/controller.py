@@ -49,6 +49,7 @@ class CardSession:
     """单条消息的卡片会话状态."""
 
     __slots__ = (
+        "_card_ready",
         "_loop",
         "_was_aborted",
         "anchor_id",
@@ -129,6 +130,7 @@ class CardSession:
         self.split_index: int = 0
         self._was_aborted: bool = False
         self.error_message: str = ""
+        self._card_ready: asyncio.Event = asyncio.Event()
 
 
 class StreamCardController(ControllerMixin, LinearControllerMixin):
@@ -652,9 +654,69 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         """根据 session 线性/非线性选择完成路径."""
         session.flush.mark_completed()
         if session.linear and session.linear_state:
-            self._fire_and_forget(self._do_linear_complete(session), session._loop)
+            self._fire_and_forget(self._do_linear_complete_with_fallback(session), session._loop)
         else:
-            self._fire_and_forget(self._do_complete(session), session._loop)
+            self._fire_and_forget(self._do_complete_with_fallback(session), session._loop)
+
+    async def _do_linear_complete_with_fallback(self, session: CardSession) -> None:
+        """线性模式完成，卡片不可用时回退为文本回复."""
+        try:
+            result = await self._do_linear_complete(session)
+            if not result:
+                await self._send_text_fallback(session)
+        except Exception:
+            _logger.warning(
+                "linear complete with fallback failed: msg=%s",
+                session.message_id[:12],
+                exc_info=True,
+            )
+            await self._send_text_fallback(session)
+
+    async def _do_complete_with_fallback(self, session: CardSession) -> None:
+        """非线性模式完成，卡片不可用时回退为文本回复."""
+        try:
+            result = await self._do_complete(session)
+            if not result:
+                await self._send_text_fallback(session)
+        except Exception:
+            _logger.warning(
+                "complete with fallback failed: msg=%s",
+                session.message_id[:12],
+                exc_info=True,
+            )
+            await self._send_text_fallback(session)
+
+    async def _send_text_fallback(self, session: CardSession) -> None:
+        """卡片不可用时，通过飞书 API 发送文本回复作为兜底.
+
+        当卡片创建失败或完成流程异常时，网关文本回复已被 card_sent=True 抑制。
+        此方法确保用户至少能看到回复内容，避免"什么都看不到"的情况。
+        """
+        if not self._client:
+            return
+        try:
+            # 优先显示错误消息，其次显示回答内容
+            text = session.error_message or session.text.display_text or ""
+            if not text.strip():
+                return
+            # 限制长度避免过长
+            if len(text) > 4000:
+                text = text[:4000] + "..."
+            from .cardkit_md import optimize_markdown_style
+            content = optimize_markdown_style(text) or text
+            reply_id = session.anchor_id or session.message_id
+            await self._client.reply_text(reply_id, content)
+            _logger.info(
+                "text fallback sent: msg=%s len=%d",
+                session.message_id[:12],
+                len(content),
+            )
+        except Exception:
+            _logger.debug(
+                "text fallback failed: msg=%s",
+                session.message_id[:12],
+                exc_info=True,
+            )
 
     def _prune_stale_sessions(self) -> None:
         now = time.time()
