@@ -39,7 +39,7 @@ sign = base64.b64encode(hmac_code).decode("utf-8")
 
 # ── 解析 JUnit XML，按文件聚合 ──
 
-file_summary = []
+failed_summary = []  # 只收集失败的文件
 total_tests = 0
 total_failures = 0
 total_errors = 0
@@ -74,19 +74,14 @@ try:
         total_errors += counts["error"]
         total_skipped += counts["skip"]
 
-        has_issue = counts["fail"] + counts["error"] > 0
-        icon = "❌" if has_issue else "✅"
-
-        if has_issue:
+        if counts["fail"] + counts["error"] > 0:
             detail = f"{counts['total']} ran, {counts['fail']} failed"
             if counts["error"] > 0:
                 detail += f", {counts['error']} errors"
-            file_summary.append(f"{icon} `{fname}` — {detail}")
-        else:
-            file_summary.append(f"{icon} `{fname}` — {counts['total']} passed")
+            failed_summary.append(f"❌ `{fname}` — {detail}")
 
 except Exception as e:
-    file_summary = [f"⚠️ 无法解析测试报告: {e}"]
+    failed_summary = [f"⚠️ 无法解析测试报告: {e}"]
 
 
 # ── 状态判定 ──
@@ -138,7 +133,7 @@ except Exception:
     print("无变更文件记录")
 
 
-# ── 构建飞书卡片（精简版） ──
+# ── 构建飞书卡片 ──
 
 elements = [
     {
@@ -149,29 +144,33 @@ elements = [
                 f"**同步**: ✅ 已推送\n"
                 f"**触发**: {trigger_label}\n"
                 f"**仓库**: {REPO} `master`\n"
-                f"**测试汇总**: {summary_line}"
+                f"**测试汇总**: {status_icon} {status_text} — {summary_line}"
             ),
         },
     },
-    {"tag": "hr"},
-    {
+]
+
+# 只有失败时才展示失败文件列表
+if failed_summary:
+    elements.append({"tag": "hr"})
+    elements.append({
         "tag": "div",
         "text": {
             "tag": "lark_md",
-            "content": "**📋 测试结果**:\n" + "\n".join(file_summary),
+            "content": "**❌ 失败脚本**:\n" + "\n".join(failed_summary),
         },
-    },
-    {"tag": "hr"},
-    {
-        "tag": "action",
-        "actions": [{
-            "tag": "button",
-            "text": {"tag": "plain_text", "content": "🔗 查看详情"},
-            "url": run_url,
-            "type": "primary",
-        }],
-    },
-]
+    })
+
+elements.append({"tag": "hr"})
+elements.append({
+    "tag": "action",
+    "actions": [{
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": "🔗 查看 Actions 详情"},
+        "url": run_url,
+        "type": "primary",
+    }],
+})
 
 payload = {
     "timestamp": timestamp,
@@ -181,7 +180,7 @@ payload = {
         "header": {
             "title": {
                 "tag": "plain_text",
-                "content": f"{status_icon} 同步+测试 - hermes-lark-streaming",
+                "content": "飞书流式卡片动态",
             },
             "template": color,
         },
