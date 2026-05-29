@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.12.2-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.12.4-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -131,20 +131,20 @@ streaming:
 
   footer:
     fields:
-      - [status, elapsed, model, cache, compression_exhausted]
+      - [status, elapsed, model, compression_exhausted]
       # 可用字段说明：
-      #   status      — 回复状态（✅ 已完成 / ❌ 出错 / 🛑 已停止）
+      #   status      — 回复状态（已完成 / 出错 / 已停止）
       #   elapsed     — AI 回复耗时
       #   model       — 使用的模型名称
-      #   cache       — 缓存命中率（💾 缓存命中/总输入 命中率%）
       #   compression_exhausted — 上下文已满（⚠ 上下文已满）
       # 以下字段默认不显示 — 在 fields 列表中添加即可启用：
+      #   cache       — 缓存命中率（💾 缓存命中/总输入 命中率%）
       #   tokens      — Token 用量（↑ 输入 ↓ 输出）
       #   context     — 上下文窗口用量（已用/总量 百分比）
       #   api_calls   — 本轮对话的 API 调用次数
       #   history_offset — 对话历史偏移量；值越大对话越长，值突然变小说明发生了上下文压缩
       # 每个内层列表为页脚的一行，字段仅在有值时显示
-    show_label: true         # 是否显示字段标签（true/false）
+    show_label: false        # 是否显示字段标签（true/false）
 ```
 
 ### 时间注入（`inject_time`）
@@ -206,3 +206,6 @@ display:
 ---
 
 ## 致谢
+
+- [Cheerwhy](https://github.com/Cheerwhy) — 原版 [hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) 作者
+- [![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=48)](https://github.com/joshcheng820222) — 多 Profile 部署修复贡献

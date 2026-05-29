@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from hermes_lark_streaming.config import Config
+from hermes_lark_streaming.config import Config, _get_hermes_config_path
 
 
 def _make_config(raw: dict[str, Any]) -> Config:
@@ -40,7 +41,7 @@ class TestEnabled:
 
 
 class TestFooterFields:
-    _DEFAULT_FIELDS = [["status", "elapsed", "model", "cache", "compression_exhausted"]]
+    _DEFAULT_FIELDS = [["status", "elapsed", "model", "compression_exhausted"]]
 
     def test_normal_2d_fields(self) -> None:
         cfg = _make_config({"streaming": {"footer": {"fields": [["a", "b"], ["c"]]}}})
@@ -363,10 +364,12 @@ class TestReloadCached:
         cfg._reload_cache_at = time.monotonic() - 5.01  # Just over TTL
 
         # Need to mock the actual file reading part
-        with patch("hermes_lark_streaming.config._HERMES_CONFIG_PATH") as mock_path, \
+        # Now uses _get_hermes_config_path() for multi-Profile support
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = "streaming:\n  inject_time: true\n"
+        with patch("hermes_lark_streaming.config._get_hermes_config_path", return_value=mock_path), \
              patch("hermes_lark_streaming.config.yaml") as mock_yaml:
-            mock_path.exists.return_value = True
-            mock_path.read_text.return_value = "streaming:\n  inject_time: true\n"
             mock_yaml.safe_load.return_value = raw_new
 
             result = cfg._reload_cached()
@@ -424,3 +427,36 @@ class TestReloadCached:
 
         assert reload_cached_calls == 1
         assert reload_calls == 0  # _reload should NOT be called
+
+
+class TestGetHermesConfigPath:
+    """_get_hermes_config_path() 动态路径解析测试 — 多 Profile 场景."""
+
+    def test_default_path_when_no_env(self) -> None:
+        """无 HERMES_HOME 环境变量时，使用 ~/.hermes/config.yaml."""
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("HERMES_HOME", None)
+            path = _get_hermes_config_path()
+            assert path == Path.home() / ".hermes" / "config.yaml"
+
+    def test_custom_path_from_env(self) -> None:
+        """HERMES_HOME 设置时，使用自定义路径."""
+        with patch.dict(os.environ, {"HERMES_HOME": "/custom/hermes"}):
+            path = _get_hermes_config_path()
+            assert path == Path("/custom/hermes/config.yaml")
+
+    def test_multi_profile_path(self) -> None:
+        """多 Profile 场景：HERMES_HOME 指向 profile 目录."""
+        with patch.dict(os.environ, {"HERMES_HOME": str(Path.home() / ".hermes" / "profiles" / "bailu")}):
+            path = _get_hermes_config_path()
+            assert path == Path.home() / ".hermes" / "profiles" / "bailu" / "config.yaml"
+
+    def test_path_changes_with_env(self) -> None:
+        """每次调用都重新读取环境变量，不同 HERMES_HOME 返回不同路径."""
+        with patch.dict(os.environ, {"HERMES_HOME": "/path/a"}):
+            path_a = _get_hermes_config_path()
+        with patch.dict(os.environ, {"HERMES_HOME": "/path/b"}):
+            path_b = _get_hermes_config_path()
+        assert path_a != path_b
+        assert str(path_a).startswith("/path/a")
+        assert str(path_b).startswith("/path/b")

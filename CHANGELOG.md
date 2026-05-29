@@ -1,5 +1,22 @@
 # 更新日志 / Changelog
 
+## v0.12.4 (2026-05-29)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Chore | 默认页脚字段精简，`cache` 移出默认列表 | `cache` 字段对多数用户意义不大，默认显示增加视觉噪音 | 默认页脚从 `[status, elapsed, model, cache, compression_exhausted]` 精简为 `[status, elapsed, model, compression_exhausted]`；`cache` 仍可在 config.yaml 手动添加；`show_label` 默认改为 `false`（更简洁） |
+| 2 | Chore | 状态文字去掉 emoji（✅❌🛑），只用纯文字 | emoji 在部分飞书客户端/系统上显示不一致或无法渲染 | `status_completed` 从 `✅ Completed` 改为 `Completed`；`status_error` 从 `❌ Error` 改为 `Error`；`status_stopped` 从 `🛑 Stopped` 改为 `Stopped`；错误/中断面板标题同步去掉 emoji |
+| 3 | Chore | `show_label` 在用户 `config.yaml` 顶层出现是否由插件导致 | 有用户反馈 `show_label` 同时出现在 `streaming` 顶层和 `streaming.footer` 两处 | 确认插件只写入 `streaming.footer.show_label`，不会向 `streaming` 顶层写入 `show_label`；顶层出现的 `show_label` 可能是用户手动配置或其他用途，插件不做迁移/清理，避免影响用户自定义配置 |
+| 4 | Docs | README 致谢新增贡献者 | — | 新增 [joshcheng820222](https://github.com/joshcheng820222)（多 Profile 部署修复贡献） |
+| 5 | Chore | `test_version.py` 每次版本更新都需手动改版本号 | 测试文件中版本号硬编码，版本更新时容易遗漏 | 版本号改为从唯一真源 `plugin.yaml` 动态读取，测试无需随版本更新而修改 |
+
+## v0.12.3 (2026-05-29)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | GitHub Actions CI 测试失败：async 测试函数无法运行 | `pyproject.toml` 的 `dev` 依赖缺少 `pytest-asyncio`，CI 环境安装 `pytest` 后无法识别 `async def` 测试函数 | 添加 `pytest-asyncio>=0.21.0` 到 `dev` 可选依赖；添加 `asyncio_mode = "auto"` 到 pytest 配置，自动发现 async 测试 |
+| 2 | Bug | 多 Profile 部署场景下流式卡片不工作 | `config.py` 和 `plugin.py` 中的 `_HERMES_CONFIG_PATH` 在模块导入时读取 `HERMES_HOME`，但多 Profile 场景下 `HERMES_HOME` 在插件导入后才被 `_apply_profile_override()` 设置，导致路径错误 | 新增 `_get_hermes_config_path()` 函数：每次调用时动态读取 `HERMES_HOME` 环境变量，确保始终使用正确的配置路径；`Config._load()`、`Config._reload_cached()`、`_backup_config()`、`_ensure_streaming_config()`、`_cleanup_config()` 均改用动态路径；保留 `_HERMES_CONFIG_PATH` 常量用于向后兼容 |
+
 ## v0.12.2 (2026-05-29)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

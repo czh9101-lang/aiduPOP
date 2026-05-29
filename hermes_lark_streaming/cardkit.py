@@ -260,8 +260,8 @@ def _build_error_panel(
     """Build a collapsible error/interrupt panel — visually consistent with
     reasoning and tool panels.
 
-    - Error (API failure, tool crash): red border, ❌ title, expanded by default
-    - Interrupt (/stop or new message): orange border, 🛑 title, expanded by default
+    - Error (API failure, tool crash): red border, expanded by default
+    - Interrupt (/stop or new message): orange border, expanded by default
     """
     if is_aborted:
         en_label, zh_label = _T["interrupt_panel"]
@@ -274,11 +274,8 @@ def _build_error_panel(
         expanded=expanded,
         title_el={
             "tag": "plain_text",
-            "content": f"{'🛑' if is_aborted else '❌'} {en_label}",
-            "i18n_content": _i18n(
-                f"{'🛑' if is_aborted else '❌'} {en_label}",
-                f"{'🛑' if is_aborted else '❌'} {zh_label}",
-            ),
+            "content": en_label,
+            "i18n_content": _i18n(en_label, zh_label),
             "text_color": "red" if not is_aborted else "orange",
             "text_size": "notation",
         },
