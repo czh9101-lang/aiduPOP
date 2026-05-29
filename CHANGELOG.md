@@ -13,15 +13,20 @@
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
+| 1 | Docs | README 功能特性列表改为效果图展示 | 功能特性文字列表不够直观，效果图一目了然 | 中英文 README 的"功能特性 / Features"节替换为"效果预览 / Effect Preview"，仅保留 img1 效果图 |
+| 2 | Bug | Cron 推送卡片从未生效（补丁签名不匹配） | 旧代码 `Scheduler._deliver_result = ...` 必然 `AttributeError`（`_deliver_result` 是模块级函数，不是 `Scheduler` 类方法）；旧 wrapper 签名 `(self, platform_name, chat_id, ...)` 与实际 `(job, content, adapters, loop)` 不匹配 | 改为 patch 模块级函数 `cron.scheduler._deliver_result`；采用临时替换 Feishu adapter 的 `send` 方法策略，卡片替换纯文本（无重复消息），失败时自动降级为纯文本 |
+| 3 | Feature | `/background` 后台任务完成后以卡片形式推送 | 后台任务（`/background`、`/bg`、`/btw`）完成后仅发送纯文本"✅ Background task complete" | 新增 `_wrap_run_background_task` 包装器：使用 `task_id` 作为卡片 message_id；支持话题内回复（thread_id 自动传递）；流式效果（思考、工具调用、回答实时更新）；完成后显示终端卡片（含 footer 信息）；自动抑制原始纯文本消息 |
+| 4 | Feature | 页脚新增 `cache` 字段，显示缓存命中率 | — | 格式：`💾 136.3K/137.4K (99%)`（缓存命中/总输入 tokens × 命中率%）；默认页脚字段精简为 `[status, elapsed, model, cache, compression_exhausted]`；`api_calls`、`tokens`、`context`、`history_offset` 不再默认显示（仍可在 config.yaml 手动添加）；新增 i18n：`Cache {}` / `缓存 {}` |
+
+## v0.11.0 (2026-05-29)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
 | 1 | Bug | 飞书卡片元素超限后卡片"卡死"，后续更新全部失败 | `_handle_linear_flush_error` 收到 `CARDKIT_ELEMENT_LIMIT` 错误后仅打日志，无任何恢复措施；下次 flush 继续往同一张卡塞内容 → 继续超限 → 无限循环直到 AI 输出完成 | 超限时自动触发拆卡：封存当前卡，开新卡继续流式输出；设置 `element_limit_hit` 标志，拆卡前跳过新增段避免继续超限；拆卡成功后重置标志和元素计数 |
 | 2 | Bug | 拆卡失败后元素再超限 = 死局 | `split_disabled=True`（拆卡失败降级）后，元素超限无路可走 | 超限拆卡不受 `split_disabled` 限制（`_do_linear_split` 内部已有降级逻辑）；即使拆卡也失败，`element_limit_hit` 标志确保只刷已有段的脏文本，等完成阶段整体重建 |
 | 3 | Perf | `inject_time` / `show_reasoning` 每次属性访问都读磁盘 | `_reload()` 每次调用都执行 `Path.read_text()` + `yaml.safe_load()`，流式输出期间每 100ms 可能触发多次，高频场景下不必要 | 新增 `_reload_cached()` 方法，带 5 秒 TTL 缓存：5 秒内复用上次读取结果，避免高频属性访问反复读磁盘；配置变更最多延迟 5 秒生效 |
 | 4 | Bug | 并发消息可能漏判中断 | `_started_msg_ids` 是全局 `set`，两个消息同时到达时 `add` / `discard` / 差集运算非原子，可能漏判中断 | 所有 `_started_msg_ids` 操作加 `threading.Lock` 保护，确保并发安全 |
 | 5 | Bug | `on_completed` 被 hermes 双调触发 300317 sequence 冲突 | hermes 两条路径（`_process_message_background` 的 finally + `pop_post_delivery_callback`）在同一 msg_id 上调用 `on_completed`，竞态窗口内两次调用触发 300317 | 新增 `COMPLETING` 状态，状态转移在 `await` 之前同步执行防止双调竞态；300317 错误视为幂等成功（设置 `state=COMPLETED` 并返回 `True`）；`_was_aborted` 保存中断标记供完成方法在 `COMPLETING` 状态下获取 |
-| 6 | Docs | README 功能特性列表改为效果图展示 | 功能特性文字列表不够直观，效果图一目了然 | 中英文 README 的"功能特性 / Features"节替换为"效果预览 / Effect Preview"，仅保留 img1 效果图 |
-| 7 | Bug | Cron 推送卡片从未生效（补丁签名不匹配） | 旧代码 `Scheduler._deliver_result = ...` 必然 `AttributeError`（`_deliver_result` 是模块级函数，不是 `Scheduler` 类方法）；旧 wrapper 签名 `(self, platform_name, chat_id, ...)` 与实际 `(job, content, adapters, loop)` 不匹配 | 改为 patch 模块级函数 `cron.scheduler._deliver_result`；采用临时替换 Feishu adapter 的 `send` 方法策略，卡片替换纯文本（无重复消息），失败时自动降级为纯文本 |
-| 8 | Feature | `/background` 后台任务完成后以卡片形式推送 | 后台任务（`/background`、`/bg`、`/btw`）完成后仅发送纯文本"✅ Background task complete" | 新增 `_wrap_run_background_task` 包装器：使用 `task_id` 作为卡片 message_id；支持话题内回复（thread_id 自动传递）；流式效果（思考、工具调用、回答实时更新）；完成后显示终端卡片（含 footer 信息）；自动抑制原始纯文本消息 |
-| 9 | Feature | 页脚新增 `cache` 字段，显示缓存命中率 | — | 格式：`💾 136.3K/137.4K (99%)`（缓存命中/总输入 tokens × 命中率%）；默认页脚字段精简为 `[status, elapsed, model, cache, compression_exhausted]`；`api_calls`、`tokens`、`context`、`history_offset` 不再默认显示（仍可在 config.yaml 手动添加）；新增 i18n：`Cache {}` / `缓存 {}` |
 
 ## v0.10.2 (2026-05-28)
 

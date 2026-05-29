@@ -162,6 +162,9 @@ def _make_session(msg_id: str = "msg_123", *, linear: bool = False) -> CardSessi
     if linear:
         session.linear = True
         session.linear_state = LinearState()
+    # v0.12.1: _card_ready must be set so _do_complete_inner / _do_linear_complete_inner
+    # don't hang for 30 seconds. In production, this is set by _do_create_card / _do_create_linear_card.
+    session._card_ready.set()
     return session
 
 
@@ -175,6 +178,7 @@ def _mock_client() -> AsyncMock:
     client.cardkit_close_streaming = AsyncMock()
     client.cardkit_update = AsyncMock()
     client.update_card = AsyncMock()
+    client.reply_text = AsyncMock(return_value="msg_id_reply")
     return client
 
 
@@ -859,14 +863,17 @@ class TestDoLinearComplete:
 
     @pytest.mark.asyncio
     async def test_no_card_id_skips_close(self) -> None:
+        """v0.12.1: When card_id is None, _do_linear_complete_inner returns False
+        and sets state=FAILED, because card creation never succeeded."""
         ctrl = _setup_ctrl()
         session = _make_session("msg_nocard", linear=True)
         session.state = STREAMING
         session.card_id = None
+        session.card_msg_id = None
         ctrl._sessions["msg_nocard"] = session
 
-        assert await ctrl._do_linear_complete(session) is True
-        assert session.state == COMPLETED
+        assert await ctrl._do_linear_complete(session) is False
+        assert session.state == FAILED
         ctrl._client.cardkit_close_streaming.assert_not_called()
 
     @pytest.mark.asyncio

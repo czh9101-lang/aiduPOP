@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.12.0 (DEV 分支) |
+| 版本 | 0.12.1 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.12.0")
+plugin.yaml (唯一版本号: "0.12.1")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -389,7 +389,7 @@ hermes gateway restart
 | v0.10.1 | 2026-05-28 | FlushController 线程安全修复（跑马灯无文字根因）、线性模式首次文字预填充、on_thinking reasoning_dirty 预防性修复 |
 | v0.10.2 | 2026-05-28 | 时间注入格式优化为 XML 标签 `<time>` （避免 LLM 忽略或模仿）、线性模式冗余 stream_element 调用优化 |
 | v0.11.0 | 2026-05-29 | 超限自动拆卡（卡片不再卡死）、拆卡失败+超限死局修复、Config TTL 缓存（减少磁盘读取）、`_started_msg_ids` 线程安全、`on_completed` 状态机+幂等容错（COMPLETING 状态 + 300317 错误处理） |
-| v0.12.0 | 2026-03-04 | v0.11.0 全部优化 + README 效果图 + Cron 推送卡片补丁修复（adapter.send 临时替换策略）+ `/background` 后台任务卡片 + 页脚 `cache` 缓存命中率字段 + 默认页脚精简（移除 api_calls/history_offset） |
+| v0.12.0 | 2026-03-04 | README 效果图 + Cron 推送卡片补丁修复（adapter.send 临时替换策略）+ `/background` 后台任务卡片 + 页脚 `cache` 缓存命中率字段 + 默认页脚精简（移除 api_calls/history_offset） |
 
 ---
 
@@ -424,4 +424,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-03-04 | Version: 0.12.0 DEV*
+*Last updated: 2026-05-29 | Version: 0.12.1 DEV*
