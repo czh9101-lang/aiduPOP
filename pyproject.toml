@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
 ]
 
@@ -32,3 +33,4 @@ hermes_lark_streaming = ["../plugin.yaml"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"

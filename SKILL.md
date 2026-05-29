@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.12.2 (DEV 分支) |
+| 版本 | 0.12.4 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -78,7 +78,7 @@ monkey_patch.py (运行时拦截)
 | `cardkit.py` | 712 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%） |
 | `cardkit_i18n.py` | 45 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数；新增 `cache` 条目 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤10)、图片 key 剥离、长文本分块(2400 chars) |
-| `config.py` | 180 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer 含 `cache` 字段 |
+| `config.py` | 190 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer `[status, elapsed, model, compression_exhausted]`（`cache` 需手动添加）；`_get_hermes_config_path()` 动态路径（多 Profile 支持） |
 | `feishu.py` | 291 | 飞书 API 客户端 | CardKit v1/v2 + IM API；错误码分类；token 脱敏 |
 | `flush.py` | 156 | 节流调度器 | CardKit 100ms / IM PATCH 1.5s；互斥锁 + re-flush |
 | `linear.py` | 180 | 线性 segment 状态 | `Segment` 数据类；`LinearState` 扁平管理；`split_tool_segment` / `split_answer_segment` 拆分 |
@@ -86,7 +86,7 @@ monkey_patch.py (运行时拦截)
 | `tooluse.py` | 299 | 工具调用追踪 | `ToolStep` / `ToolSession`；敏感信息脱敏 |
 | `image.py` | 129 | 异步图片处理 | 下载远程图→上传飞书→替换 img_key；同步 strip + 异步上传 |
 | `unavailable_guard.py` | 144 | 消息不可用保护 | 删除/撤回检测；30分钟 TTL 缓存 |
-| `plugin.py` | 193 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml |
+| `plugin.py` | 200 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml；`_get_hermes_config_path()` 动态路径（多 Profile 支持）；插件只写 `streaming.footer.show_label`，不迁移用户配置 |
 | `__init__.py`(子包) | 23 | 版本号导出 | 从 `plugin.yaml` 动态读取，失败 → warning + "unknown" |
 | `__init__.py`(根) | 39 | 桥接模块 | `spec_from_file_location` 桥接到子包，解决 Hermes 加载方式兼容 |
 | `setup.py` | 19 | 构建时版本 | 从 `plugin.yaml` 读版本，失败 raise |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.12.2")
+plugin.yaml (唯一版本号: "0.12.4")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -247,8 +247,8 @@ streaming:
   inject_time: false
   footer:
     fields:
-      - [status, elapsed, model, cache, compression_exhausted]
-    show_label: true
+      - [status, elapsed, model, compression_exhausted]
+    show_label: false
 ```
 
 首次安装时 `plugin.py:register()` 自动注入此段（并备份 config.yaml）。
@@ -405,6 +405,8 @@ hermes gateway restart
 | v0.12.0 | 2026-05-29 | README 效果图 + Cron 推送卡片补丁修复（adapter.send 临时替换策略）+ `/background` 后台任务卡片 + 页脚 `cache` 缓存命中率字段 + 默认页脚精简（移除 api_calls/history_offset） |
 | v0.12.1 | 2026-05-29 | 竞态条件修复（`_card_ready` 同步）+ 错误/状态消息卡片内显示（`interim_assistant_callback` 重新包装）+ `card_sent` 误报修复（文本回退）+ card_id 空值检查 |
 | v0.12.2 | 2026-05-29 | 拆卡后依旧超元素修复：answer 估算对齐封卡实际元素数 + answer 内部拆分（`split_answer_segment`）+ answer 增长时动态重新估算 + 相邻 answer segment 拆卡触发 |
+| v0.12.3 | 2026-05-29 | CI 测试修复（添加 pytest-asyncio 依赖）+ 多 Profile 部署修复（`_get_hermes_config_path()` 动态读取 HERMES_HOME） |
+| v0.12.4 | 2026-05-29 | 默认页脚精简（移除 `cache`、`show_label` 默认 `false`）+ 状态文字去 emoji（✅❌🛑→纯文字）+ `show_label` 重复确认（插件只写 `footer.show_label`，不迁移用户配置）+ 致谢新增 joshcheng820222 + `test_version.py` 版本号动态读取 |
 
 ---
 
@@ -440,4 +442,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-05-29 | Version: 0.12.2 DEV*
+*Last updated: 2026-05-29 | Version: 0.12.4 DEV*
