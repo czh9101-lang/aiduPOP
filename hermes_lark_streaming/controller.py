@@ -265,7 +265,15 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 session.reasoning_dirty = True
                 if not session.reasoning_start:
                     session.reasoning_start = time.time()
-            session.text.on_partial(split["answer_text"] or "")
+            # ── Dedup: skip answer text already delivered via stream_delta_callback ──
+            # When streaming is active, answer text arrives via on_answer
+            # (from stream_delta_callback). The interim_assistant_callback also
+            # delivers the same text. Appending it here would duplicate because
+            # session.text.on_partial() appends.
+            # Only push answer text when no streamed answer exists yet
+            # (non-streaming fallback where stream_delta_callback is absent).
+            if not session.text.accumulated:
+                session.text.on_partial(split["answer_text"] or "")
 
         self._schedule_card_update(session)
 
