@@ -86,7 +86,7 @@ monkey_patch.py (运行时拦截)
 | `tooluse.py` | 299 | 工具调用追踪 | `ToolStep` / `ToolSession`；敏感信息脱敏 |
 | `image.py` | 129 | 异步图片处理 | 下载远程图→上传飞书→替换 img_key；同步 strip + 异步上传 |
 | `unavailable_guard.py` | 144 | 消息不可用保护 | 删除/撤回检测；30分钟 TTL 缓存 |
-| `plugin.py` | 200 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml；`_get_hermes_config_path()` 动态路径（多 Profile 支持）；`show_label` 位置修复（自动从 `streaming` 顶层移至 `streaming.footer`） |
+| `plugin.py` | 200 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml；`_get_hermes_config_path()` 动态路径（多 Profile 支持）；插件只写 `streaming.footer.show_label`，不迁移用户配置 |
 | `__init__.py`(子包) | 23 | 版本号导出 | 从 `plugin.yaml` 动态读取，失败 → warning + "unknown" |
 | `__init__.py`(根) | 39 | 桥接模块 | `spec_from_file_location` 桥接到子包，解决 Hermes 加载方式兼容 |
 | `setup.py` | 19 | 构建时版本 | 从 `plugin.yaml` 读版本，失败 raise |
@@ -406,7 +406,7 @@ hermes gateway restart
 | v0.12.1 | 2026-05-29 | 竞态条件修复（`_card_ready` 同步）+ 错误/状态消息卡片内显示（`interim_assistant_callback` 重新包装）+ `card_sent` 误报修复（文本回退）+ card_id 空值检查 |
 | v0.12.2 | 2026-05-29 | 拆卡后依旧超元素修复：answer 估算对齐封卡实际元素数 + answer 内部拆分（`split_answer_segment`）+ answer 增长时动态重新估算 + 相邻 answer segment 拆卡触发 |
 | v0.12.3 | 2026-05-29 | CI 测试修复（添加 pytest-asyncio 依赖）+ 多 Profile 部署修复（`_get_hermes_config_path()` 动态读取 HERMES_HOME） |
-| v0.12.4 | 2026-05-29 | 默认页脚精简（移除 `cache`、`show_label` 默认 `false`）+ 状态文字去 emoji（✅❌🛑→纯文字）+ `show_label` 位置修复（自动从 `streaming` 顶层移至 `streaming.footer`）+ 致谢新增 joshcheng820222 |
+| v0.12.4 | 2026-05-29 | 默认页脚精简（移除 `cache`、`show_label` 默认 `false`）+ 状态文字去 emoji（✅❌🛑→纯文字）+ `show_label` 重复确认（插件只写 `footer.show_label`，不迁移用户配置）+ 致谢新增 joshcheng820222 + `test_version.py` 版本号动态读取 |
 
 ---
 

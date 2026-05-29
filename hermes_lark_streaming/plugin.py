@@ -131,21 +131,12 @@ def _ensure_streaming_config() -> None:
             changed = True
             _logger.info("Injected top-level streaming config into %s", config_path)
 
-        # Clean up misplaced top-level keys that should be under streaming.footer
-        # Some older versions or manual edits may leave `show_label` at the
-        # streaming top level instead of streaming.footer.show_label.
-        streaming = raw.get("streaming")
-        if isinstance(streaming, dict):
-            if "show_label" in streaming:
-                _backup_config()
-                # Move it to the correct location: streaming.footer.show_label
-                footer = streaming.get("footer")
-                if not isinstance(footer, dict):
-                    footer = {}
-                    streaming["footer"] = footer
-                footer.setdefault("show_label", streaming.pop("show_label"))
-                changed = True
-                _logger.info("Moved streaming.show_label → streaming.footer.show_label in %s", config_path)
+        # NOTE: We intentionally do NOT migrate `streaming.show_label` to
+        # `streaming.footer.show_label`.  If `show_label` appears at the
+        # streaming top level (or even the config.yaml top level), it may have
+        # been placed there by the user for other purposes.  Our plugin only
+        # writes `streaming.footer.show_label` and never touches user-defined
+        # keys outside that scope.
 
         # Ensure plugins.enabled includes this plugin
         plugins = raw.get("plugins")

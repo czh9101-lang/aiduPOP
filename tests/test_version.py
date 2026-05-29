@@ -1,7 +1,7 @@
 """Tests for version reading logic in __init__.py and setup.py.
 
 Covers:
-  - hermes_lark_streaming.__version__ reads "0.12.4" from plugin.yaml
+  - hermes_lark_streaming.__version__ matches the version in plugin.yaml
   - Fallback to "unknown" when plugin.yaml is missing
   - Fallback to "unknown" when plugin.yaml has no version: field
   - setup.py raises FileNotFoundError when plugin.yaml is missing
@@ -26,6 +26,19 @@ import hermes_lark_streaming
 # ---------------------------------------------------------------------------
 
 _SETUP_PY = Path(__file__).resolve().parent.parent / "setup.py"
+_PLUGIN_YAML = Path(__file__).resolve().parent.parent / "plugin.yaml"
+
+
+def _read_plugin_yaml_version() -> str:
+    """Read version from plugin.yaml (single source of truth).
+
+    This avoids hardcoding the version number in the test file,
+    so the test never needs updating on version bumps.
+    """
+    for line in _PLUGIN_YAML.read_text(encoding="utf-8").splitlines():
+        if line.startswith("version:"):
+            return line.split(":", 1)[1].strip().strip('"').strip("'")
+    raise ValueError("No 'version:' field found in plugin.yaml")
 
 
 def _is_plugin_yaml_path(p: Path) -> bool:
@@ -46,8 +59,9 @@ class TestInitVersion:
     """Tests for ``hermes_lark_streaming.__version__``."""
 
     def test_version_reads_correct_value(self) -> None:
-        """__version__ should be '0.12.4' as defined in plugin.yaml."""
-        assert hermes_lark_streaming.__version__ == "0.12.4"
+        """__version__ should match the version defined in plugin.yaml."""
+        expected = _read_plugin_yaml_version()
+        assert hermes_lark_streaming.__version__ == expected
 
     def test_version_fallback_when_plugin_yaml_missing(self) -> None:
         """__version__ falls back to 'unknown' when plugin.yaml does not exist."""
