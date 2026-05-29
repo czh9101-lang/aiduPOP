@@ -14,6 +14,7 @@ from hermes_lark_streaming.controller_linear_mixin import _estimate_segment_elem
 from hermes_lark_streaming.controller_mixin import (
     ABORTED,
     COMPLETED,
+    COMPLETING,
     FAILED,
     STREAMING,
 )
@@ -21,6 +22,7 @@ from hermes_lark_streaming.feishu import (
     CARDKIT_CONTENT_FAILED,
     CARDKIT_ELEMENT_LIMIT,
     CARDKIT_RATE_LIMITED,
+    CARDKIT_SEQUENCE_CONFLICT,
     CARDKIT_STREAMING_CLOSED,
     FeishuAPIError,
     FeishuClient,
@@ -824,7 +826,7 @@ class TestDoLinearComplete:
 
         assert await ctrl._do_linear_complete(session) is True
         assert client.cardkit_close_streaming.call_count == 1
-        assert call_count == 2
+        assert call_count == 1
 
     @pytest.mark.asyncio
     async def test_three_retries_exhausted(self) -> None:
@@ -1020,7 +1022,8 @@ class TestOnCompleted:
         with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
             ctrl.on_completed(message_id="msg_abort", aborted=True)
 
-        assert session.state == ABORTED
+        assert session._was_aborted is True
+        assert session.state == COMPLETING
 
     def test_error_message_saved_on_session(self) -> None:
         ctrl = _setup_ctrl()
@@ -1068,7 +1071,8 @@ class TestOnCompleted:
                 error_message="User stopped",
             )
 
-        assert session.state == ABORTED
+        assert session._was_aborted is True
+        assert session.state == COMPLETING
         assert session.error_message == "User stopped"
 
 
@@ -1536,3 +1540,202 @@ class TestElementLimitHit:
         assert session.linear_state.segments[0].dirty is False
         assert session.linear_state.segments[1].dirty is False
         ctrl._client.cardkit_stream_element.assert_called()
+
+
+# ── 状态机 + 幂等容错测试 ──
+
+
+class TestStateMachineIdempotent:
+    """on_completed 状态机幂等守卫 + COMPLETING 状态阻塞测试."""
+
+    def test_on_completed_completing_state_returns_true(self) -> None:
+        """session 在 COMPLETING 状态时，on_completed 应直接返回 True 而不调用 _complete_session."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_completing")
+        session.state = COMPLETING
+        session.card_id = "card_completing"
+        ctrl._sessions["msg_completing"] = session
+
+        with patch.object(ctrl, "_complete_session") as mock_complete:
+            result = ctrl.on_completed(message_id="msg_completing")
+
+        assert result is True
+        mock_complete.assert_not_called()
+
+    def test_on_completed_completed_state_returns_true(self) -> None:
+        """session 在 COMPLETED 状态时，on_completed 应直接返回 True 而不调用 _complete_session."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_done")
+        session.state = COMPLETED
+        session.card_id = "card_done"
+        ctrl._sessions["msg_done"] = session
+
+        with patch.object(ctrl, "_complete_session") as mock_complete:
+            result = ctrl.on_completed(message_id="msg_done")
+
+        assert result is True
+        mock_complete.assert_not_called()
+
+    def test_on_completed_redirected_completing_state(self) -> None:
+        """重定向的 session 在 COMPLETING 状态时，on_completed 也应返回 True."""
+        ctrl = _setup_ctrl()
+        old_session = _make_session("msg_old")
+        old_session.state = ABORTED
+        old_session.card_id = "card_old"
+        ctrl._sessions["msg_old"] = old_session
+
+        new_session = _make_session("msg_new")
+        new_session.state = COMPLETING
+        new_session.card_id = "card_new"
+        ctrl._sessions["msg_new"] = new_session
+
+        ctrl._interrupt_map["msg_old"] = "msg_new"
+
+        with patch.object(ctrl, "_complete_session") as mock_complete:
+            result = ctrl.on_completed(message_id="msg_old")
+
+        assert result is True
+        mock_complete.assert_not_called()
+
+    def test_on_completed_double_call_idempotent(self) -> None:
+        """连续两次调用 on_completed，第二次应直接返回 True 而不重复 _complete_session."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_double")
+        session.state = STREAMING
+        session.card_id = "card_double"
+        ctrl._sessions["msg_double"] = session
+
+        complete_call_count = 0
+        original_complete = ctrl._complete_session
+
+        def counting_complete(s: CardSession) -> None:
+            nonlocal complete_call_count
+            complete_call_count += 1
+            original_complete(s)
+
+        ctrl._complete_session = counting_complete  # type: ignore[assignment]
+
+        # First call - should proceed normally
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            result1 = ctrl.on_completed(message_id="msg_double")
+
+        assert result1 is True
+        assert complete_call_count == 1
+
+        # Second call - should return True immediately due to COMPLETING state
+        result2 = ctrl.on_completed(message_id="msg_double")
+        assert result2 is True
+        assert complete_call_count == 1  # No additional call
+
+    def test_was_aborted_preserved_in_completing(self) -> None:
+        """on_completed(aborted=True) 设置 _was_aborted=True 且 state=COMPLETING."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_wa")
+        session.state = STREAMING
+        session.card_id = "card_wa"
+        ctrl._sessions["msg_wa"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(message_id="msg_wa", aborted=True)
+
+        assert session._was_aborted is True
+        assert session.state == COMPLETING
+
+    def test_completing_blocks_schedule_linear_flush(self) -> None:
+        """COMPLETING 状态下 _schedule_linear_flush 应跳过."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_block_flush", linear=True)
+        session.state = COMPLETING
+        session.card_id = "card_block"
+        ctrl._sessions["msg_block_flush"] = session
+
+        with patch.object(session, "flush") as mock_flush:
+            ctrl._schedule_linear_flush(session)
+            mock_flush.schedule_update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_completing_blocks_do_linear_flush(self) -> None:
+        """COMPLETING 状态下 _do_linear_flush 应直接返回."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_block_doflush", linear=True)
+        session.state = COMPLETING
+        session.card_id = "card_block"
+        session.linear_state.on_answer_delta("text")
+        ctrl._sessions["msg_block_doflush"] = session
+
+        await ctrl._do_linear_flush(session)
+
+        ctrl._client.cardkit_batch_update.assert_not_called()
+        ctrl._client.cardkit_stream_element.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_completing_blocks_do_tool_use_status_update(self) -> None:
+        """COMPLETING 状态下 _do_tool_use_status_update 应直接返回."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_block_tool", linear=True)
+        session.state = COMPLETING
+        session.card_id = "card_block"
+        session.use_cardkit = True
+        ctrl._sessions["msg_block_tool"] = session
+
+        await ctrl._do_tool_use_status_update(session)
+
+        ctrl._client.cardkit_batch_update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_completing_blocks_do_reasoning_update(self) -> None:
+        """COMPLETING 状态下 _do_reasoning_update 应直接返回."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_block_reason", linear=True)
+        session.state = COMPLETING
+        session.card_id = "card_block"
+        session.use_cardkit = True
+        session.reasoning_dirty = True
+        ctrl._sessions["msg_block_reason"] = session
+
+        await ctrl._do_reasoning_update(session)
+
+        ctrl._client.cardkit_stream_element.assert_not_called()
+
+
+class TestSequenceConflictIdempotent:
+    """300317 CARDKIT_SEQUENCE_CONFLICT 幂等成功测试."""
+
+    @pytest.mark.asyncio
+    async def test_linear_complete_300317_idempotent_success(self) -> None:
+        """_do_linear_complete_inner 遇到 300317 时应设 COMPLETED 并返回 True."""
+        ctrl = _setup_ctrl()
+        client = ctrl._client
+        client.cardkit_close_streaming = AsyncMock()
+        client.cardkit_update = AsyncMock(
+            side_effect=FeishuAPIError("conflict", code=CARDKIT_SEQUENCE_CONFLICT)
+        )
+
+        session = _make_session("msg_317l", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_317l"
+        session.card_msg_id = "msg_317l_reply"
+        ctrl._sessions["msg_317l"] = session
+
+        assert await ctrl._do_linear_complete(session) is True
+        assert session.state == COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_do_complete_300317_idempotent_success(self) -> None:
+        """_do_complete_inner 遇到 300317 时应设 COMPLETED 并返回 True."""
+        ctrl = _setup_ctrl()
+        client = ctrl._client
+        client.cardkit_close_streaming = AsyncMock()
+        client.cardkit_update = AsyncMock(
+            side_effect=FeishuAPIError("conflict", code=CARDKIT_SEQUENCE_CONFLICT)
+        )
+
+        session = _make_session("msg_317n")
+        session.state = STREAMING
+        session.card_id = "card_317n"
+        session.card_msg_id = "msg_317n_reply"
+        session.use_cardkit = True
+        ctrl._sessions["msg_317n"] = session
+
+        assert await ctrl._do_complete(session) is True
+        assert session.state == COMPLETED
