@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.11.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.12.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -24,21 +24,9 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 
 ---
 
-## Features
+## Effect Preview
 
-- **Streaming Cards** — Real-time AI response display in interactive cards with typing effect
-- **Linear Mode** — Single-card dynamic rendering of thinking, tool calls and answers, with automatic card splitting
-- **CardKit v2.0** — Prioritizes Feishu CardKit streaming API, auto-falls back to IM PATCH
-- **Terminal Cards** — Shows complete results including token usage, elapsed time, etc.
-- **Message Protection** — Auto-terminates updates when messages are deleted/recalled
-- **Image Parsing** — Auto-detects markdown image references, downloads and uploads as Feishu img_key
-- **Interrupt Handling** — Handles /stop command and message interrupts, displays interrupt status and auto-starts new session
-- **i18n** — Built-in Chinese/English bilingual card text, auto-switches based on Feishu client language
-- **Plugin Lifecycle** — Install/uninstall via `hermes plugins`, no source file modification required
-- **Runtime Patches** — Uses monkey patching instead of AST injection, does not modify source files on disk
-- **Idempotent Completion** — Prevents duplicate card completions when Hermes calls on_completed twice, with state machine guard and 300317 error handling
-
-![Feature Preview](assets/img1.png)
+![Effect Preview](assets/img1.png)
 
 ---
 

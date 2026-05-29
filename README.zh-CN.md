@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.11.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.12.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -24,21 +24,9 @@
 
 ---
 
-## 功能特性
+## 效果预览
 
-- **流式卡片** — AI 响应实时在交互式卡片中展示，带打字机效果
-- **线性模式** — 单卡片动态渲染思考、工具调用和答案，支持自动拆卡
-- **CardKit v2.0** — 优先使用飞书 CardKit 流式 API，自动降级到 IM PATCH
-- **终端卡片** — 完成后显示完整结果，包括 token 使用量、耗时等信息
-- **消息保护** — 检测消息被删除/撤回后自动终止更新
-- **图片解析** — 自动识别 markdown 图片引用，下载并上传为飞书 img_key
-- **中断处理** — 处理 /stop 命令和消息中断，显示中断状态并自动开启新会话
-- **多语言** — 内置中英文双语卡片文本，根据飞书客户端语言自动切换
-- **插件管理** — 通过 `hermes plugins` 安装/卸载，无需修改源文件
-- **运行时补丁** — 使用 monkey patching，不修改磁盘上的源文件
-- **幂等完成** — 防止 Hermes 双调 on_completed 导致重复完成，通过状态机守卫和 300317 错误处理实现
-
-![功能预览](assets/img1.png)
+![效果预览](assets/img1.png)
 
 ---
 
