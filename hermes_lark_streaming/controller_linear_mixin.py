@@ -126,7 +126,19 @@ class LinearControllerMixin:
         if reasoning and self._cfg.show_reasoning:
             linear_state.on_reasoning_delta(reasoning)
         if answer:
-            linear_state.on_answer_delta(answer)
+            # ── Dedup: skip answer text already delivered via stream_delta_callback ──
+            # When streaming is active, answer text arrives incrementally via
+            # stream_delta_callback → on_answer_delta → linear_state.on_answer_delta.
+            # The interim_assistant_callback also delivers the same text in
+            # accumulated form.  Appending it here would cause duplication because
+            # linear_state.on_answer_delta APPENDS to the existing segment.
+            # Only push answer text when no answer segment has text yet
+            # (non-streaming fallback where stream_delta_callback is absent).
+            _has_streamed_answer = any(
+                seg.type == "answer" and seg.text for seg in linear_state.segments
+            )
+            if not _has_streamed_answer:
+                linear_state.on_answer_delta(answer)
         if not (reasoning and self._cfg.show_reasoning) and not answer:
             return
         self._schedule_linear_flush(session)
