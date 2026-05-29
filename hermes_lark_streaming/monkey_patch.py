@@ -11,7 +11,7 @@ when the plugin loads.
     GatewayRunner._run_agent                 → event_message_id injection + COMPLETE (after)
     AIAgent.run_conversation                 → wraps all 6 callbacks (ANSWER, THINKING,
                                                 TOOL, REASONING, BACKGROUND_REVIEW)
-    Scheduler._deliver_result                → redirect cron Feishu deliveries to CardKit
+    cron.scheduler._deliver_result           → redirect cron Feishu deliveries to CardKit
 
 Message context (``message_id``, ``event_message_id``, ``chat_id``, …) is
 propagated through a ``contextvars.ContextVar`` — safe within a single async
@@ -264,6 +264,14 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 # 此时应该显示"已停止"而非"已完成"。
                 is_interrupted = result.get("interrupted", False) or result.get("partial", False)
 
+                # ── Extract cache tokens from agent reference ──
+                # _maybe_wrap_callbacks stores _agent_ref in ctx when wrapping
+                # callbacks.  We read cache_read_tokens / cache_write_tokens
+                # from the agent object for the footer's cache hit rate display.
+                _agent_ref = ctx.get("_agent_ref")
+                cache_read = getattr(_agent_ref, "session_cache_read_tokens", 0) if _agent_ref else 0
+                cache_write = getattr(_agent_ref, "session_cache_write_tokens", 0) if _agent_ref else 0
+
                 card_sent = on_message_completed(
                     message_id=ctx["message_id"],
                     answer=result.get("final_response", ""),
@@ -272,6 +280,8 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     tokens={
                         "input_tokens": result.get("input_tokens", 0),
                         "output_tokens": result.get("output_tokens", 0),
+                        "cache_read_tokens": cache_read,
+                        "cache_write_tokens": cache_write,
                     },
                     context={
                         "used_tokens": result.get("last_prompt_tokens", 0),
@@ -558,42 +568,258 @@ def _maybe_wrap_callbacks(agent) -> None:
 
         agent.background_review_callback = _bg_wrapper
 
+    # ── Store agent reference for cache token extraction (Feature 2-c) ──
+    ctx = _msg_ctx.get()
+    if ctx is not None:
+        ctx["_agent_ref"] = agent
+        _thread_local_ctx.data = dict(ctx)
+
+
+# ── Background task wrapper ───────────────────────────────────────
+
+
+def _wrap_run_background_task(orig: Callable) -> Callable:
+    """Inject START/COMPLETE hooks for ``/background`` tasks so they get streaming cards.
+
+    Background tasks run in a fire-and-forget asyncio task.  There is no
+    Feishu ``message_id`` (the user's ``/background`` command message_id is
+    already used by the main session).  We use the ``task_id``
+    (e.g. ``bg_HHMMSS_xxxxxx``) as the message_id for the card session.
+
+    The card is created as a **new message** (not a reply), since there is no
+    original message to reply to in the background context.
+
+    To prevent the original ``_run_background_task`` from also sending a plain
+    text "✅ Background task complete" message (which would duplicate our card),
+    we temporarily replace the Feishu adapter's ``send`` method with our own
+    that suppresses the delivery when our card was already sent.
+    """
+
+    @functools.wraps(orig)
+    async def wrapper(self, prompt, source, task_id, **kwargs):
+        # Only intercept Feishu platform
+        platform_name = getattr(getattr(source, "platform", None), "value", "").lower()
+        if platform_name not in ("feishu", "lark"):
+            return await orig(self, prompt, source, task_id, **kwargs)
+
+        chat_id = getattr(source, "chat_id", "")
+
+        # Set up message context so _maybe_wrap_callbacks works
+        _msg_ctx.set({
+            "message_id": task_id,
+            "chat_id": chat_id,
+            "anchor_id": None,  # No reply anchor for background tasks
+            "event_message_id": task_id,  # Use task_id so callbacks find a valid eid
+            "card_sent": False,
+            "_msg_start_time": time.monotonic(),
+            "_agent_ref": None,  # Will be filled by _maybe_wrap_callbacks
+        })
+        _thread_local_ctx.data = dict(_msg_ctx.get())
+
+        # ── Fire START hook ──
+        try:
+            from .patch import on_message_started
+            on_message_started(message_id=task_id, chat_id=chat_id, anchor_id=None)
+        except Exception:
+            _logger.debug("background task START hook failed", exc_info=True)
+
+        # ── Wrap adapter.send to suppress duplicate text delivery ──
+        adapter = None
+        original_send = None
+
+        try:
+            if hasattr(self, "adapters") and source.platform:
+                adapter = self.adapters.get(source.platform)
+        except Exception:
+            pass
+
+        if adapter:
+            original_send = adapter.send
+
+            async def _intercepting_send(chat_id_send, content, **send_kwargs):
+                """Suppress plain text delivery when our card was sent."""
+                ctx = _msg_ctx.get()
+                if ctx and ctx.get("card_sent"):
+                    _logger.debug(
+                        "background task: suppressing adapter.send (card already sent), chat=%s",
+                        chat_id_send[:12] if chat_id_send else "?",
+                    )
+                    try:
+                        from gateway.platforms.base import SendResult
+                        return SendResult(success=True)
+                    except (ImportError, AttributeError):
+                        return None
+                return await original_send(chat_id_send, content, **send_kwargs)
+
+            adapter.send = _intercepting_send
+
+        try:
+            result = await orig(self, prompt, source, task_id, **kwargs)
+        finally:
+            if original_send and adapter:
+                adapter.send = original_send
+
+        # ── Fire COMPLETE hook ──
+        ctx = _msg_ctx.get()
+        if ctx is not None:
+            try:
+                from .patch import on_message_completed
+
+                _elapsed = time.monotonic() - ctx.get("_msg_start_time", time.monotonic())
+
+                # Extract cache tokens from agent reference (set by _maybe_wrap_callbacks)
+                _agent_ref = ctx.get("_agent_ref")
+                cache_read = getattr(_agent_ref, "session_cache_read_tokens", 0) if _agent_ref else 0
+                cache_write = getattr(_agent_ref, "session_cache_write_tokens", 0) if _agent_ref else 0
+
+                card_sent = on_message_completed(
+                    message_id=task_id,
+                    answer=(result or {}).get("final_response", ""),
+                    duration=_elapsed,
+                    model=(result or {}).get("model", ""),
+                    tokens={
+                        "input_tokens": (result or {}).get("input_tokens", 0),
+                        "output_tokens": (result or {}).get("output_tokens", 0),
+                        "cache_read_tokens": cache_read,
+                        "cache_write_tokens": cache_write,
+                    },
+                    context={
+                        "used_tokens": (result or {}).get("last_prompt_tokens", 0),
+                        "max_tokens": (result or {}).get("context_length", 0),
+                    },
+                    api_calls=(result or {}).get("api_calls", 0),
+                    history_offset=(result or {}).get("history_offset", 0),
+                    compression_exhausted=(result or {}).get("compression_exhausted", False),
+                    aborted=False,
+                    error_message=(result or {}).get("error") or "",
+                )
+
+                if card_sent:
+                    ctx["card_sent"] = True
+                    # Mark result so upstream knows card was sent
+                    if result is not None and isinstance(result, dict):
+                        result["_hls_card_sent"] = True
+            except Exception:
+                _logger.debug("background task COMPLETE hook failed", exc_info=True)
+
+        # Clear context
+        _msg_ctx.set(None)
+        _thread_local_ctx.data = None
+
+        return result
+
+    return wrapper
+
 
 # ── Cron delivery wrapper ──────────────────────────────────────────
 
 
 def _wrap_cron_deliver(orig: Callable) -> Callable:
-    """Intercept cron delivery and redirect to Feishu CardKit cards."""
+    """Intercept cron ``_deliver_result`` and redirect Feishu deliveries to CardKit cards.
+
+    The original ``cron.scheduler._deliver_result`` is a **module-level function**
+    (not a class method) with signature::
+
+        def _deliver_result(job: dict, content: str, adapters=None, loop=None)
+
+    It iterates over delivery targets from ``_resolve_delivery_targets(job)``,
+    and for each Feishu target calls ``runtime_adapter.send(chat_id, text, …)``.
+
+    Our wrapper temporarily replaces the Feishu adapter's ``send`` method with a
+    card-sending version.  This way:
+    - All the original's logic (thread_id, metadata, error handling) still works.
+    - Feishu text messages are replaced with CardKit cards.
+    - If card delivery fails, it falls back to the original plain-text send.
+    - No duplicate messages (card replaces text, not supplements it).
+    - Thread-safe: the original ``send`` is restored in a ``finally`` block.
+    """
 
     @functools.wraps(orig)
-    async def wrapper(
-        self,
-        platform_name,
-        chat_id,
-        cleaned_delivery_content,
-        loop=None,
-        **_kwargs,
-    ):
-        if platform_name.lower() in ("feishu", "lark"):
-            try:
-                from .patch import on_cron_deliver
+    def wrapper(job, content, adapters=None, loop=None, **kwargs):
+        # Only intercept when there are adapters with a Feishu/Lark platform
+        if not adapters:
+            return orig(job, content, adapters=adapters, loop=loop, **kwargs)
 
-                if await on_cron_deliver(
-                    chat_id=chat_id,
-                    content=cleaned_delivery_content.strip(),
-                    loop=loop,
-                ):
-                    return True
+        feishu_adapter = None
+        feishu_platform_key = None
+
+        try:
+            from gateway.config import Platform
+
+            for p in list(adapters.keys()):
+                pn = p.value.lower() if hasattr(p, "value") else str(p).lower()
+                if pn in ("feishu", "lark"):
+                    feishu_adapter = adapters[p]
+                    feishu_platform_key = p
+                    break
+        except (ImportError, AttributeError):
+            pass
+
+        if feishu_adapter is None:
+            return orig(job, content, adapters=adapters, loop=loop, **kwargs)
+
+        # ── Temporarily replace Feishu adapter.send with card-sending version ──
+        original_send = feishu_adapter.send
+
+        async def _card_sending_send(chat_id_send, content_text, **send_kwargs):
+            """Redirect Feishu adapter.send to CardKit card delivery."""
+            try:
+                ctrl = get_controller()
+                if ctrl.enabled and content_text:
+                    # Try to strip MEDIA tags for cleaner card content
+                    cleaned = content_text
+                    try:
+                        from gateway.platforms.base import BasePlatformAdapter
+                        _, cleaned = BasePlatformAdapter.extract_media(content_text)
+                    except (ImportError, AttributeError):
+                        pass
+                    if not cleaned.strip():
+                        cleaned = content_text
+
+                    # Deliver card — use the event loop from the wrapper's loop param
+                    # or fall back to get_running_loop()
+                    try:
+                        if loop and getattr(loop, "is_running", lambda: False)():
+                            import asyncio
+                            future = asyncio.run_coroutine_threadsafe(
+                                ctrl._do_cron_deliver(chat_id_send, cleaned.strip()),
+                                loop,
+                            )
+                            future.result(timeout=30)
+                        else:
+                            import asyncio
+                            try:
+                                running_loop = asyncio.get_running_loop()
+                                # We're inside an async context — await directly
+                                await ctrl._do_cron_deliver(chat_id_send, cleaned.strip())
+                            except RuntimeError:
+                                # No running loop — use asyncio.run
+                                asyncio.run(ctrl._do_cron_deliver(chat_id_send, cleaned.strip()))
+
+                        _logger.info("cron card delivered: chat=%s", chat_id_send[:12])
+                        # Return a success result so the original _deliver_result
+                        # thinks the send succeeded
+                        try:
+                            from gateway.platforms.base import SendResult
+                            return SendResult(success=True)
+                        except (ImportError, AttributeError):
+                            return None
+                    except Exception:
+                        _logger.debug(
+                            "cron card delivery failed, falling back to plain text",
+                            exc_info=True,
+                        )
             except Exception:
-                _logger.debug("cron deliver hook failed", exc_info=True)
-        return await orig(
-            self,
-            platform_name,
-            chat_id,
-            cleaned_delivery_content,
-            loop=loop,
-            **_kwargs,
-        )
+                _logger.debug("cron card intercept failed", exc_info=True)
+
+            # Fallback: send plain text via the original adapter
+            return await original_send(chat_id_send, content_text, **send_kwargs)
+
+        feishu_adapter.send = _card_sending_send
+        try:
+            return orig(job, content, adapters=adapters, loop=loop, **kwargs)
+        finally:
+            feishu_adapter.send = original_send
 
     return wrapper
 
@@ -770,13 +996,18 @@ def _detect_hermes_layout() -> dict[str, bool]:
     except (ImportError, AttributeError):
         pass
 
+    # Cron scheduler: probe for the module-level _deliver_result function.
+    # In Hermes, _deliver_result is a module-level function in cron.scheduler,
+    # NOT a class method on Scheduler.  We check for the module directly.
     try:
-        from gateway.cron.scheduler import Scheduler  # noqa: F401
-        layout["has_cron_scheduler"] = True
-    except (ImportError, AttributeError):
-        try:
-            from cron.scheduler import Scheduler  # noqa: F401
+        import cron.scheduler as _cron_probe  # noqa: F401
+        if hasattr(_cron_probe, "_deliver_result"):
             layout["has_cron_scheduler"] = True
+    except ImportError:
+        try:
+            import gateway.cron.scheduler as _cron_probe  # noqa: F401
+            if hasattr(_cron_probe, "_deliver_result"):
+                layout["has_cron_scheduler"] = True
         except (ImportError, AttributeError):
             pass
 
@@ -830,6 +1061,18 @@ def apply_patches() -> None:
                 GatewayRunner._handle_message_with_agent
             )
             GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
+
+            # ── Background task patch ──
+            # Wraps _run_background_task to inject START/COMPLETE hooks
+            # so /background tasks also get streaming cards.
+            try:
+                GatewayRunner._run_background_task = _wrap_run_background_task(
+                    GatewayRunner._run_background_task
+                )
+                _logger.info("hermes-lark-streaming: GatewayRunner._run_background_task patched ✓")
+            except AttributeError:
+                _logger.debug("hermes-lark-streaming: _run_background_task not found, background cards disabled")
+
             gw_patched = True
             _logger.info("hermes-lark-streaming: GatewayRunner patched ✓")
         except (ImportError, AttributeError) as e:
@@ -887,37 +1130,35 @@ def apply_patches() -> None:
     _apply_direct_agent_patch()
 
     # ── Cron scheduler ──
+    # Patch the module-level _deliver_result function instead of the
+    # Scheduler class method.  In Hermes, _deliver_result is a standalone
+    # function in cron.scheduler, not Scheduler._deliver_result.
     cron_patched = False
     if layout["has_cron_scheduler"]:
         try:
-            from gateway.cron.scheduler import Scheduler
-
-            Scheduler._deliver_result = _wrap_cron_deliver(
-                Scheduler._deliver_result
-            )
+            import cron.scheduler as _cron_mod
+            _cron_mod._deliver_result = _wrap_cron_deliver(_cron_mod._deliver_result)
             cron_patched = True
             _logger.info("hermes-lark-streaming: cron scheduler patched ✓")
-        except (ImportError, AttributeError):
-            pass
+        except (ImportError, AttributeError) as e:
+            _logger.debug("hermes-lark-streaming: cron.scheduler patch failed (%s)", e)
         if not cron_patched:
             try:
-                from cron.scheduler import Scheduler  # alternative import path
-
-                Scheduler._deliver_result = _wrap_cron_deliver(
-                    Scheduler._deliver_result
-                )
+                import gateway.cron.scheduler as _cron_mod
+                _cron_mod._deliver_result = _wrap_cron_deliver(_cron_mod._deliver_result)
                 cron_patched = True
-                _logger.info("hermes-lark-streaming: cron scheduler patched (alt path) ✓")
-            except (ImportError, AttributeError):
-                _logger.info("hermes-lark-streaming: cron scheduler not found, cron cards disabled")
+                _logger.info("hermes-lark-streaming: cron scheduler patched (gateway path) ✓")
+            except (ImportError, AttributeError) as e:
+                _logger.info("hermes-lark-streaming: cron scheduler not found (%s), cron cards disabled", e)
 
     # ── Summary ──
     _logger.info(
         "hermes-lark-streaming: patch summary — "
-        "GatewayRunner=%s, conversation_loop=%s, AIAgent=applied, cron=%s",
+        "GatewayRunner=%s, conversation_loop=%s, AIAgent=applied, cron=%s, background=%s",
         "✓" if gw_patched else "✗",
         "✓" if _module_patch_applied else "n/a (direct AIAgent used)",
         "✓" if cron_patched else "n/a",
+        "✓" if gw_patched else "n/a",  # background task patch is part of GatewayRunner
     )
 
     # Deferred direct patch: retry AIAgent.run_conversation after Hermes

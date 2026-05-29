@@ -32,6 +32,7 @@ _T: dict[str, tuple[str, str]] = {
     "error_panel": ("Error", "错误信息"),
     "interrupt_panel": ("Interrupted", "中断信息"),
     "compression_exhausted": ("⚠ Context Full", "⚠ 上下文已满"),
+    "cache": ("Cache {}", "缓存 {}"),
 }
 
 

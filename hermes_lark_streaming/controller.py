@@ -513,6 +513,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             "model": model,
             **({"input_tokens": tokens.get("input_tokens")} if tokens else {}),
             **({"output_tokens": tokens.get("output_tokens")} if tokens else {}),
+            **({"cache_read_tokens": tokens.get("cache_read_tokens")} if tokens and tokens.get("cache_read_tokens") else {}),
+            **({"cache_write_tokens": tokens.get("cache_write_tokens")} if tokens and tokens.get("cache_write_tokens") else {}),
             **({"context_used": context.get("used_tokens")} if context else {}),
             **({"context_max": context.get("max_tokens")} if context else {}),
             **({"api_calls": api_calls} if api_calls else {}),

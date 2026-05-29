@@ -1075,6 +1075,95 @@ class TestOnCompleted:
         assert session.state == COMPLETING
         assert session.error_message == "User stopped"
 
+    def test_cache_read_tokens_in_footer(self) -> None:
+        """cache_read_tokens from tokens dict stored in session.footer."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_cache_r")
+        session.state = STREAMING
+        session.card_id = "card_cache_r"
+        ctrl._sessions["msg_cache_r"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(
+                message_id="msg_cache_r",
+                tokens={"input_tokens": 137400, "output_tokens": 500, "cache_read_tokens": 136300},
+            )
+
+        assert session.footer.get("cache_read_tokens") == 136300
+
+    def test_cache_write_tokens_in_footer(self) -> None:
+        """cache_write_tokens from tokens dict stored in session.footer."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_cache_w")
+        session.state = STREAMING
+        session.card_id = "card_cache_w"
+        ctrl._sessions["msg_cache_w"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(
+                message_id="msg_cache_w",
+                tokens={"input_tokens": 137400, "output_tokens": 500, "cache_write_tokens": 1100},
+            )
+
+        assert session.footer.get("cache_write_tokens") == 1100
+
+    def test_both_cache_tokens_in_footer(self) -> None:
+        """Both cache_read_tokens and cache_write_tokens stored in session.footer."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_cache_both")
+        session.state = STREAMING
+        session.card_id = "card_cache_both"
+        ctrl._sessions["msg_cache_both"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(
+                message_id="msg_cache_both",
+                tokens={
+                    "input_tokens": 200000,
+                    "output_tokens": 800,
+                    "cache_read_tokens": 150000,
+                    "cache_write_tokens": 2000,
+                },
+            )
+
+        assert session.footer.get("cache_read_tokens") == 150000
+        assert session.footer.get("cache_write_tokens") == 2000
+        assert session.footer.get("input_tokens") == 200000
+
+    def test_cache_tokens_zero_not_stored(self) -> None:
+        """cache_read_tokens=0 and cache_write_tokens=0 are not stored in footer."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_cache_zero")
+        session.state = STREAMING
+        session.card_id = "card_cache_zero"
+        ctrl._sessions["msg_cache_zero"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(
+                message_id="msg_cache_zero",
+                tokens={"input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0},
+            )
+
+        assert "cache_read_tokens" not in session.footer
+        assert "cache_write_tokens" not in session.footer
+
+    def test_cache_tokens_missing_not_stored(self) -> None:
+        """When tokens dict lacks cache keys, footer doesn't have them."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_cache_miss")
+        session.state = STREAMING
+        session.card_id = "card_cache_miss"
+        ctrl._sessions["msg_cache_miss"] = session
+
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+            ctrl.on_completed(
+                message_id="msg_cache_miss",
+                tokens={"input_tokens": 100, "output_tokens": 50},
+            )
+
+        assert "cache_read_tokens" not in session.footer
+        assert "cache_write_tokens" not in session.footer
+
 
 # ── on_cron_deliver_async 测试 ──
 
