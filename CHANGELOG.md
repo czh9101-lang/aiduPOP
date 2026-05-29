@@ -15,7 +15,7 @@
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
 | 1 | Bug | GitHub Actions CI 测试失败：async 测试函数无法运行 | `pyproject.toml` 的 `dev` 依赖缺少 `pytest-asyncio`，CI 环境安装 `pytest` 后无法识别 `async def` 测试函数 | 添加 `pytest-asyncio>=0.21.0` 到 `dev` 可选依赖；添加 `asyncio_mode = "auto"` 到 pytest 配置，自动发现 async 测试 |
-| 2 | Bug | 多 Profile 部署场景下流式卡片不工作 | `config.py` 和 `plugin.py` 中的 `_HERMES_CONFIG_PATH` 在模块导入时读取 `HERMES_HOME`，但多 Profile 场景下 `HERMES_HOME` 在插件导入后才被 `_apply_profile_override()` 设置，导致路径错误 | 新增 `_get_hermes_config_path()` 函数：每次调用时动态读取 `HERMES_HOME` 环境变量，确保始终使用正确的配置路径；`Config._load()`、`Config._reload_cached()`、`_backup_config()`、`_ensure_streaming_config()`、`_cleanup_config()` 均改用动态路径；保留 `_HERMES_CONFIG_PATH` 常量用于向后兼容 |
+| 2 | Bug | 多 Profile 部署场景下流式卡片不工作 | `config.py` 和 `plugin.py` 中的 `_HERMES_CONFIG_PATH` 在模块导入时读取 `HERMES_HOME`，但多 Profile 场景下 `HERMES_HOME` 在插件导入后才被 `_apply_profile_override()` 设置，导致路径错误 | [@joshcheng820222](https://github.com/joshcheng820222) 新增 `_get_hermes_config_path()` 函数：每次调用时动态读取 `HERMES_HOME` 环境变量，确保始终使用正确的配置路径；`Config._load()`、`Config._reload_cached()`、`_backup_config()`、`_ensure_streaming_config()`、`_cleanup_config()` 均改用动态路径；保留 `_HERMES_CONFIG_PATH` 常量用于向后兼容 |
 
 ## v0.12.2 (2026-05-29)
 
