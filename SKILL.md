@@ -67,9 +67,9 @@ monkey_patch.py (运行时拦截)
 |------|------|------|--------|
 | `monkey_patch.py` | 985 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全 |
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async |
-| `controller.py` | 640 | 主控制器(单例) | `CardSession` 状态机；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志 |
-| `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链 |
-| `controller_linear_mixin.py` | 740 | 线性模式编排 | 拆卡阈值 180 元素；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列 |
+| `controller.py` | 640 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记 |
+| `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
+| `controller_linear_mixin.py` | 740 | 线性模式编排 | 拆卡阈值 180 元素；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；`_do_update_card` 允许 `COMPLETING` 状态 |
 | `cardkit.py` | 701 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales |
 | `cardkit_i18n.py` | 44 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤10)、图片 key 剥离、长文本分块(2400 chars) |
@@ -178,7 +178,7 @@ Hermes 用 `spec_from_file_location` 加载插件，会加载仓库根目录的 
 ## 5. CardSession 状态机
 
 ```
-IDLE → CREATING → STREAMING → COMPLETED
+IDLE → CREATING → STREAMING → COMPLETING → COMPLETED
                     │              │
                     ├→ FAILED      └→ (card_sent=True → suppress Hermes reply)
                     └→ ABORTED
@@ -187,11 +187,12 @@ IDLE → CREATING → STREAMING → COMPLETED
 - **IDLE**: 初始状态
 - **CREATING**: 正在创建卡片（CardKit API / IM API）
 - **STREAMING**: 正在流式更新
+- **COMPLETING**: 正在完成（状态转移在 `await` 之前同步执行，防止 hermes 双调竞态）；`_TERMINAL` 成员，后续 `on_answer`/`on_reasoning` 等被跳过；`_do_update_card` 仍允许此状态以刷出待发文本
 - **COMPLETED**: 终态，卡片已发送
 - **FAILED**: API 错误，降级为 Hermes 默认回复
 - **ABORTED**: 消息被中断/删除
 
-终态集合: `{COMPLETED, FAILED, ABORTED}`
+终态集合: `{COMPLETING, COMPLETED, FAILED, ABORTED}`
 
 ---
 
@@ -298,6 +299,15 @@ streaming:
 飞书硬限制 200 元素/卡片。线性模式阈值设为 180（预留 20 给 footer + 波动）。
 v0.11.0 起，超限时自动触发拆卡（而非仅打日志），设置 `element_limit_hit` 标志后跳过新增段，拆卡成功后重置标志和元素计数。
 
+### 10.8 on_completed 幂等容错（v0.11.0 新增）
+**问题**: Hermes 两条路径（`_process_message_background` 的 finally + `pop_post_delivery_callback`）可能对同一 msg_id 双调 `on_completed`，竞态窗口内两次调用触发飞书 300317 sequence 冲突。
+**解决**: 
+- 新增 `COMPLETING` 状态，状态转移在 `await` 之前同步执行——第二次调用发现已在 `COMPLETING`，直接返回，不再进入完成流程
+- 300317 错误视为幂等成功：设置 `state=COMPLETED` 并返回 `True`
+- `_was_aborted` 保存中断标记，供完成方法在 `COMPLETING` 状态下仍能获取中断信息
+
+**模式**: 幂等守卫 = 同步状态转移 + 错误码容错，适用于异步回调竞态场景
+
 ---
 
 ## 11. 测试结构
@@ -358,7 +368,7 @@ hermes gateway restart
 | v0.10.0 | 2026-05-28 | 时间注入、/stop 状态显示、错误面板、compression_exhausted、Apple Silicon 修复、补丁隔离、Cron 死锁修复、Cron 表格降级 |
 | v0.10.1 | 2026-05-28 | FlushController 线程安全修复（跑马灯无文字根因）、线性模式首次文字预填充、on_thinking reasoning_dirty 预防性修复 |
 | v0.10.2 | 2026-05-28 | 时间注入格式优化为 XML 标签 `<time>` （避免 LLM 忽略或模仿）、线性模式冗余 stream_element 调用优化 |
-| v0.11.0 | 2026-05-29 | 超限自动拆卡（卡片不再卡死）、拆卡失败+超限死局修复、Config TTL 缓存（减少磁盘读取）、`_started_msg_ids` 线程安全 |
+| v0.11.0 | 2026-05-29 | 超限自动拆卡（卡片不再卡死）、拆卡失败+超限死局修复、Config TTL 缓存（减少磁盘读取）、`_started_msg_ids` 线程安全、`on_completed` 状态机+幂等容错（COMPLETING 状态 + 300317 错误处理） |
 
 ---
 
@@ -370,6 +380,7 @@ hermes gateway restart
 - [ ] 考虑更多 Hermes 版本的兼容性探测
 - [ ] `inject_time` 时区配置化（当前硬编码 CST/UTC+8）
 - [x] ~~`_handle_linear_flush_error` 对 `CARDKIT_ELEMENT_LIMIT` 增加超限拆卡~~（v0.11.0 已实现：超限自动触发拆卡 + `element_limit_hit` 标志）
+- [x] ~~`on_completed` 被 hermes 双调触发 300317~~（v0.11.0 已实现：COMPLETING 状态机守卫 + 300317 幂等成功 + `_was_aborted` 中断标记）
 
 ---
 

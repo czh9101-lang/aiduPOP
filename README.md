@@ -36,6 +36,7 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 - **i18n** — Built-in Chinese/English bilingual card text, auto-switches based on Feishu client language
 - **Plugin Lifecycle** — Install/uninstall via `hermes plugins`, no source file modification required
 - **Runtime Patches** — Uses monkey patching instead of AST injection, does not modify source files on disk
+- **Idempotent Completion** — Prevents duplicate card completions when Hermes calls on_completed twice, with state machine guard and 300317 error handling
 
 ![Feature Preview](assets/img1.png)
 

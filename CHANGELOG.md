@@ -8,6 +8,7 @@
 | 2 | Bug | 拆卡失败后元素再超限 = 死局 | `split_disabled=True`（拆卡失败降级）后，元素超限无路可走 | 超限拆卡不受 `split_disabled` 限制（`_do_linear_split` 内部已有降级逻辑）；即使拆卡也失败，`element_limit_hit` 标志确保只刷已有段的脏文本，等完成阶段整体重建 |
 | 3 | Perf | `inject_time` / `show_reasoning` 每次属性访问都读磁盘 | `_reload()` 每次调用都执行 `Path.read_text()` + `yaml.safe_load()`，流式输出期间每 100ms 可能触发多次，高频场景下不必要 | 新增 `_reload_cached()` 方法，带 5 秒 TTL 缓存：5 秒内复用上次读取结果，避免高频属性访问反复读磁盘；配置变更最多延迟 5 秒生效 |
 | 4 | Bug | 并发消息可能漏判中断 | `_started_msg_ids` 是全局 `set`，两个消息同时到达时 `add` / `discard` / 差集运算非原子，可能漏判中断 | 所有 `_started_msg_ids` 操作加 `threading.Lock` 保护，确保并发安全 |
+| 5 | Bug | `on_completed` 被 hermes 双调触发 300317 sequence 冲突 | hermes 两条路径（`_process_message_background` 的 finally + `pop_post_delivery_callback`）在同一 msg_id 上调用 `on_completed`，竞态窗口内两次调用触发 300317 | 新增 `COMPLETING` 状态，状态转移在 `await` 之前同步执行防止双调竞态；300317 错误视为幂等成功（设置 `state=COMPLETED` 并返回 `True`）；`_was_aborted` 保存中断标记供完成方法在 `COMPLETING` 状态下获取 |
 
 ## v0.10.2 (2026-05-28)
 

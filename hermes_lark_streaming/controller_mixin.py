@@ -27,6 +27,7 @@ from .feishu import (
     CARDKIT_CONTENT_FAILED,
     CARDKIT_ELEMENT_LIMIT,
     CARDKIT_RATE_LIMITED,
+    CARDKIT_SEQUENCE_CONFLICT,
     CARDKIT_STREAMING_CLOSED,
     FeishuAPIError,
 )
@@ -43,11 +44,12 @@ _logger = logging.getLogger("hermes_lark_streaming")
 IDLE = "idle"
 CREATING = "creating"
 STREAMING = "streaming"
+COMPLETING = "completing"
 COMPLETED = "completed"
 FAILED = "failed"
 ABORTED = "aborted"
 
-_TERMINAL = {COMPLETED, FAILED, ABORTED}
+_TERMINAL = {COMPLETING, COMPLETED, FAILED, ABORTED}
 
 
 class ControllerMixin:
@@ -112,7 +114,7 @@ class ControllerMixin:
             session.state = FAILED
 
     async def _do_update_card(self, session: CardSession) -> None:
-        if session.state not in (CREATING, STREAMING):
+        if session.state not in (CREATING, STREAMING, COMPLETING):
             return
         if not session.card_msg_id:
             return
@@ -195,7 +197,7 @@ class ControllerMixin:
             _logger.warning("card update failed: %s", e, exc_info=True)
 
     async def _do_tool_use_status_update(self, session: CardSession) -> None:
-        if not session.card_id or session.state in _TERMINAL:
+        if not session.card_id or session.state in _TERMINAL or session.state == COMPLETING:
             return
         try:
             assert self._client is not None
@@ -243,7 +245,7 @@ class ControllerMixin:
             _logger.debug("tool use status update failed: %s", e, exc_info=True)
 
     async def _do_reasoning_update(self, session: CardSession) -> None:
-        if not session.card_id or session.state in _TERMINAL:
+        if not session.card_id or session.state in _TERMINAL or session.state == COMPLETING:
             return
         if not session.reasoning_dirty:
             return
@@ -303,7 +305,8 @@ class ControllerMixin:
             reasoning_elapsed_ms = (time.time() - session.reasoning_start) * 1000
 
         is_error = session.state == FAILED
-        is_aborted = session.state == ABORTED
+        # COMPLETING 状态下需通过 _was_aborted 获取中断标记
+        is_aborted = getattr(session, "_was_aborted", False) or session.state == ABORTED
         error_message = getattr(session, "error_message", "")
         card = build_complete_card(
             text=display,
@@ -341,6 +344,18 @@ class ControllerMixin:
                 session.state = COMPLETED
                 return True
             except FeishuAPIError as e:
+                # 300317 sequence 冲突 → 幂等成功
+                # hermes 可能双调 on_completed（finally + pop_post_delivery_callback），
+                # 竞态窗口内两次调用触发 300317，表示另一条路径已完成操作。
+                if e.code == CARDKIT_SEQUENCE_CONFLICT:
+                    _logger.info(
+                        "do_complete: 300317 sequence conflict → idempotent success, "
+                        "card_id=%s seq=%d",
+                        session.card_id,
+                        session.sequence,
+                    )
+                    session.state = COMPLETED
+                    return True
                 _logger.warning(
                     "cardkit complete attempt %d failed (FeishuAPIError): code=%s msg=%s card_id=%s seq=%d",
                     attempt,
