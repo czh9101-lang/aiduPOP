@@ -14,6 +14,7 @@ from hermes_lark_streaming.cardkit import (
     _escape_md,
     _format_elapsed,
     _longest_backtick_run,
+    _render_footer_field,
     build_complete_card,
     build_im_fallback_card,
     build_linear_complete_card,
@@ -737,3 +738,150 @@ class TestBuildCronCard:
         # optimize_markdown_style downgrades h1 → h4
         combined = " ".join(e["content"] for e in card["body"]["elements"])
         assert "#### Title" in combined
+
+
+# --- Cache footer field ---
+
+
+class TestCacheFooterField:
+    """_render_footer_field("cache", ...) 缓存命中率字段渲染测试."""
+
+    def test_cache_with_both_tokens(self) -> None:
+        """cache_read_tokens + input_tokens 均存在时渲染💾格式."""
+        en, zh = _render_footer_field(
+            "cache",
+            {"cache_read_tokens": 136300, "input_tokens": 137400},
+            is_error=False,
+            is_aborted=False,
+            show_label=False,
+        )
+        assert en is not None
+        assert zh is not None
+        assert "💾" in en
+        assert "136.3K" in en
+        assert "137.4K" in en
+        assert "99%" in en
+
+    def test_cache_hit_percentage_calculation(self) -> None:
+        """命中率百分比 = cache_read / input_tokens * 100."""
+        en, zh = _render_footer_field(
+            "cache",
+            {"cache_read_tokens": 50000, "input_tokens": 200000},
+            is_error=False,
+            is_aborted=False,
+            show_label=False,
+        )
+        assert en is not None
+        assert "25%" in en
+        assert "50.0K" in en
+        assert "200.0K" in en
+
+    def test_cache_zero_read_returns_none(self) -> None:
+        """cache_read_tokens=0 时返回 (None, None)."""
+        en, zh = _render_footer_field(
+            "cache",
+            {"cache_read_tokens": 0, "input_tokens": 1000},
+            is_error=False,
+            is_aborted=False,
+            show_label=False,
+        )
+        assert en is None
+        assert zh is None
+
+    def test_cache_zero_input_returns_none(self) -> None:
+        """input_tokens=0 时返回 (None, None)."""
+        en, zh = _render_footer_field(
+            "cache",
+            {"cache_read_tokens": 500, "input_tokens": 0},
+            is_error=False,
+            is_aborted=False,
+            show_label=False,
+        )
+        assert en is None
+        assert zh is None
+
+    def test_cache_missing_data_returns_none(self) -> None:
+        """缺少 cache_read_tokens 或 input_tokens 时返回 (None, None)."""
+        en1, zh1 = _render_footer_field(
+            "cache", {}, is_error=False, is_aborted=False, show_label=False,
+        )
+        assert en1 is None
+
+        en2, zh2 = _render_footer_field(
+            "cache",
+            {"cache_read_tokens": 500},
+            is_error=False,
+            is_aborted=False,
+            show_label=False,
+        )
+        assert en2 is None
+
+        en3, zh3 = _render_footer_field(
+            "cache",
+            {"input_tokens": 1000},
+            is_error=False,
+            is_aborted=False,
+            show_label=False,
+        )
+        assert en3 is None
+
+    def test_cache_show_label_true_english(self) -> None:
+        """show_label=True 时英文前缀为 'Cache 💾 ...'."""
+        en, zh = _render_footer_field(
+            "cache",
+            {"cache_read_tokens": 1500, "input_tokens": 2000},
+            is_error=False,
+            is_aborted=False,
+            show_label=True,
+        )
+        assert en is not None
+        assert en.startswith("Cache 💾")
+        assert "75%" in en
+
+    def test_cache_show_label_true_chinese(self) -> None:
+        """show_label=True 时中文前缀为 '缓存 💾 ...'."""
+        en, zh = _render_footer_field(
+            "cache",
+            {"cache_read_tokens": 1500, "input_tokens": 2000},
+            is_error=False,
+            is_aborted=False,
+            show_label=True,
+        )
+        assert zh is not None
+        assert zh.startswith("缓存 💾")
+        assert "75%" in zh
+
+    def test_cache_show_label_false_no_prefix(self) -> None:
+        """show_label=False 时无标签前缀，直接💾开头."""
+        en, zh = _render_footer_field(
+            "cache",
+            {"cache_read_tokens": 1500, "input_tokens": 2000},
+            is_error=False,
+            is_aborted=False,
+            show_label=False,
+        )
+        assert en is not None
+        assert en.startswith("💾")
+        assert not en.startswith("Cache")
+
+    def test_cache_in_build_footer_elements(self) -> None:
+        """cache 字段在 _build_footer_elements 中正常渲染."""
+        result = _build_footer_elements(
+            {"cache_read_tokens": 136300, "input_tokens": 137400},
+            fields=[["cache"]],
+        )
+        assert len(result) >= 2
+        assert "💾" in result[1]["content"]
+        assert "99%" in result[1]["content"]
+
+    def test_cache_100_percent(self) -> None:
+        """全部命中时显示 100%."""
+        en, zh = _render_footer_field(
+            "cache",
+            {"cache_read_tokens": 1000, "input_tokens": 1000},
+            is_error=False,
+            is_aborted=False,
+            show_label=False,
+        )
+        assert en is not None
+        assert "100%" in en

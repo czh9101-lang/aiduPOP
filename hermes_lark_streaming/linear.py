@@ -139,6 +139,30 @@ class LinearState:
         self.segments.insert(index + 1, new_seg)
         return new_seg
 
+    def split_answer_segment(
+        self,
+        index: int,
+        split_char_offset: int,
+    ) -> Segment:
+        """在指定字符位置拆分一个 answer segment，返回承接后续文本的新 segment.
+
+        将 answer 的文本从 split_char_offset 处切开：
+        - 原 segment 保留 [0, split_char_offset) 的文本
+        - 新 segment 承接 [split_char_offset, ...) 的文本
+        两个 segment 都标记为 dirty 以确保刷新。
+        """
+        seg = self.segments[index]
+        c = self._counter
+        self._counter += 1
+        new_seg = Segment("answer", f"answer_{c}")
+        new_seg.text = seg.text[split_char_offset:]
+        new_seg.start_time = seg.start_time
+        seg.text = seg.text[:split_char_offset]
+        seg.dirty = True
+        new_seg.dirty = True
+        self.segments.insert(index + 1, new_seg)
+        return new_seg
+
     def finalize_segments(self, total_tool_count: int) -> None:
         """完成态调用：终结最后一个 tool segment + 补算最后一个 reasoning elapsed_ms."""
         now = time.time()

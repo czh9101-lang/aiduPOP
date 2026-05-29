@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.12.0 (DEV 分支) |
+| 版本 | 0.12.2 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -43,7 +43,12 @@
                └─ background_review_callback [Hook 7: on_background_review_message]
                
 Cron 定时推送:
-  Scheduler._deliver_result ──────────── [Hook 10: on_cron_deliver] (async)
+  cron.scheduler._deliver_result ──────── [Hook 10: on_cron_deliver] (async)
+               │
+               ▼
+Background 后台任务:
+  _run_background_task ───────────────── [Hook 1: on_message_started]
+                                         [Hook 2: on_message_completed]
 ```
 
 ### 核心调用链
@@ -65,18 +70,18 @@ monkey_patch.py (运行时拦截)
 
 | 文件 | 行数 | 职责 | 关键点 |
 |------|------|------|--------|
-| `monkey_patch.py` | 985 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全 |
-| `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async |
-| `controller.py` | 640 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记 |
+| `monkey_patch.py` | 1237 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全；`_wrap_cron_deliver` 临时替换 adapter.send；`_wrap_run_background_task` 后台任务卡片 |
+| `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async；`on_message_completed` 传递 cache tokens |
+| `controller.py` | 681 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记；footer 新增 `cache_read_tokens`/`cache_write_tokens` |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
-| `controller_linear_mixin.py` | 740 | 线性模式编排 | 拆卡阈值 180 元素；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；`_do_update_card` 允许 `COMPLETING` 状态 |
-| `cardkit.py` | 701 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales |
-| `cardkit_i18n.py` | 44 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数 |
+| `controller_linear_mixin.py` | 800 | 线性模式编排 | 拆卡阈值 180 元素；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算 |
+| `cardkit.py` | 712 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%） |
+| `cardkit_i18n.py` | 45 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数；新增 `cache` 条目 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤10)、图片 key 剥离、长文本分块(2400 chars) |
-| `config.py` | 168 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；`inject_time` / `show_reasoning` 使用缓存 |
+| `config.py` | 180 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer 含 `cache` 字段 |
 | `feishu.py` | 291 | 飞书 API 客户端 | CardKit v1/v2 + IM API；错误码分类；token 脱敏 |
 | `flush.py` | 156 | 节流调度器 | CardKit 100ms / IM PATCH 1.5s；互斥锁 + re-flush |
-| `linear.py` | 158 | 线性 segment 状态 | `Segment` 数据类；`LinearState` 扁平管理 |
+| `linear.py` | 180 | 线性 segment 状态 | `Segment` 数据类；`LinearState` 扁平管理；`split_tool_segment` / `split_answer_segment` 拆分 |
 | `text.py` | 111 | 文本增量追踪 | `<think|thinking|thought>` 标签拆分；`TextState` 累积器 |
 | `tooluse.py` | 299 | 工具调用追踪 | `ToolStep` / `ToolSession`；敏感信息脱敏 |
 | `image.py` | 129 | 异步图片处理 | 下载远程图→上传飞书→替换 img_key；同步 strip + 异步上传 |
@@ -94,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.12.0")
+plugin.yaml (唯一版本号: "0.12.2")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -224,6 +229,8 @@ Hermes 默认纯文本回复 (最终降级)
 - 扁平排列，无需推断轮次边界
 - 当元素数接近 200 上限时自动拆卡（阈值 180）
 - 拆卡后首卡片标记 `partial` 状态
+- Tool segment 按 step 边界拆分，Answer segment 按文本块边界拆分
+- 超了就拆，拆完还超继续拆
 
 ---
 
@@ -240,8 +247,7 @@ streaming:
   inject_time: false
   footer:
     fields:
-      - [status, elapsed, model, api_calls]
-      - [tokens, context, history_offset, compression_exhausted]
+      - [status, elapsed, model, cache, compression_exhausted]
     show_label: true
 ```
 
@@ -263,7 +269,8 @@ streaming:
 | 7 | `on_background_review_message` | `background_review_callback` | sync | 暂存后台审查通知 |
 | 8 | `on_message_aborted` | 返回 None (无卡片) | sync | 消息异常终止 |
 | 9 | `on_message_interrupted` | 返回 None (有卡片+新消息) | sync | 新消息打断旧消息 |
-| 10 | `on_cron_deliver` | `Scheduler._deliver_result` | **async** | Cron 推送卡片 |
+| 10 | `on_cron_deliver` | `cron.scheduler._deliver_result` | **async** | Cron 推送卡片 |
+| 11 | `on_message_completed` (bg) | `_run_background_task` | sync | 后台任务卡片（复用 Hook 2，task_id 作为 message_id） |
 
 ---
 
@@ -298,6 +305,17 @@ streaming:
 ### 10.7 Feishu CardKit 元素限制
 飞书硬限制 200 元素/卡片。线性模式阈值设为 180（预留 20 给 footer + 波动）。
 v0.11.0 起，超限时自动触发拆卡（而非仅打日志），设置 `element_limit_hit` 标志后跳过新增段，拆卡成功后重置标志和元素计数。
+v0.12.2 起，answer 估算对齐封卡实际元素数（按 `_split_long_text` 分块数），answer 具备内部拆分能力（`split_answer_segment`），拆卡判断不再因估算偏低而失效。
+
+### 10.7.1 Answer 估算偏差（v0.12.2 修复）
+**问题**: 流式阶段 answer 只占 1 个 streaming markdown element，但封卡时 `_split_long_text` 会将长文本拆成 N 个 markdown 元素。旧代码 `_estimate_segment_elements` 对 answer 恒返回 1，导致流式阶段判断"不超限"，封卡时实际超限——拆卡后依旧超元素。
+**解决**: 
+- 估算对齐封卡实际：`_estimate_segment_elements` 对 answer 按 `_split_long_text` 实际分块数计算
+- 动态更新：`_do_linear_flush` 步骤 0 对已创建的 dirty answer segment 重新估算并更新 `element_count`
+- 内部拆分：`split_answer_segment` 按文本块边界拆分 answer segment，对标 tool 的 `split_tool_segment`
+- 相邻触发：相邻 answer segment 也触发拆卡（与 tool segment 一致）
+
+**模式**: 估算必须对齐实际渲染行为，否则拆卡判断形同虚设。
 
 ### 10.8 on_completed 幂等容错（v0.11.0 新增）
 **问题**: Hermes 两条路径（`_process_message_background` 的 finally + `pop_post_delivery_callback`）可能对同一 msg_id 双调 `on_completed`，竞态窗口内两次调用触发飞书 300317 sequence 冲突。
@@ -307,6 +325,21 @@ v0.11.0 起，超限时自动触发拆卡（而非仅打日志），设置 `elem
 - `_was_aborted` 保存中断标记，供完成方法在 `COMPLETING` 状态下仍能获取中断信息
 
 **模式**: 幂等守卫 = 同步状态转移 + 错误码容错，适用于异步回调竞态场景
+
+### 10.9 Cron 补丁签名不匹配（v0.12.0 修复）
+**问题**: `_deliver_result` 是 `cron.scheduler` **模块级函数**，不是 `Scheduler` 类方法。旧代码 `Scheduler._deliver_result = ...` 必然 `AttributeError`。
+**解决**: 改为 patch 模块级属性 `cron.scheduler._deliver_result`；采用临时替换 Feishu adapter 的 `send` 方法策略，卡片替换纯文本（无重复消息），失败时自动降级为纯文本。
+
+**模式**: monkey patch 模块级函数时，必须确认目标是类方法还是模块级函数；签名不匹配 = 静默失败。
+
+### 10.10 后台任务卡片 — adapter.send 临时替换（v0.12.0 新增）
+**策略**: Cron 和后台任务均采用"临时替换 Feishu adapter.send"策略：
+1. 进入包装器时，保存原始 `adapter.send`
+2. 替换为卡片版本，卡片成功时返回 `SendResult(success=True)` 让 Hermes 认为发送成功
+3. 卡片失败时回退到原始 `send`
+4. `finally` 块恢复原始 `send`，线程安全
+
+**关键**: 无重复消息——卡片替换纯文本，不是追加；`card_sent=True` 时抑制 Hermes 原始纯文本回复。
 
 ---
 
@@ -369,19 +402,23 @@ hermes gateway restart
 | v0.10.1 | 2026-05-28 | FlushController 线程安全修复（跑马灯无文字根因）、线性模式首次文字预填充、on_thinking reasoning_dirty 预防性修复 |
 | v0.10.2 | 2026-05-28 | 时间注入格式优化为 XML 标签 `<time>` （避免 LLM 忽略或模仿）、线性模式冗余 stream_element 调用优化 |
 | v0.11.0 | 2026-05-29 | 超限自动拆卡（卡片不再卡死）、拆卡失败+超限死局修复、Config TTL 缓存（减少磁盘读取）、`_started_msg_ids` 线程安全、`on_completed` 状态机+幂等容错（COMPLETING 状态 + 300317 错误处理） |
-| v0.12.0 | 2026-03-04 | v0.11.0 全部优化（版本号升级，V0.11.0版本 为已发布分支）+ README 功能特性改为效果图展示 |
+| v0.12.0 | 2026-05-29 | README 效果图 + Cron 推送卡片补丁修复（adapter.send 临时替换策略）+ `/background` 后台任务卡片 + 页脚 `cache` 缓存命中率字段 + 默认页脚精简（移除 api_calls/history_offset） |
+| v0.12.1 | 2026-05-29 | 竞态条件修复（`_card_ready` 同步）+ 错误/状态消息卡片内显示（`interim_assistant_callback` 重新包装）+ `card_sent` 误报修复（文本回退）+ card_id 空值检查 |
+| v0.12.2 | 2026-05-29 | 拆卡后依旧超元素修复：answer 估算对齐封卡实际元素数 + answer 内部拆分（`split_answer_segment`）+ answer 增长时动态重新估算 + 相邻 answer segment 拆卡触发 |
 
 ---
 
 ## 14. 待做事项 (Roadmap)
 
 - [ ] 拆卡首卡片 `partial` 状态显示
+- [x] ~~`/background` 后台任务卡片~~（v0.12.0 已实现：流式卡片 + 话题回复 + 抑制纯文本）
 - [ ] `background_review` 进度消息放入卡片
 - [ ] DEV → master 兼容性回归测试
 - [ ] 考虑更多 Hermes 版本的兼容性探测
 - [ ] `inject_time` 时区配置化（当前硬编码 CST/UTC+8）
 - [x] ~~`_handle_linear_flush_error` 对 `CARDKIT_ELEMENT_LIMIT` 增加超限拆卡~~（v0.11.0 已实现：超限自动触发拆卡 + `element_limit_hit` 标志）
 - [x] ~~`on_completed` 被 hermes 双调触发 300317~~（v0.11.0 已实现：COMPLETING 状态机守卫 + 300317 幂等成功 + `_was_aborted` 中断标记）
+- [x] ~~拆卡后依旧超元素（answer 估算偏差 + 缺少内部拆分）~~（v0.12.2 已实现：answer 估算对齐封卡实际 + `split_answer_segment` + 动态重新估算 + 相邻 answer 拆卡触发）
 
 ---
 
@@ -391,14 +428,16 @@ hermes gateway restart
 |------|------|------|
 | 卡片不出现 | `grep "GatewayRunner" agent.log` 看补丁是否成功 | monkey_patch.py |
 | 内容重复 | `interim_assistant_callback` 是否被包裹 | monkey_patch.py `_maybe_wrap_callbacks` |
-| Cron 推送纯文本 | `grep "cron" agent.log` 看是否有死锁 | monkey_patch.py `_wrap_cron_deliver` |
+| Cron 推送纯文本 | `grep "cron" agent.log` 看是否有死锁或 patch 失败 | monkey_patch.py `_wrap_cron_deliver` |
+| 后台任务纯文本 | `grep "background" agent.log` 看 patch 是否成功 | monkey_patch.py `_wrap_run_background_task` |
+| 页脚无 cache 字段 | `cache_read_tokens` 是否从 agent 引用中提取 | monkey_patch.py `_maybe_wrap_callbacks` |
 | Apple Silicon 报错 | `grep "conversation_loop" agent.log` | monkey_patch.py `_resolve_hermes_agent_module` |
 | 版本号显示 unknown | plugin.yaml 是否存在于正确路径 | `__init__.py` |
 | 页脚耗时为 0 | `_msg_start_time` 是否正确设置 | monkey_patch.py `_wrap_handle_message_with_agent` |
 | 消息删除后仍在更新 | UnavailableGuard 是否工作 | unavailable_guard.py |
-| 卡片元素超限 | `_element_limit_hit` 标志、`_do_linear_split` 拆卡 | controller_linear_mixin.py |
+| 拆卡后依旧超元素 | answer 估算是否对齐封卡实际、`split_answer_segment` 是否生效 | controller_linear_mixin.py `_estimate_segment_elements` / `_find_answer_split_offset` |
 | 卡片卡死不更新 | 元素超限后无限重试失败 | controller_linear_mixin.py `_handle_linear_flush_error_async` |
 
 ---
 
-*Last updated: 2026-03-04 | Version: 0.12.0 DEV*
+*Last updated: 2026-05-29 | Version: 0.12.2 DEV*

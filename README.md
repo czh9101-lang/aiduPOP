@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.12.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.12.2-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 English | <a href="README.zh-CN.md">中文版</a>
 </p>
 
-Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, tool panels, reasoning, and more.
+Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, tool panels, reasoning, background task cards, and more.
 
 > Based on [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0, with extensive refactoring and optimizations
 >
@@ -134,17 +134,18 @@ streaming:
 
   footer:
     fields:
-      - [status, elapsed, model, api_calls]
-      - [tokens, context, history_offset, compression_exhausted]
+      - [status, elapsed, model, cache, compression_exhausted]
       # Available fields:
       #   status      — Reply status (✅ Completed / ❌ Error / 🛑 Stopped)
       #   elapsed     — AI response elapsed time
       #   model       — Model name used
-      #   api_calls   — Number of API calls in this session
+      #   cache       — Cache hit rate (💾 cache_read/total_input hit%)
+      #   compression_exhausted — Context window is full (⚠ Context Full)
+      # Fields below are not shown by default — add them to the fields list to enable:
       #   tokens      — Token usage (↑ input ↓ output)
       #   context     — Context window usage (used/total percentage)
+      #   api_calls   — Number of API calls in this session
       #   history_offset — Conversation history offset; larger = longer history, sudden decrease = context compression
-      #   compression_exhausted — Context window is full, compression can no longer fit (⚠ Context Full)
       # Each inner list is one row in the footer; fields only shown when they have values
     show_label: true         # Show field labels (true/false)
 ```
