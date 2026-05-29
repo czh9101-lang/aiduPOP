@@ -26,6 +26,7 @@ from .controller_mixin import (
     _TERMINAL,
     ABORTED,
     COMPLETED,
+    COMPLETING,
     CREATING,
     FAILED,
     IDLE,
@@ -35,6 +36,7 @@ from .feishu import (
     CARDKIT_CONTENT_FAILED,
     CARDKIT_ELEMENT_LIMIT,
     CARDKIT_RATE_LIMITED,
+    CARDKIT_SEQUENCE_CONFLICT,
     CARDKIT_STREAMING_CLOSED,
     FeishuAPIError,
 )
@@ -97,7 +99,7 @@ class LinearControllerMixin:
     _do_complete_inner: Callable[..., Coroutine[Any, Any, bool]]
 
     def _schedule_linear_flush(self, session: CardSession) -> None:
-        if session.state == IDLE or session.state in _TERMINAL:
+        if session.state == IDLE or session.state in _TERMINAL or session.state == COMPLETING:
             return
         if session.guard.should_skip("_schedule_linear_flush"):
             return
@@ -188,7 +190,7 @@ class LinearControllerMixin:
 
     async def _do_linear_flush(self, session: CardSession) -> None:
         """线性模式幂等 flush：按 segment 顺序处理结构性变更，超阈值时拆卡."""
-        if session.state in _TERMINAL or not session.card_id:
+        if session.state in _TERMINAL or session.state == COMPLETING or not session.card_id:
             return
         linear_state = session.linear_state
         if linear_state is None:
@@ -719,7 +721,8 @@ class LinearControllerMixin:
 
         linear_state = session.linear_state
         is_error = session.state == FAILED
-        is_aborted = session.state == ABORTED
+        # COMPLETING 状态下需通过 _was_aborted 获取中断标记
+        is_aborted = getattr(session, "_was_aborted", False) or session.state == ABORTED
         error_message = getattr(session, "error_message", "")
         all_tool_steps = session.tool_use.build_display_steps()
 
@@ -771,6 +774,18 @@ class LinearControllerMixin:
                 session.state = COMPLETED
                 return True
             except FeishuAPIError as e:
+                # 300317 sequence 冲突 → 幂等成功
+                # hermes 可能双调 on_completed（finally + pop_post_delivery_callback），
+                # 竞态窗口内两次调用触发 300317，表示另一条路径已完成操作。
+                if e.code == CARDKIT_SEQUENCE_CONFLICT:
+                    _logger.info(
+                        "linear complete: 300317 sequence conflict → idempotent success, "
+                        "card_id=%s seq=%d",
+                        session.card_id,
+                        session.sequence,
+                    )
+                    session.state = COMPLETED
+                    return True
                 _logger.warning(
                     "linear complete attempt %d failed: code=%s msg=%s card_id=%s seq=%d",
                     attempt,

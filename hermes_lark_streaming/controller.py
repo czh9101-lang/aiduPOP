@@ -23,6 +23,8 @@ from .controller_linear_mixin import LinearControllerMixin
 from .controller_mixin import (
     _TERMINAL,
     ABORTED,
+    COMPLETED,
+    COMPLETING,
     FAILED,
     IDLE,
     ControllerMixin,
@@ -48,6 +50,7 @@ class CardSession:
 
     __slots__ = (
         "_loop",
+        "_was_aborted",
         "anchor_id",
         "card_id",
         "card_msg_id",
@@ -124,6 +127,7 @@ class CardSession:
         self.element_limit_hit = False
         self.split_disabled = False
         self.split_index: int = 0
+        self._was_aborted: bool = False
         self.error_message: str = ""
 
 
@@ -429,19 +433,49 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         aborted: bool = False,
         error_message: str = "",
     ) -> bool:
-        """消息处理完成 — 构建终端卡片."""
+        """消息处理完成 — 构建终端卡片.
+
+        状态机守卫：hermes 可能双调 on_completed（_process_message_background
+        的 finally + pop_post_delivery_callback），竞态窗口内两次调用会触发
+        300317 sequence 冲突。通过 COMPLETING 状态在 await 之前同步转移，
+        防止双调竞态；300317 错误在 complete 方法中视为幂等成功。
+        """
         if not self.enabled:
             return False
+
+        # ── 状态机幂等守卫 ──
+        # 先做直接查找（绕过 _TERMINAL 过滤），检查是否已在完成中/已完成。
+        # COMPLETING: 完成流程已启动，另一条路径的 on_completed 正在执行
+        # COMPLETED: 完成流程已结束
+        direct_session = self._sessions.get(message_id)
+        if direct_session is not None and direct_session.state in (COMPLETING, COMPLETED):
+            _logger.info(
+                "on_completed: idempotent, msg=%s state=%s",
+                message_id[:12],
+                direct_session.state,
+            )
+            return True
+
         session = self._get_active_session(message_id)
         if session is None:
             redirected_id = self._interrupt_map.pop(message_id, None)
             if redirected_id is not None:
+                # 也检查重定向的 session 是否已在完成中
+                redir_session = self._sessions.get(redirected_id)
+                if redir_session is not None and redir_session.state in (COMPLETING, COMPLETED):
+                    _logger.info(
+                        "on_completed: idempotent (redirected), msg=%s -> %s state=%s",
+                        message_id[:12],
+                        redirected_id[:12],
+                        redir_session.state,
+                    )
+                    return True
+                session = self._get_active_session(redirected_id)
                 _logger.info(
                     "on_completed: redirect msg=%s -> msg=%s",
                     message_id[:12],
                     redirected_id[:12],
                 )
-                session = self._get_active_session(redirected_id)
             if session is None:
                 return False
             message_id = redirected_id or message_id
@@ -463,16 +497,16 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         if answer:
             session.text.on_deliver(answer)
 
-        # ── 设置 session 状态 ──
-        # 当 monkey_patch 检测到 interrupted/partial 时传入 aborted=True，
-        # 此时 session 状态应为 ABORTED，这样完成卡片会显示 "🛑 已停止"。
-        if aborted and session.state not in _TERMINAL:
-            session.state = ABORTED
-
         # ── 保存错误/中断消息 ──
         # 用于在卡片正文中展示（而非仅页脚）
         if error_message:
             session.error_message = error_message
+
+        # ── 中断标记 ──
+        # 当 monkey_patch 检测到 interrupted/partial 时传入 aborted=True，
+        # 保存到 _was_aborted 以便完成方法在 COMPLETING 状态下仍能获取该标记。
+        if aborted:
+            session._was_aborted = True
 
         session.footer = {
             "duration": duration,
@@ -485,6 +519,11 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             **({"history_offset": history_offset} if history_offset else {}),
             **({"compression_exhausted": compression_exhausted} if compression_exhausted else {}),
         }
+
+        # ── 状态转移: → COMPLETING ──
+        # 在 _complete_session 的 await 之前同步设置，防止 hermes 双调竞态。
+        # COMPLETING 加入 _TERMINAL，确保后续 on_answer/on_reasoning 等跳过。
+        session.state = COMPLETING
 
         self._complete_session(session)
         return True
