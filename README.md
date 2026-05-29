@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.12.3-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.12.4-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -134,20 +134,20 @@ streaming:
 
   footer:
     fields:
-      - [status, elapsed, model, cache, compression_exhausted]
+      - [status, elapsed, model, compression_exhausted]
       # Available fields:
-      #   status      — Reply status (✅ Completed / ❌ Error / 🛑 Stopped)
+      #   status      — Reply status (Completed / Error / Stopped)
       #   elapsed     — AI response elapsed time
       #   model       — Model name used
-      #   cache       — Cache hit rate (💾 cache_read/total_input hit%)
       #   compression_exhausted — Context window is full (⚠ Context Full)
       # Fields below are not shown by default — add them to the fields list to enable:
+      #   cache       — Cache hit rate (💾 cache_read/total_input hit%)
       #   tokens      — Token usage (↑ input ↓ output)
       #   context     — Context window usage (used/total percentage)
       #   api_calls   — Number of API calls in this session
       #   history_offset — Conversation history offset; larger = longer history, sudden decrease = context compression
       # Each inner list is one row in the footer; fields only shown when they have values
-    show_label: true         # Show field labels (true/false)
+    show_label: false        # Show field labels (true/false)
 ```
 
 ### Time Injection (`inject_time`)
@@ -209,3 +209,6 @@ display:
 ---
 
 ## Acknowledgments
+
+- [Cheerwhy](https://github.com/Cheerwhy) — Original [hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) author
+- [![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=48)](https://github.com/joshcheng820222) — Multi-profile deployment fix contribution

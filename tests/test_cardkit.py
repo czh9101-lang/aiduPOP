@@ -282,7 +282,6 @@ class TestBuildErrorPanel:
     def test_error_panel_structure(self) -> None:
         panel = _build_error_panel("something went wrong")
         assert panel["tag"] == "collapsible_panel"
-        assert "❌" in panel["header"]["title"]["content"]
         assert "Error" in panel["header"]["title"]["content"]
         assert panel["border"]["color"] == "red"
         assert panel["expanded"] is True
@@ -290,7 +289,6 @@ class TestBuildErrorPanel:
     def test_aborted_panel_structure(self) -> None:
         panel = _build_error_panel("stopped by user", is_aborted=True)
         assert panel["tag"] == "collapsible_panel"
-        assert "🛑" in panel["header"]["title"]["content"]
         assert "Interrupted" in panel["header"]["title"]["content"]
         assert panel["border"]["color"] == "orange"
 
@@ -549,7 +547,7 @@ class TestBuildCompleteCard:
         card = build_complete_card(error_message="test error")
         elements = card.get("elements", card.get("body", {}).get("elements", []))
         error_panels = [e for e in elements if e.get("tag") == "collapsible_panel"
-                        and "❌" in e.get("header", {}).get("title", {}).get("content", "")]
+                        and "Error" in e.get("header", {}).get("title", {}).get("content", "")]
         assert len(error_panels) == 1
         assert "test error" in error_panels[0]["elements"][0]["content"]
 
@@ -557,7 +555,7 @@ class TestBuildCompleteCard:
         card = build_complete_card(error_message="stopped", is_aborted=True)
         elements = card.get("elements", card.get("body", {}).get("elements", []))
         error_panels = [e for e in elements if e.get("tag") == "collapsible_panel"
-                        and "🛑" in e.get("header", {}).get("title", {}).get("content", "")]
+                        and "Interrupted" in e.get("header", {}).get("title", {}).get("content", "")]
         assert len(error_panels) == 1
         assert "stopped" in error_panels[0]["elements"][0]["content"]
 
@@ -665,7 +663,7 @@ class TestBuildLinearCompleteCard:
         card = build_linear_complete_card(segments=[], all_tool_steps=[], error_message="test error")
         elements = card["body"]["elements"]
         error_panels = [e for e in elements if e.get("tag") == "collapsible_panel"
-                        and "❌" in e.get("header", {}).get("title", {}).get("content", "")]
+                        and "Error" in e.get("header", {}).get("title", {}).get("content", "")]
         assert len(error_panels) == 1
         assert "test error" in error_panels[0]["elements"][0]["content"]
 

@@ -132,7 +132,7 @@ class Config:
 
     @staticmethod
     def _default_footer_fields() -> list[list[str]]:
-        return [["status", "elapsed", "model", "cache", "compression_exhausted"]]
+        return [["status", "elapsed", "model", "compression_exhausted"]]
 
     @property
     def env_app_id(self) -> str:

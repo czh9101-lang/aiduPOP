@@ -41,7 +41,7 @@ class TestEnabled:
 
 
 class TestFooterFields:
-    _DEFAULT_FIELDS = [["status", "elapsed", "model", "cache", "compression_exhausted"]]
+    _DEFAULT_FIELDS = [["status", "elapsed", "model", "compression_exhausted"]]
 
     def test_normal_2d_fields(self) -> None:
         cfg = _make_config({"streaming": {"footer": {"fields": [["a", "b"], ["c"]]}}})

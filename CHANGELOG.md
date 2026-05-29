@@ -1,5 +1,14 @@
 # 更新日志 / Changelog
 
+## v0.12.4 (2026-05-29)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Chore | 默认页脚字段精简，`cache` 移出默认列表 | `cache` 字段对多数用户意义不大，默认显示增加视觉噪音 | 默认页脚从 `[status, elapsed, model, cache, compression_exhausted]` 精简为 `[status, elapsed, model, compression_exhausted]`；`cache` 仍可在 config.yaml 手动添加；`show_label` 默认改为 `false`（更简洁） |
+| 2 | Chore | 状态文字去掉 emoji（✅❌🛑），只用纯文字 | emoji 在部分飞书客户端/系统上显示不一致或无法渲染 | `status_completed` 从 `✅ Completed` 改为 `Completed`；`status_error` 从 `❌ Error` 改为 `Error`；`status_stopped` 从 `🛑 Stopped` 改为 `Stopped`；错误/中断面板标题同步去掉 emoji |
+| 3 | Bug | `show_label` 配置在 `config.yaml` 中出现在 `streaming` 顶层 + `streaming.footer` 两处 | 旧版本或手动编辑可能将 `show_label` 误放在 `streaming` 顶层而非 `streaming.footer` 下 | `_ensure_streaming_config()` 新增清理逻辑：检测到 `streaming.show_label` 时自动移至 `streaming.footer.show_label`，修复配置位置 |
+| 4 | Docs | README 致谢新增贡献者 | — | 新增 [joshcheng820222](https://github.com/joshcheng820222)（多 Profile 部署修复贡献） |
+
 ## v0.12.3 (2026-05-29)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
