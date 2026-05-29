@@ -468,7 +468,7 @@ def _maybe_wrap_callbacks(agent) -> None:
     _stream_consumed_texts: dict[str, str] = {}
 
     if getattr(agent, "stream_delta_callback", None):
-        _orig = agent.stream_delta_callback
+        _orig_stream = agent.stream_delta_callback
 
         def _answer_wrapper(text, *args, **kwargs):
             try:
@@ -489,7 +489,7 @@ def _maybe_wrap_callbacks(agent) -> None:
                     )
             except Exception:
                 _logger.debug("answer_wrapper: exception", exc_info=True)
-            return _orig(text, *args, **kwargs)
+            return _orig_stream(text, *args, **kwargs)
 
         agent.stream_delta_callback = _answer_wrapper
         _logger.debug("_maybe_wrap_callbacks: stream_delta_callback wrapped")
@@ -498,10 +498,10 @@ def _maybe_wrap_callbacks(agent) -> None:
 
     # ── THINKING: wrap interim_assistant_callback ──
     # Routes interim content (status messages, thinking text) to the card.
+    # When the card consumes the text, skip the original callback to prevent
+    # duplicate messages (card + plain text) on Feishu.
     # Dedup: skip if the text was already consumed by stream_delta_callback,
     # which happens when Hermes processes the same text through both callbacks.
-    # Unlike the old approach (emoji prefix matching), dedup is based on
-    # structural tracking — we compare against what stream_delta already consumed.
     if getattr(agent, "interim_assistant_callback", None):
         _orig_interim = agent.interim_assistant_callback
 
@@ -511,10 +511,31 @@ def _maybe_wrap_callbacks(agent) -> None:
                 last_consumed = _stream_consumed_texts.get(eid, "")
                 if text and text != last_consumed:
                     from .patch import on_thinking_delta
-                    on_thinking_delta(message_id=eid, text=text)
+                    consumed = on_thinking_delta(message_id=eid, text=text)
+                    if consumed:
+                        # Card consumed the text — skip original callback to
+                        # avoid duplicate plain-text delivery via _stream_consumer.
+                        # Safe because: when the card is active, _stream_consumer's
+                        # _accumulated is empty (answer_wrapper already intercepted
+                        # the stream deltas), so on_segment_break() would be a no-op.
+                        _logger.debug(
+                            "thinking_wrapper: consumed text len=%d eid=%s",
+                            len(text), eid[:12],
+                        )
+                        return
+                elif text and text == last_consumed:
+                    # Text already consumed by stream_delta_callback (card shown),
+                    # skip original callback to avoid duplicate plain-text send.
+                    _logger.debug(
+                        "thinking_wrapper: dedup skip (stream already consumed) eid=%s",
+                        eid[:12],
+                    )
+                    return
             except Exception:
                 _logger.debug("thinking_wrapper: exception", exc_info=True)
-            # Always call original so Hermes internal state stays consistent
+            # Card didn't consume (disabled / not Feishu / error) — call original
+            # so Hermes internal state (e.g. on_segment_break for already_streamed)
+            # stays consistent and plain-text fallback works.
             return _orig_interim(text, *args, **kwargs)
 
         agent.interim_assistant_callback = _thinking_wrapper
@@ -525,7 +546,7 @@ def _maybe_wrap_callbacks(agent) -> None:
 
     # ── TOOL: wrap tool_progress_callback ──
     if getattr(agent, "tool_progress_callback", None):
-        _orig = agent.tool_progress_callback
+        _orig_tool = agent.tool_progress_callback
 
         def _tool_wrapper(event_type, tool_name=None, preview=None, *args, **kwargs):
             try:
@@ -541,7 +562,7 @@ def _maybe_wrap_callbacks(agent) -> None:
                         return
             except Exception:
                 pass
-            return _orig(event_type, tool_name, preview, *args, **kwargs)
+            return _orig_tool(event_type, tool_name, preview, *args, **kwargs)
 
         agent.tool_progress_callback = _tool_wrapper
 
@@ -574,7 +595,7 @@ def _maybe_wrap_callbacks(agent) -> None:
 
     # ── BACKGROUND_REVIEW: wrap background_review_callback ──
     if getattr(agent, "background_review_callback", None):
-        _orig = agent.background_review_callback
+        _orig_bg = agent.background_review_callback
 
         def _bg_wrapper(message, *args, **kwargs):
             try:
@@ -583,13 +604,13 @@ def _maybe_wrap_callbacks(agent) -> None:
                 deferred = on_background_review_message(
                     message_id=eid,
                     text=message,
-                    sender=_orig,
+                    sender=_orig_bg,
                 )
                 if deferred:
                     return
             except Exception:
                 pass
-            return _orig(message, *args, **kwargs)
+            return _orig_bg(message, *args, **kwargs)
 
         agent.background_review_callback = _bg_wrapper
 
