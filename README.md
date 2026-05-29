@@ -210,5 +210,4 @@ display:
 
 ## Acknowledgments
 
-- [Cheerwhy](https://github.com/Cheerwhy) — Original [hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) author
-- [![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=48)](https://github.com/joshcheng820222) — Multi-profile deployment fix contribution
+[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=48)](https://github.com/joshcheng820222)

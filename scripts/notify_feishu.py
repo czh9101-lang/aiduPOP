@@ -180,7 +180,7 @@ payload = {
         "header": {
             "title": {
                 "tag": "plain_text",
-                "content": "飞书流式卡片动态",
+                "content": "飞书流式卡片插件·动态",
             },
             "template": color,
         },
