@@ -1835,3 +1835,169 @@ class TestSequenceConflictIdempotent:
 
         assert await ctrl._do_complete(session) is True
         assert session.state == COMPLETED
+
+
+# ── Answer 拆分测试 ──
+
+
+class TestAnswerEstimation:
+    """验证 answer 估算按封卡实际元素数计算，而非恒为 1."""
+
+    def test_estimate_answer_short_text(self) -> None:
+        """短文本 answer 估算为 1."""
+        seg = Segment("answer", "ans_0")
+        seg.text = "hello"
+        assert _estimate_segment_elements(seg, []) == 1
+
+    def test_estimate_answer_long_text_splits(self) -> None:
+        """长文本 answer 按 _split_long_text 实际分块数估算."""
+        seg = Segment("answer", "ans_0")
+        # 生成超过 _MAX_CHUNK_CHARS(2400) 的文本，应被拆成多块
+        seg.text = "A" * 5000
+        est = _estimate_segment_elements(seg, [])
+        assert est >= 2  # 至少拆成 2 块
+
+    def test_estimate_answer_empty_text(self) -> None:
+        """空文本 answer 估算为 1."""
+        seg = Segment("answer", "ans_0")
+        seg.text = ""
+        assert _estimate_segment_elements(seg, []) == 1
+
+
+class TestSplitAnswerSegment:
+    """验证 LinearState.split_answer_segment 拆分逻辑."""
+
+    def test_split_answer_basic(self) -> None:
+        """在指定字符偏移处拆分 answer segment."""
+        ls = LinearState()
+        ls.on_answer_delta("Hello World!")
+        original_seg = ls.segments[0]
+
+        new_seg = ls.split_answer_segment(0, 5)
+
+        assert original_seg.text == "Hello"
+        assert new_seg.text == " World!"
+        assert len(ls.segments) == 2
+        assert ls.segments[0] is original_seg
+        assert ls.segments[1] is new_seg
+        assert original_seg.dirty is True
+        assert new_seg.dirty is True
+
+    def test_split_answer_preserves_counter(self) -> None:
+        """拆分后新 segment 的 el_id 递增."""
+        ls = LinearState()
+        ls.on_answer_delta("First answer")
+        # 插入 reasoning 让下一个 answer 创建新 segment
+        ls.on_reasoning_delta("thinking")
+        ls.on_answer_delta("Second answer")
+
+        # 拆分第二个 answer segment (index 2)
+        new_seg = ls.split_answer_segment(2, 3)
+
+        assert ls.segments[2].el_id != new_seg.el_id
+        assert new_seg.type == "answer"
+
+
+class TestAnswerSplitInFlush:
+    """验证 _do_linear_flush 中 answer 超限时内部拆分 + 拆卡."""
+
+    @pytest.mark.asyncio
+    async def test_long_answer_triggers_internal_split(self) -> None:
+        """未创建的 answer 超限时，先内部拆分再拆卡."""
+        ctrl = _setup_ctrl()
+        calls = _capture_split_calls(ctrl)
+
+        session = _make_session("msg_ans_split", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_old"
+        session.card_msg_id = "msg_old"
+        # 让已有元素接近阈值，一个长 answer 就会超限
+        session.element_count = 175
+        # 添加已创建的 reasoning segment
+        session.linear_state.on_reasoning_delta("think")
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].dirty = False
+        session.linear_state.segments[0].element_estimate = 4
+        # 添加超长 answer（超过 _MAX_CHUNK_CHARS * 多倍，拆成多块）
+        long_text = "A" * 10000
+        session.linear_state.on_answer_delta(long_text)
+
+        ctrl._sessions["msg_ans_split"] = session
+
+        await ctrl._do_linear_flush(session)
+
+        # 应发生拆卡：旧卡被封，新卡创建
+        assert ("create", "") in calls
+        assert ("close", "card_old") in calls
+        # answer 应被拆分为多个 segment
+        answer_segs = [s for s in session.linear_state.segments if s.type == "answer"]
+        assert len(answer_segs) >= 2
+
+    @pytest.mark.asyncio
+    async def test_answer_growth_triggers_rollover(self) -> None:
+        """已创建的 answer 文本增长后估算超限，触发内部拆分 + 拆卡."""
+        ctrl = _setup_ctrl()
+        calls = _capture_split_calls(ctrl)
+
+        session = _make_session("msg_ans_roll", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_old"
+        session.card_msg_id = "msg_old"
+        # 已创建 answer，初始估算偏低
+        session.linear_state.on_answer_delta("short")
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].element_estimate = 1
+        session.element_count = 175
+
+        # answer 增长到很长
+        long_text = "A" * 10000
+        session.linear_state.on_answer_delta(long_text)
+
+        ctrl._sessions["msg_ans_roll"] = session
+
+        await ctrl._do_linear_flush(session)
+
+        # answer 增长后估算应更新
+        assert session.linear_state.segments[0].element_estimate > 1
+        # 应发生拆卡
+        assert ("create", "") in calls
+
+    @pytest.mark.asyncio
+    async def test_answer_split_across_multiple_cards(self) -> None:
+        """超长 answer 拆分后跨多张卡.
+
+        场景：先有大量 tool steps 占满元素，然后超长 answer 导致
+        第一次拆卡，新卡上继续写入超长 answer 的剩余部分。
+        验证拆卡后 answer 被拆成多个 segment，且第一张卡被封，
+        新卡继续接收内容。
+        """
+        ctrl = _setup_ctrl()
+        calls = _capture_split_calls(ctrl)
+
+        session = _make_session("msg_ans_many", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_ans_p1"
+        session.card_msg_id = "msg_ans_p1"
+        session.element_count = 174  # 已有大量元素，接近阈值
+        # 添加已创建的 tool segment（占 174 个元素）
+        for _ in range(28):
+            session.tool_use.record_start("check", "f")
+        session.linear_state.on_tool_event(len(session.tool_use.build_display_steps()))
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].element_estimate = 174
+        session.linear_state.segments[0].dirty = False
+        # 添加超长 answer（拆成多块，估算远超阈值）
+        huge_text = ("Paragraph content here. " * 50 + "\n\n") * 100  # ~130K chars → ~100 chunks
+        session.linear_state.on_answer_delta(huge_text)
+
+        ctrl._sessions["msg_ans_many"] = session
+
+        await ctrl._do_linear_flush(session)
+
+        # 应发生拆卡
+        assert ("create", "") in calls
+        # answer 应被拆分为多个 segment
+        answer_segs = [s for s in session.linear_state.segments if s.type == "answer"]
+        assert len(answer_segs) >= 2
+        # 拆卡后新卡应继续接收内容
+        assert session.card_id != "card_ans_p1"

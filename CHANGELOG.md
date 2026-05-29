@@ -1,15 +1,15 @@
 # 更新日志 / Changelog
 
-## v0.12.1 (2026-05-29)
+## v0.12.2 (2026-05-29)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
-| 1 | Bug | Agent 快速失败时卡片卡跑马灯，永远无法退出流式模式 | `on_completed` 在卡片创建完成前触发（竞态条件），`card_id` 仍为 None，`_do_linear_complete_inner` 跳过 `close_streaming` 调用，卡片永远停留在 loading 状态 | 新增 `_card_ready: asyncio.Event` 同步机制：卡片创建完成后 set 事件；`_do_linear_complete_inner` / `_do_complete_inner` 在执行前 `await _card_ready.wait()`（超时 30s）；卡片创建失败路径也 set 事件避免死锁 |
-| 2 | Bug | 错误/状态消息（⚠️ 🔄 ❌）不在卡片内显示，以纯文本发送 | `interim_assistant_callback` 未被包装，所有中间状态消息绕过卡片系统直接走 Hermes 原始回调 | 重新包装 `interim_assistant_callback`：通过 `on_thinking_delta` 路由到卡片；去重基于结构化追踪（`_stream_consumed_texts` 对比 `stream_delta_callback` 已消费文本），而非基于 emoji 前缀匹配；始终调用原始回调保持 Hermes 内部状态一致 |
-| 3 | Bug | `card_sent=True` 误报：卡片从未成功显示但网关文本回复被抑制 | `on_completed` 无条件返回 True（只要 session 存在），即使 card_id 为 None 也会抑制网关文本回复，导致用户"什么都看不到" | 卡片完成失败时通过 `_send_text_fallback` 直接发送文本回复作为兜底；新增 `_do_linear_complete_with_fallback` / `_do_complete_with_fallback` 包装器；当卡片不可用时确保用户至少看到文本内容；新增 `FeishuClient.reply_text` 方法 |
-| 4 | Bug | 卡片创建失败后完成流程仍尝试操作不存在的 card_id | `_do_linear_complete_inner` 不检查 card_id 是否为 None 就尝试 `close_streaming` | 新增 `card_id` 和 `card_msg_id` 的空值检查：两者均为 None 时直接返回 False（设置 state=FAILED），不再尝试 API 操作 |
+| 1 | Bug | 拆卡后依旧超元素：Answer 估算恒为 1，拆卡判断失效 | `_estimate_segment_elements` 对 answer 恒返回 1，但封卡时 answer 会被 `_split_long_text` 拆成 N 个 markdown 元素；流式阶段判断"不超限"，封卡时实际超限 | 修正 answer 估算：按封卡时 `_split_long_text` 实际分块数计算元素数，确保流式阶段拆卡判断基于封卡真实元素数 |
+| 2 | Bug | 单个 Answer 超大时无法内部拆分，只能强行塞入当前卡 | 只有 Tool segment 有内部拆分能力（`split_tool_segment`），Answer segment 缺少对应的拆分机制 | 新增 `split_answer_segment`：按文本块边界拆分 answer segment；新增 `_find_answer_split_offset`：找到当前卡能容纳的最大文本块数；在 `_do_linear_flush` 中增加 answer 内部拆分触发逻辑（对标 tool 的内部拆分） |
+| 3 | Bug | 已创建的 Answer 文本增长后估算不更新，可能导致拆卡延迟 | answer 创建时 `element_estimate = 1`，后续文本增长不再重新估算，`element_count` 中的旧值偏低 | 在 `_do_linear_flush` 步骤 0 增加 answer 估算动态更新：每次 flush 前对已创建的 dirty answer segment 重新估算并更新 `element_count`；增长后超限则触发 answer 内部拆分 + 拆卡 |
+| 4 | Bug | 拆卡后相邻 Answer segment 不会触发继续拆卡 | `_do_linear_flush` 中只在相邻 tool segment 边界触发拆卡，相邻 answer segment 被忽略 | 扩展拆卡触发条件：相邻 answer segment 也触发拆卡（与 tool segment 一致） |
 
-## v0.12.0 (2026-03-04)
+## v0.12.0 (2026-05-29)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
