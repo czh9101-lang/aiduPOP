@@ -13,7 +13,9 @@ when the plugin loads.
                                                 TOOL, REASONING, BACKGROUND_REVIEW)
     cron.scheduler._deliver_result           → redirect cron Feishu deliveries to CardKit
     FeishuAdapter.send                       → intercept ALL text → convert to cards
-    FeishuAdapter.edit_message               → route card updates (logging for now)
+    FeishuAdapter.edit_message               → update gateway card content (Phase 2)
+    FeishuAdapter.add_reaction               → card status indicator (Phase 3)
+    FeishuAdapter.delete_reaction            → card status clear (Phase 3)
 
 Message context (``message_id``, ``event_message_id``, ``chat_id``, …) is
 propagated through a ``contextvars.ContextVar`` — safe within a single async
@@ -73,6 +75,13 @@ _msg_ctx: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar
 # the old session was interrupted (not just aborted).
 _started_msg_ids: set[str] = set()
 _started_msg_ids_lock = threading.Lock()
+
+# ── Gateway card registry (Phase 2: edit_message support) ────────────
+# Maps card_msg_id → {"chat_id": str, "card_id": str|None, "category": str}
+# Used by _wrap_feishu_adapter_edit to update cards created by
+# _wrap_feishu_adapter_send instead of trying to edit plain text.
+_gateway_cards: dict[str, dict[str, Any]] = {}
+_gateway_cards_lock = threading.Lock()
 
 
 def _get_event_message_id() -> str | None:
@@ -978,6 +987,18 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
         if not content.strip():
             return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
+        # ── Phase 4: Media message card wrapping ──
+        # When content contains MEDIA tags (Hermes wraps images/files in
+        # <MEDIA>...</MEDIA> tags), extract the media and text parts, then
+        # build a card with both the media and the text content.
+        _media_parts: list[dict] | None = None
+        _text_content = content
+        try:
+            from gateway.platforms.base import BasePlatformAdapter
+            _media_parts, _text_content = BasePlatformAdapter.extract_media(content)
+        except (ImportError, AttributeError):
+            pass
+
         # ── Guard: check if this is a cron/background fallback send ──
         # When cron's _card_sending_send or background task's
         # _intercepting_send falls back to original_send, it calls
@@ -1020,28 +1041,36 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                 if not cfg.gateway_cards:
                     return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
-                # Strip MEDIA tags for cleaner card content
-                cleaned = content
-                try:
-                    from gateway.platforms.base import BasePlatformAdapter
-                    _, cleaned = BasePlatformAdapter.extract_media(content)
-                except (ImportError, AttributeError):
-                    pass
-                if not cleaned.strip():
+                # Phase 4: Media-aware card building
+                has_media = bool(_media_parts)
+                cleaned = _text_content
+                if not cleaned.strip() and not has_media:
                     cleaned = content
+                if not cleaned.strip() and not has_media:
+                    return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
-                category = _classify_gateway_message(cleaned)
-                card_msg_id = await ctrl._do_gateway_deliver(
-                    chat_id, cleaned.strip(), category=category,
+                category = _classify_gateway_message(cleaned or content)
+                card_msg_id, card_id = await ctrl._do_gateway_deliver(
+                    chat_id, cleaned.strip() if cleaned.strip() else content,
+                    category=category,
+                    media_parts=_media_parts if has_media else None,
                 )
                 if card_msg_id:
+                    # Register the card so edit_message can update it later
+                    _register_gateway_card(
+                        card_msg_id,
+                        chat_id=chat_id,
+                        card_id=card_id,
+                        category=category,
+                    )
                     _logger.info(
                         "hermes-lark-streaming v%s: gateway message card sent: "
-                        "chat=%s category=%s content_len=%d",
+                        "chat=%s category=%s content_len=%d card_id=%s",
                         __version__,
                         chat_id[:12] if chat_id else "?",
                         category,
                         len(content),
+                        (card_id or "?")[:12],
                     )
                     try:
                         from gateway.platforms.base import SendResult
@@ -1062,21 +1091,227 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
     return _intercepted_send
 
 
-def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
-    """Intercept ``FeishuAdapter.edit_message()`` — route card updates.
+def _register_gateway_card(card_msg_id: str, *, chat_id: str, card_id: str | None, category: str) -> None:
+    """Register a gateway card so edit_message can update it later."""
+    if not card_msg_id:
+        return
+    with _gateway_cards_lock:
+        _gateway_cards[card_msg_id] = {
+            "chat_id": chat_id,
+            "card_id": card_id,
+            "category": category,
+        }
+    _logger.debug(
+        "registered gateway card: msg_id=%s card_id=%s category=%s",
+        card_msg_id[:12], (card_id or "?")[:12], category,
+    )
 
-    For now this is a pass-through with logging. Future phases may
-    convert long-running notification edits into card updates.
+
+def _unregister_gateway_card(card_msg_id: str) -> None:
+    """Remove a gateway card from the registry."""
+    with _gateway_cards_lock:
+        _gateway_cards.pop(card_msg_id, None)
+
+
+def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
+    """Intercept ``FeishuAdapter.edit_message()`` — update gateway card content.
+
+    When Hermes calls ``edit_message()`` on a message_id that was created
+    by our gateway card system (Phase 1), we update the card content instead
+    of trying to edit the plain text message (which no longer exists).
+
+    This handles long-running notifications where Hermes initially sends
+    a status message and later updates it (e.g. "Thinking..." → "Processing...").
+
+    When the message_id is NOT a gateway card (i.e. it's an original Feishu
+    message that was never converted to a card), we pass through to the
+    original ``edit_message()``.
     """
     async def _intercepted_edit(self_feishu, message_id, content, metadata=None, **kwargs):
+        # ── Check if this message_id is a gateway card ──
+        with _gateway_cards_lock:
+            card_info = _gateway_cards.get(message_id)
+
+        if card_info is not None and isinstance(content, str) and content.strip():
+            _logger.info(
+                "feishu_adapter_edit: updating gateway card msg_id=%s content_len=%d",
+                message_id[:12] if message_id else "?",
+                len(content),
+            )
+            try:
+                from .controller import get_controller
+                ctrl = get_controller()
+                if ctrl and ctrl.enabled:
+                    # Check if gateway_cards feature is enabled
+                    cfg = _get_config()
+                    if cfg.gateway_cards:
+                        # Strip MEDIA tags for cleaner card content
+                        cleaned = content
+                        try:
+                            from gateway.platforms.base import BasePlatformAdapter
+                            _, cleaned = BasePlatformAdapter.extract_media(content)
+                        except (ImportError, AttributeError):
+                            pass
+                        if not cleaned.strip():
+                            cleaned = content
+
+                        category = _classify_gateway_message(cleaned)
+                        updated = await ctrl._do_gateway_card_update(
+                            chat_id=card_info["chat_id"],
+                            card_msg_id=message_id,
+                            card_id=card_info.get("card_id"),
+                            content=cleaned.strip(),
+                            category=category,
+                        )
+                        if updated:
+                            # Update category in registry
+                            with _gateway_cards_lock:
+                                if message_id in _gateway_cards:
+                                    _gateway_cards[message_id]["category"] = category
+                            try:
+                                from gateway.platforms.base import SendResult
+                                return SendResult(success=True)
+                            except (ImportError, AttributeError):
+                                return None
+            except Exception:
+                _logger.debug(
+                    "feishu_adapter_edit: card update failed, falling back to original",
+                    exc_info=True,
+                )
+
+        # ── Fallback: original edit_message ──
         _logger.debug(
-            "feishu_adapter_edit: msg_id=%s content_len=%d",
+            "feishu_adapter_edit: pass-through msg_id=%s content_len=%d",
             message_id[:12] if message_id else "?",
             len(content) if isinstance(content, str) else 0,
         )
         return await orig_edit(self_feishu, message_id, content, metadata=metadata, **kwargs)
 
     return _intercepted_edit
+
+
+# ── Reaction → card status indicator (Phase 3) ─────────────────────
+
+
+# Map Feishu reaction emojis to human-readable status labels
+_REACTION_STATUS_MAP: dict[str, str] = {
+    "👀": "Reading",
+    "👍": "Done",
+    "🤔": "Thinking",
+    "⏳": "Processing",
+    "✅": "Completed",
+    "🔄": "Refreshing",
+    "📝": "Composing",
+}
+
+
+def _wrap_feishu_adapter_add_reaction(orig_add_reaction: Callable) -> Callable:
+    """Intercept ``FeishuAdapter.add_reaction()`` — card status indicator.
+
+    When Hermes adds a reaction to a message that has a gateway card,
+    we suppress the reaction emoji and instead show the status as a
+    text indicator in the card's header/footer.
+
+    This replaces the "emoji reaction on the user's message" pattern
+    (which is invisible in card-only mode) with an in-card status
+    indicator.
+    """
+    async def _intercepted_add_reaction(self_feishu, message_id, emoji, **kwargs):
+        # ── Check if this message_id is a gateway card ──
+        with _gateway_cards_lock:
+            card_info = _gateway_cards.get(message_id)
+
+        if card_info is not None:
+            status_label = _REACTION_STATUS_MAP.get(emoji)
+            if status_label:
+                _logger.info(
+                    "feishu_adapter_add_reaction: gateway card status msg_id=%s emoji=%s → %s",
+                    message_id[:12] if message_id else "?",
+                    emoji,
+                    status_label,
+                )
+                try:
+                    from .controller import get_controller
+                    ctrl = get_controller()
+                    if ctrl and ctrl.enabled:
+                        cfg = _get_config()
+                        if cfg.gateway_cards:
+                            # Update the card with a status indicator
+                            updated = await ctrl._do_gateway_card_status(
+                                card_msg_id=message_id,
+                                card_id=card_info.get("card_id"),
+                                status_label=status_label,
+                                emoji=emoji,
+                                category=card_info.get("category", "system"),
+                            )
+                            if updated:
+                                # Suppress the actual reaction — card shows status instead
+                                try:
+                                    from gateway.platforms.base import SendResult
+                                    return SendResult(success=True)
+                                except (ImportError, AttributeError):
+                                    return None
+                except Exception:
+                    _logger.debug(
+                        "feishu_adapter_add_reaction: card status update failed",
+                        exc_info=True,
+                    )
+
+        # ── Fallback: original add_reaction ──
+        return await orig_add_reaction(self_feishu, message_id, emoji, **kwargs)
+
+    return _intercepted_add_reaction
+
+
+def _wrap_feishu_adapter_delete_reaction(orig_delete_reaction: Callable) -> Callable:
+    """Intercept ``FeishuAdapter.delete_reaction()`` — clear card status.
+
+    When Hermes removes a reaction from a gateway card message,
+    we clear the status indicator from the card.
+    """
+    async def _intercepted_delete_reaction(self_feishu, message_id, emoji, **kwargs):
+        # ── Check if this message_id is a gateway card ──
+        with _gateway_cards_lock:
+            card_info = _gateway_cards.get(message_id)
+
+        if card_info is not None:
+            status_label = _REACTION_STATUS_MAP.get(emoji)
+            if status_label:
+                _logger.info(
+                    "feishu_adapter_delete_reaction: gateway card clear status msg_id=%s emoji=%s",
+                    message_id[:12] if message_id else "?",
+                    emoji,
+                )
+                try:
+                    from .controller import get_controller
+                    ctrl = get_controller()
+                    if ctrl and ctrl.enabled:
+                        cfg = _get_config()
+                        if cfg.gateway_cards:
+                            # Clear the status indicator from the card
+                            updated = await ctrl._do_gateway_card_status(
+                                card_msg_id=message_id,
+                                card_id=card_info.get("card_id"),
+                                status_label="",
+                                emoji="",
+                                category=card_info.get("category", "system"),
+                            )
+                            if updated:
+                                try:
+                                    from gateway.platforms.base import SendResult
+                                    return SendResult(success=True)
+                                except (ImportError, AttributeError):
+                                    return None
+                except Exception:
+                    _logger.debug(
+                        "feishu_adapter_delete_reaction: card status clear failed",
+                        exc_info=True,
+                    )
+
+        # ── Fallback: original delete_reaction ──
+        return await orig_delete_reaction(self_feishu, message_id, emoji, **kwargs)
+
+    return _intercepted_delete_reaction
 
 
 # ── Namespace-collision-safe module resolver ────────────────────────
@@ -1422,8 +1657,17 @@ def apply_patches() -> None:
             FeishuAdapter.edit_message = _wrap_feishu_adapter_edit(FeishuAdapter.edit_message)
         except AttributeError:
             _logger.debug("hermes-lark-streaming: FeishuAdapter.edit_message not found, edit interception skipped")
+        # Phase 3: Reaction → card status indicator
+        try:
+            FeishuAdapter.add_reaction = _wrap_feishu_adapter_add_reaction(FeishuAdapter.add_reaction)
+        except AttributeError:
+            _logger.debug("hermes-lark-streaming: FeishuAdapter.add_reaction not found, reaction interception skipped")
+        try:
+            FeishuAdapter.delete_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter.delete_reaction)
+        except AttributeError:
+            _logger.debug("hermes-lark-streaming: FeishuAdapter.delete_reaction not found, reaction interception skipped")
         feishu_patched = True
-        _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit patched ✓ (gateway message cards enabled)")
+        _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit/reaction patched ✓ (gateway message cards enabled)")
     except (ImportError, AttributeError) as e:
         _logger.info("hermes-lark-streaming: FeishuAdapter patch skipped (%s)", e)
 

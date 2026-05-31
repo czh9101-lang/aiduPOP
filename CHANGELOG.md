@@ -1,5 +1,15 @@
 # 更新日志 / Changelog
 
+## v0.15.0 (2026-06-02)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | `edit_message()` 拦截 — 网关卡片可编辑 | Phase 1 发送网关卡片后，Hermes 后续调用 `edit_message()` 更新内容时找不到原始纯文本消息（已被卡片替代），导致更新失败或行为异常 | 新增网关卡片注册表 `_gateway_cards`：`send()` 发送卡片后注册 `card_msg_id → {chat_id, card_id, category}`；`edit_message()` 拦截器查询注册表，若命中则调用 `_do_gateway_card_update()` 更新卡片内容（IM PATCH 模式），而非尝试编辑不存在的纯文本消息；新增 `_do_gateway_card_update()` 方法（controller_mixin.py）：支持 CardKit 和 IM PATCH 两种更新路径 |
+| 2 | Feature | Reaction → 卡片状态指示器 | Hermes 通过 emoji reaction（👀/👍/🤔）表示消息处理状态，但在卡片模式下 reaction 不可见或视觉不一致 | 新增 `add_reaction()` / `delete_reaction()` 拦截器：当 reaction 目标是网关卡片时，将 emoji 转为卡片内状态指示器（如 "👀 Reading"、"⏳ Processing"），而非在用户消息上添加 reaction；新增 `_REACTION_STATUS_MAP` 映射表：7 种常见 emoji → 状态标签；新增 `_do_gateway_card_status()` 方法（controller_mixin.py）：更新卡片状态指示器；`build_gateway_card()` 新增 `status_label` / `status_emoji` 参数：当有活动状态时，替换分类图标头部 |
+| 3 | Feature | 媒体消息卡片包装 | Hermes 发送的图片/文件消息（`<MEDIA>` 标签）在 Phase 1 中被提取 media 后仅保留文本，图片丢失 | `_wrap_feishu_adapter_send` 新增媒体感知：提取 MEDIA 标签后保留 `_media_parts`，传递给 `_do_gateway_deliver()`；`build_gateway_card()` 新增 `media_parts` 参数：图片渲染为 `img` 元素，文件渲染为 📎 链接文本；`_do_gateway_deliver()` 新增 `media_parts` 参数透传 |
+| 4 | Chore | `apply_patches()` 新增 reaction 补丁 | 无法确认 reaction 拦截是否成功应用 | 补丁日志新增 `add_reaction` / `delete_reaction` 补丁状态；汇总日志更新为 `FeishuAdapter=send/edit/reaction` |
+| 5 | Test | 新增 Phase 2-4 测试 | 新功能需测试覆盖 | 新增 `TestBuildGatewayCardStatusIndicator`（4 个测试）：状态指示器渲染、空状态回退；新增 `TestBuildGatewayCardMedia`（5 个测试）：图片/文件元素、多 media、空 media；新增 `TestGatewayCardRegistry`（3 个测试）：注册/查询/删除/空 ID；新增 `TestReactionStatusMap`（3 个测试）：映射存在性、常见 emoji、值类型 |
+
 ## v0.14.0 (2026-06-01)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

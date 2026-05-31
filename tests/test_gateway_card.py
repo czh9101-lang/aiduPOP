@@ -1,4 +1,4 @@
-"""Tests for gateway message card interception (v0.14.0 Phase 1)."""
+"""Tests for gateway message card interception (v0.14.0 Phase 1-4)."""
 
 from __future__ import annotations
 
@@ -78,6 +78,103 @@ class TestBuildGatewayCard:
         assert len(elements) >= 2
 
 
+class TestBuildGatewayCardStatusIndicator:
+    """Test Phase 3: status indicator in build_gateway_card()."""
+
+    def test_status_indicator_replaces_category_icon(self):
+        """When status_label and status_emoji are set, they replace the category icon."""
+        card = build_gateway_card(
+            "Processing your request",
+            category="system",
+            status_label="Reading",
+            status_emoji="👀",
+        )
+        elements = card["body"]["elements"]
+        # First element should be the status indicator, not the category icon
+        assert elements[0]["tag"] == "plain_text"
+        assert elements[0]["content"] == "👀 Reading"
+        assert elements[0]["text_color"] == "turquoise"
+
+    def test_no_status_shows_category_icon(self):
+        """When no status is set, the category icon is shown (default behavior)."""
+        card = build_gateway_card("Hello", category="error")
+        elements = card["body"]["elements"]
+        assert elements[0]["content"] == "❌"
+        assert elements[0]["text_color"] == "grey"
+
+    def test_empty_status_shows_category_icon(self):
+        """When status_label is empty, the category icon is shown."""
+        card = build_gateway_card("Hello", status_label="", status_emoji="👀")
+        elements = card["body"]["elements"]
+        # No status → show category icon (default system)
+        assert elements[0]["content"] == "🔔"
+
+    def test_processing_status(self):
+        card = build_gateway_card("Working...", status_label="Processing", status_emoji="⏳")
+        elements = card["body"]["elements"]
+        assert elements[0]["content"] == "⏳ Processing"
+
+
+class TestBuildGatewayCardMedia:
+    """Test Phase 4: media elements in build_gateway_card()."""
+
+    def test_image_media_element(self):
+        """Image media parts are rendered as img elements in the card."""
+        card = build_gateway_card(
+            "Here is an image",
+            media_parts=[{"type": "image", "key": "img_v3_test123"}],
+        )
+        elements = card["body"]["elements"]
+        # Should have: icon + img + markdown
+        assert len(elements) >= 3
+        # Find the img element
+        img_elements = [e for e in elements if e.get("tag") == "img"]
+        assert len(img_elements) == 1
+        assert img_elements[0]["img_key"] == "img_v3_test123"
+
+    def test_file_media_element(self):
+        """File media parts are rendered as text links in the card."""
+        card = build_gateway_card(
+            "Here is a file",
+            media_parts=[{"type": "file", "key": "file_v3_test456", "name": "report.pdf"}],
+        )
+        elements = card["body"]["elements"]
+        # Find the file element
+        file_elements = [e for e in elements if "📎" in e.get("content", "")]
+        assert len(file_elements) == 1
+        assert "report.pdf" in file_elements[0]["content"]
+
+    def test_multiple_media_parts(self):
+        """Multiple media parts are all included in the card."""
+        card = build_gateway_card(
+            "Multiple files",
+            media_parts=[
+                {"type": "image", "key": "img_v3_1"},
+                {"type": "image", "key": "img_v3_2"},
+                {"type": "file", "key": "file_v3_1", "name": "doc.pdf"},
+            ],
+        )
+        elements = card["body"]["elements"]
+        img_elements = [e for e in elements if e.get("tag") == "img"]
+        assert len(img_elements) == 2
+        file_elements = [e for e in elements if "📎" in e.get("content", "")]
+        assert len(file_elements) == 1
+
+    def test_no_media_parts(self):
+        """When media_parts is None, no media elements are added."""
+        card = build_gateway_card("Just text", media_parts=None)
+        elements = card["body"]["elements"]
+        img_elements = [e for e in elements if e.get("tag") == "img"]
+        assert len(img_elements) == 0
+
+    def test_empty_media_parts_list(self):
+        """When media_parts is an empty list, no media elements are added."""
+        card = build_gateway_card("Just text", media_parts=[])
+        elements = card["body"]["elements"]
+        img_elements = [e for e in elements if e.get("tag") == "img"]
+        assert len(img_elements) == 0
+
+
 class TestClassifyGatewayMessage:
     """Test the _classify_gateway_message() function."""
 
@@ -135,3 +232,57 @@ class TestGatewayCardsConfig:
         from hermes_lark_streaming.config import Config
         cfg = Config()
         assert hasattr(cfg, "gateway_cards")
+
+
+class TestGatewayCardRegistry:
+    """Test Phase 2: gateway card registry for edit_message support."""
+
+    def test_register_and_lookup(self):
+        from hermes_lark_streaming.monkey_patch import _register_gateway_card, _gateway_cards, _gateway_cards_lock
+        # Register a card
+        _register_gateway_card("msg_test_123", chat_id="chat_abc", card_id="card_xyz", category="error")
+        # Look it up
+        with _gateway_cards_lock:
+            info = _gateway_cards.get("msg_test_123")
+        assert info is not None
+        assert info["chat_id"] == "chat_abc"
+        assert info["card_id"] == "card_xyz"
+        assert info["category"] == "error"
+        # Cleanup
+        from hermes_lark_streaming.monkey_patch import _unregister_gateway_card
+        _unregister_gateway_card("msg_test_123")
+
+    def test_unregister_removes_entry(self):
+        from hermes_lark_streaming.monkey_patch import _register_gateway_card, _unregister_gateway_card, _gateway_cards, _gateway_cards_lock
+        _register_gateway_card("msg_test_456", chat_id="chat_def", card_id=None, category="system")
+        _unregister_gateway_card("msg_test_456")
+        with _gateway_cards_lock:
+            assert _gateway_cards.get("msg_test_456") is None
+
+    def test_register_empty_id_is_noop(self):
+        from hermes_lark_streaming.monkey_patch import _register_gateway_card, _gateway_cards, _gateway_cards_lock
+        _register_gateway_card("", chat_id="chat_ghi", card_id=None, category="system")
+        with _gateway_cards_lock:
+            assert "" not in _gateway_cards
+
+
+class TestReactionStatusMap:
+    """Test Phase 3: reaction emoji to status label mapping."""
+
+    def test_reaction_map_exists(self):
+        from hermes_lark_streaming.monkey_patch import _REACTION_STATUS_MAP
+        assert isinstance(_REACTION_STATUS_MAP, dict)
+        assert len(_REACTION_STATUS_MAP) > 0
+
+    def test_common_reactions_mapped(self):
+        from hermes_lark_streaming.monkey_patch import _REACTION_STATUS_MAP
+        assert "👀" in _REACTION_STATUS_MAP
+        assert "👍" in _REACTION_STATUS_MAP
+        assert "🤔" in _REACTION_STATUS_MAP
+
+    def test_reaction_values_are_strings(self):
+        from hermes_lark_streaming.monkey_patch import _REACTION_STATUS_MAP
+        for emoji, label in _REACTION_STATUS_MAP.items():
+            assert isinstance(emoji, str)
+            assert isinstance(label, str)
+            assert len(label) > 0
