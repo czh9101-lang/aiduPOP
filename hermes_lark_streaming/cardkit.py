@@ -707,3 +707,62 @@ def build_cron_card(content: str) -> dict[str, Any]:
         if chunk.strip():
             card["body"]["elements"].append({"tag": "markdown", "content": chunk})
     return card
+
+
+_CATEGORY_ICONS: dict[str, str] = {
+    "system": "🔔",
+    "error": "❌",
+    "auth": "🔐",
+    "session": "🔄",
+    "slash": "⌨️",
+}
+
+
+def build_gateway_card(content: str, *, category: str = "") -> dict[str, Any]:
+    """Gateway-internal message card — lightweight, static, no streaming.
+
+    Used for slash command replies, auth messages, session lifecycle
+    notifications, error messages, and all non-AI, non-interactive text
+    that Hermes sends to the Feishu user.
+
+    Unlike ``build_cron_card``, this adds a subtle header icon to
+    differentiate gateway messages from AI replies.
+
+    Args:
+        content: The text content to display in the card.
+        category: Optional category hint for the header icon:
+            - "system": system/notification messages (default)
+            - "error": error messages
+            - "auth": auth/pairing messages
+            - "session": session lifecycle messages
+            - "slash": slash command replies
+    """
+    cat = category or "system"
+    icon = _CATEGORY_ICONS.get(cat, _CATEGORY_ICONS["system"])
+
+    elements: list[dict] = []
+
+    # Subtle header line with category icon
+    elements.append({
+        "tag": "plain_text",
+        "content": icon,
+        "text_color": "grey",
+        "text_size": "notation",
+    })
+
+    if content.strip():
+        for chunk in _split_long_text(_downgrade_tables(optimize_markdown_style(content))):
+            if chunk.strip():
+                elements.append({"tag": "markdown", "content": chunk})
+
+    card: dict[str, Any] = {
+        "schema": "2.0",
+        "config": {"wide_screen_mode": True, "locales": _LOCALES},
+        "body": {"elements": elements},
+    }
+
+    summary = content[:120].replace("\n", " ").replace("```", "").strip() if content.strip() else ""
+    if summary:
+        card["config"]["summary"] = {"content": summary}
+
+    return card

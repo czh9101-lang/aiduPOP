@@ -15,6 +15,7 @@ from .cardkit import (
     _build_tool_panel,
     build_complete_card,
     build_cron_card,
+    build_gateway_card,
     build_im_fallback_card,
     build_streaming_card,
     build_streaming_card_v2,
@@ -426,3 +427,25 @@ class ControllerMixin:
         assert self._client is not None
         card = build_cron_card(content)
         await self._client.send_card_to_chat(chat_id, card)
+
+    async def _do_gateway_deliver(self, chat_id: str, content: str, *, category: str = "") -> str | None:
+        """Send a gateway-internal message as a card.
+
+        Returns the card_msg_id on success, or None on failure (caller should
+        fall back to the original adapter.send).
+        """
+        try:
+            await self._ensure_init()
+            assert self._client is not None
+            card = build_gateway_card(content, category=category)
+            card_msg_id = await self._client.send_card_to_chat(chat_id, card)
+            _logger.info(
+                "gateway card delivered: chat=%s category=%s card_msg_id=%s",
+                chat_id[:12],
+                category or "system",
+                card_msg_id[:12] if card_msg_id else None,
+            )
+            return card_msg_id
+        except Exception:
+            _logger.warning("gateway card delivery failed, caller should fall back", exc_info=True)
+            return None

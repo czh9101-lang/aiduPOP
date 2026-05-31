@@ -12,6 +12,8 @@ when the plugin loads.
     AIAgent.run_conversation                 → wraps all 6 callbacks (ANSWER, THINKING,
                                                 TOOL, REASONING, BACKGROUND_REVIEW)
     cron.scheduler._deliver_result           → redirect cron Feishu deliveries to CardKit
+    FeishuAdapter.send                       → intercept ALL text → convert to cards
+    FeishuAdapter.edit_message               → route card updates (logging for now)
 
 Message context (``message_id``, ``event_message_id``, ``chat_id``, …) is
 propagated through a ``contextvars.ContextVar`` — safe within a single async
@@ -722,12 +724,14 @@ def _wrap_run_background_task(orig: Callable) -> Callable:
                 return await original_send(chat_id_send, content, **send_kwargs)
 
             adapter.send = _intercepting_send
+            adapter._hls_bg_sending = True
 
         try:
             result = await orig(self, prompt, source, task_id, **kwargs)
         finally:
             if original_send and adapter:
                 adapter.send = original_send
+                adapter._hls_bg_sending = False
 
         # ── Fire COMPLETE hook ──
         ctx = _msg_ctx.get()
@@ -901,12 +905,178 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
             return await original_send(chat_id_send, content_text, **send_kwargs)
 
         feishu_adapter.send = _card_sending_send
+        # Set flag so the class-level send wrapper knows not to
+        # re-intercept cron's fallback plain-text sends.
+        feishu_adapter._hls_cron_sending = True
         try:
             return orig(job, content, adapters=adapters, loop=loop, **kwargs)
         finally:
             feishu_adapter.send = original_send
+            feishu_adapter._hls_cron_sending = False
 
     return wrapper
+
+
+# ── FeishuAdapter interception layer (Phase 1: gateway message cards) ─
+
+
+def _classify_gateway_message(content: str) -> str:
+    """Classify a gateway-internal message by its content for card category.
+
+    Returns one of: "error", "auth", "session", "slash", "system"
+    """
+    if not isinstance(content, str):
+        return "system"
+    # Auth / pairing messages
+    if any(kw in content for kw in ("pairing code", "pairing requests", "配对码", "I don't recognize you")):
+        return "auth"
+    # Error messages
+    if any(kw in content for kw in ("❌", "⚠️", "error", "failed", "Error", "Failed")):
+        return "error"
+    # Session lifecycle messages
+    if any(kw in content for kw in ("Session", "session", "🔄", "♻", "compress", "compres")):
+        return "session"
+    # Slash command replies (common prefixes)
+    if any(kw in content for kw in ("/help", "/status", "/model", "/usage", "/whoami", "/reset", "/new", "/stop", "/resume", "/undo", "/compress", "/goal", "/agents", "/background", "/queue", "/steer", "/yolo", "/footer")):
+        return "slash"
+    return "system"
+
+
+def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
+    """Intercept ``FeishuAdapter.send()`` — convert text to gateway cards.
+
+    This wrapper intercepts ALL text messages sent through the Feishu
+    adapter's ``send()`` method and converts them to CardKit cards when:
+
+    1. The message is NOT from the AI agent pipeline (which is already
+       handled by callback interception + consumed mechanism).
+    2. The controller is enabled and the FeishuClient is initialized.
+
+    When the card delivery fails, it falls back to the original plain
+    text ``send()``.
+
+    **Agent path detection**: When a message is being handled by the
+    AI agent pipeline, ``_msg_ctx`` has ``card_sent=True`` after the
+    streaming card is delivered.  In that case, the gateway's own text
+    reply should be suppressed (returned as success with no message
+    sent).  When ``card_sent=False`` and there IS an event_message_id,
+    the agent is still running — we also skip to avoid interfering
+    with the streaming card.
+
+    **Gateway-internal path**: When there is NO ``event_message_id``
+    in the context (or the context is None), the message originates
+    from the gateway itself (slash commands, auth, errors, etc.)
+    and should be converted to a card.
+    """
+    async def _intercepted_send(self_feishu, chat_id, content, reply_to=None, metadata=None, **kwargs):
+        # ── Guard: skip non-text content ──
+        # If content is not a string (e.g. card dict, image key), pass through
+        if not isinstance(content, str):
+            return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
+
+        # ── Guard: skip empty content ──
+        if not content.strip():
+            return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
+
+        # ── Guard: check if this is a cron/background fallback send ──
+        # When cron's _card_sending_send or background task's
+        # _intercepting_send falls back to original_send, it calls
+        # the (now-wrapped) send method. In that case we should
+        # NOT try to make another card — just send plain text.
+        # Detection: cron/bg sets a flag on the adapter instance.
+        if getattr(self_feishu, "_hls_cron_sending", False) or getattr(self_feishu, "_hls_bg_sending", False):
+            return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
+
+        # ── Agent path: suppress duplicate text reply ──
+        ctx = _msg_ctx.get(None)
+        if ctx is not None:
+            eid = ctx.get("event_message_id", "")
+            if eid:
+                # We're inside an agent message pipeline.
+                # If card was already sent, suppress the gateway's text reply.
+                if ctx.get("card_sent"):
+                    _logger.debug(
+                        "feishu_adapter_send: suppressing gateway text reply "
+                        "(card already sent), chat=%s content_len=%d",
+                        chat_id[:12] if chat_id else "?",
+                        len(content),
+                    )
+                    try:
+                        from gateway.platforms.base import SendResult
+                        return SendResult(success=True)
+                    except (ImportError, AttributeError):
+                        return None
+                else:
+                    # Agent still running, card not yet sent — don't interfere
+                    return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
+
+        # ── Gateway-internal path: convert to card ──
+        try:
+            from .controller import get_controller
+            ctrl = get_controller()
+            if ctrl and ctrl.enabled:
+                # Check if gateway_cards feature is enabled
+                cfg = _get_config()
+                if not cfg.gateway_cards:
+                    return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
+
+                # Strip MEDIA tags for cleaner card content
+                cleaned = content
+                try:
+                    from gateway.platforms.base import BasePlatformAdapter
+                    _, cleaned = BasePlatformAdapter.extract_media(content)
+                except (ImportError, AttributeError):
+                    pass
+                if not cleaned.strip():
+                    cleaned = content
+
+                category = _classify_gateway_message(cleaned)
+                card_msg_id = await ctrl._do_gateway_deliver(
+                    chat_id, cleaned.strip(), category=category,
+                )
+                if card_msg_id:
+                    _logger.info(
+                        "hermes-lark-streaming v%s: gateway message card sent: "
+                        "chat=%s category=%s content_len=%d",
+                        __version__,
+                        chat_id[:12] if chat_id else "?",
+                        category,
+                        len(content),
+                    )
+                    try:
+                        from gateway.platforms.base import SendResult
+                        return SendResult(success=True, message_id=card_msg_id)
+                    except (ImportError, AttributeError):
+                        return None
+        except Exception:
+            _logger.debug(
+                "hermes-lark-streaming v%s: gateway card delivery failed, "
+                "falling back to plain text",
+                __version__,
+                exc_info=True,
+            )
+
+        # ── Fallback: original plain text send ──
+        return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
+
+    return _intercepted_send
+
+
+def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
+    """Intercept ``FeishuAdapter.edit_message()`` — route card updates.
+
+    For now this is a pass-through with logging. Future phases may
+    convert long-running notification edits into card updates.
+    """
+    async def _intercepted_edit(self_feishu, message_id, content, metadata=None, **kwargs):
+        _logger.debug(
+            "feishu_adapter_edit: msg_id=%s content_len=%d",
+            message_id[:12] if message_id else "?",
+            len(content) if isinstance(content, str) else 0,
+        )
+        return await orig_edit(self_feishu, message_id, content, metadata=metadata, **kwargs)
+
+    return _intercepted_edit
 
 
 # ── Namespace-collision-safe module resolver ────────────────────────
@@ -1238,15 +1408,36 @@ def apply_patches() -> None:
             except (ImportError, AttributeError) as e:
                 _logger.info("hermes-lark-streaming: cron scheduler not found (%s), cron cards disabled", e)
 
+    # ── FeishuAdapter interception (Phase 1: gateway message cards) ──
+    # Patch FeishuAdapter.send() and edit_message() to intercept ALL
+    # text messages and convert non-agent messages to CardKit cards.
+    # This covers: slash commands, auth messages, errors, notifications,
+    # session lifecycle, busy-ack, gateway lifecycle, etc.
+    feishu_patched = False
+    try:
+        from gateway.platforms.feishu import FeishuAdapter
+
+        FeishuAdapter.send = _wrap_feishu_adapter_send(FeishuAdapter.send)
+        try:
+            FeishuAdapter.edit_message = _wrap_feishu_adapter_edit(FeishuAdapter.edit_message)
+        except AttributeError:
+            _logger.debug("hermes-lark-streaming: FeishuAdapter.edit_message not found, edit interception skipped")
+        feishu_patched = True
+        _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit patched ✓ (gateway message cards enabled)")
+    except (ImportError, AttributeError) as e:
+        _logger.info("hermes-lark-streaming: FeishuAdapter patch skipped (%s)", e)
+
     # ── Summary ──
     _logger.info(
         "hermes-lark-streaming v%s: patch summary — "
-        "GatewayRunner=%s, conversation_loop=%s, AIAgent=applied, cron=%s, background=%s",
+        "GatewayRunner=%s, conversation_loop=%s, AIAgent=applied, cron=%s, "
+        "background=%s, FeishuAdapter=%s",
         __version__,
         "✓" if gw_patched else "✗",
         "✓" if _module_patch_applied else "n/a (direct AIAgent used)",
         "✓" if cron_patched else "n/a",
         "✓" if gw_patched else "n/a",  # background task patch is part of GatewayRunner
+        "✓" if feishu_patched else "✗",
     )
 
     # Deferred direct patch: retry AIAgent.run_conversation after Hermes

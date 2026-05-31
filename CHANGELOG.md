@@ -1,5 +1,14 @@
 # 更新日志 / Changelog
 
+## v0.14.0 (2026-06-01)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | 飞书渠道网关内部消息（slash 命令、错误、通知等）全部转为卡片 | 之前仅 AI 回复和 Cron 消息使用卡片，其他消息（授权/配对、会话生命周期、忙碌确认、网关启停、slash 命令回复、Provider 错误、压缩警告等）均为纯文本，视觉不统一 | 新增 `FeishuAdapter.send()` 拦截层：在类级别 monkey-patch `FeishuAdapter.send()` 和 `edit_message()`，对所有非 Agent 路径的文本消息自动转为 CardKit 卡片；Agent 路径通过 `_msg_ctx` 检测自动跳过（避免与现有 consumed 机制冲突）；Cron/Background 临时 send 替换通过 `_hls_cron_sending` / `_hls_bg_sending` 实例标志安全共存 |
+| 2 | Feature | 网关消息卡片分类图标 | 网关消息类型多样，需要视觉区分 | 新增 `build_gateway_card()` 卡片构建器，5 种分类图标：🔔 system、❌ error、🔐 auth、🔄 session、⌨️ slash；新增 `_classify_gateway_message()` 内容分类器，基于关键词自动识别消息类别 |
+| 3 | Feature | `streaming.gateway_cards` 配置开关 | 全量接管是重大变更，用户可能希望逐步切换 | 新增 `gateway_cards` 配置项（默认 `true`），设为 `false` 可关闭网关消息卡片化，仅保留 AI 回复和 Cron 卡片 |
+| 4 | Chore | `apply_patches()` 日志新增 FeishuAdapter 补丁状态 | 无法确认 FeishuAdapter 拦截层是否成功应用 | 补丁汇总日志新增 `FeishuAdapter=✓/✗` 字段 |
+
 ## v0.13.0 (2026-05-31)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
