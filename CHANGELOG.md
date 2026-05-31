@@ -1,5 +1,15 @@
 # 更新日志 / Changelog
 
+## v0.13.0 (2026-05-31)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | Cron 推送消息仍为纯文本，不是卡片效果 | `_card_sending_send` 内部使用 `run_coroutine_threadsafe + future.result(timeout=30)` 调度卡片投递，由于 `_card_sending_send` 本身已在事件循环上运行，`future.result()` 阻塞事件循环导致 30 秒死锁超时，每次都降级为纯文本 | 改为直接 `await ctrl._do_cron_deliver(...)`：`_card_sending_send` 已在事件循环上被 `safe_schedule_threadsafe` 调度，直接 `await` 即可，无需 `run_coroutine_threadsafe`；新增 `_do_cron_deliver` 诊断日志（chat_id、content_len）；新增 `_card_sending_send` 诊断日志（ctrl.enabled、chat_id、content_len） |
+| 2 | Bug | 飞书重复消息：卡片 + 纯文本同时出现 | `_thinking_wrapper` 无条件调用 `_orig_interim()`，当卡片已消费文字时，原始回调仍触发 `_stream_consumer` 发送纯文本 | `_thinking_wrapper` 检查 `on_thinking_delta` 返回值：卡片消费文字时 `return`（不调原始回调）；文字已被 `stream_delta_callback` 消费时 dedup 跳过；仅在卡片未消费时才调原始回调作为降级（与 `_answer_wrapper` 逻辑一致） |
+| 3 | Chore | 日志无法确认消息来自哪个版本 | `register()`、`apply_patches()` 等关键日志未包含版本号 | `plugin.py` 的 `register()` 日志加入 `v{__version__}`；`monkey_patch.py` 的 `apply_patches()` 启动日志和汇总日志加入版本号；cron 投递日志加入版本号；新增 `__version__` 导入 |
+| 4 | Chore | `content_filter` 等异常 `finish_reason` 无诊断日志 | 模型 API 返回 `finish_reason=content_filter` 时 AI 回复为空，但插件无任何日志记录此异常，排查困难 | `_wrap_run_agent` 的 COMPLETE hook 新增诊断日志：非 `stop` 的 `finish_reason` 记录 WARNING 日志（含版本号、finish_reason、model、msg_id）；agent error 记录 WARNING 日志（含版本号、错误信息、model、msg_id） |
+| 5 | Test | 新增版本日志、cron 投递、`__version__` 导入测试 | 新功能需测试覆盖 | 新增 `TestVersionLogging`（3 个测试）：验证 `__version__` 可用、`register()` 日志包含版本号、`monkey_patch` 模块导入版本号；新增 `TestCronDeliveryWrapper`（2 个测试）：验证无 adapters 降级、无飞书 adapter 降级 |
+
 ## v0.12.4 (2026-05-29)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

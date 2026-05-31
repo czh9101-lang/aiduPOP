@@ -33,6 +33,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
+from . import __version__
+
 
 # Thread-local storage for context propagation into worker threads
 _thread_local_ctx = threading.local()
@@ -264,6 +266,28 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 # 此时应该显示"已停止"而非"已完成"。
                 is_interrupted = result.get("interrupted", False) or result.get("partial", False)
 
+                # ── 诊断日志：记录 finish_reason / error 等关键信息 ──
+                # content_filter 等异常 finish_reason 会导致 AI 返回空回复，
+                # 记录这些信息便于排查模型 API 侧的内容安全过滤问题。
+                _finish_reason = result.get("finish_reason", "")
+                _error_msg = result.get("error") or result.get("interrupt_message", "")
+                if _finish_reason and _finish_reason != "stop":
+                    _logger.warning(
+                        "hermes-lark-streaming v%s: non-stop finish_reason=%s model=%s msg=%s",
+                        __version__,
+                        _finish_reason,
+                        result.get("model", "?"),
+                        ctx["message_id"][:12],
+                    )
+                if _error_msg:
+                    _logger.warning(
+                        "hermes-lark-streaming v%s: agent error: %s model=%s msg=%s",
+                        __version__,
+                        _error_msg[:200],
+                        result.get("model", "?"),
+                        ctx["message_id"][:12],
+                    )
+
                 # ── Extract cache tokens from agent reference ──
                 # _maybe_wrap_callbacks stores _agent_ref in ctx when wrapping
                 # callbacks.  We read cache_read_tokens / cache_write_tokens
@@ -291,7 +315,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     history_offset=result.get("history_offset", 0),
                     compression_exhausted=result.get("compression_exhausted", False),
                     aborted=is_interrupted,
-                    error_message=result.get("error") or result.get("interrupt_message", ""),
+                    error_message=_error_msg,
                 )
                 if card_sent:
                     result["already_sent"] = True
@@ -804,13 +828,40 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
         if feishu_adapter is None:
             return orig(job, content, adapters=adapters, loop=loop, **kwargs)
 
+        _logger.info(
+            "hermes-lark-streaming v%s: cron delivery intercepted, redirecting to card (job=%s)",
+            __version__,
+            job.get("id", "?")[:12],
+        )
+
         # ── Temporarily replace Feishu adapter.send with card-sending version ──
         original_send = feishu_adapter.send
 
         async def _card_sending_send(chat_id_send, content_text, **send_kwargs):
-            """Redirect Feishu adapter.send to CardKit card delivery."""
+            """Redirect Feishu adapter.send to CardKit card delivery.
+
+            This async function replaces the Feishu adapter's ``send`` method.
+            Hermes calls ``safe_schedule_threadsafe(adapter.send(...), loop)``
+            from ``_deliver_result``, which schedules this coroutine on the
+            gateway's event loop.  Since we are *already* running on the event
+            loop, we can simply ``await`` the card delivery — no
+            ``run_coroutine_threadsafe`` / ``asyncio.run`` needed.
+
+            Previous versions used ``run_coroutine_threadsafe`` +
+            ``future.result(timeout=30)`` when the loop was running, which
+            caused a **deadlock**: the loop was blocked waiting for a coroutine
+            it could never schedule because it was blocked.  The 30-second
+            timeout expired and the delivery fell back to plain text.
+            """
             try:
+                from .controller import get_controller
                 ctrl = get_controller()
+                _logger.info(
+                    "cron _card_sending_send: ctrl.enabled=%s chat=%s content_len=%d",
+                    ctrl.enabled,
+                    chat_id_send[:12] if chat_id_send else "?",
+                    len(content_text) if content_text else 0,
+                )
                 if ctrl.enabled and content_text:
                     # Try to strip MEDIA tags for cleaner card content
                     cleaned = content_text
@@ -822,41 +873,29 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
                     if not cleaned.strip():
                         cleaned = content_text
 
-                    # Deliver card — use the event loop from the wrapper's loop param
-                    # or fall back to get_running_loop()
-                    try:
-                        if loop and getattr(loop, "is_running", lambda: False)():
-                            import asyncio
-                            future = asyncio.run_coroutine_threadsafe(
-                                ctrl._do_cron_deliver(chat_id_send, cleaned.strip()),
-                                loop,
-                            )
-                            future.result(timeout=30)
-                        else:
-                            import asyncio
-                            try:
-                                running_loop = asyncio.get_running_loop()
-                                # We're inside an async context — await directly
-                                await ctrl._do_cron_deliver(chat_id_send, cleaned.strip())
-                            except RuntimeError:
-                                # No running loop — use asyncio.run
-                                asyncio.run(ctrl._do_cron_deliver(chat_id_send, cleaned.strip()))
+                    # We are running on the event loop (scheduled via
+                    # safe_schedule_threadsafe by _deliver_result), so we
+                    # can await the card delivery directly.
+                    await ctrl._do_cron_deliver(chat_id_send, cleaned.strip())
 
-                        _logger.info("cron card delivered: chat=%s", chat_id_send[:12])
-                        # Return a success result so the original _deliver_result
-                        # thinks the send succeeded
-                        try:
-                            from gateway.platforms.base import SendResult
-                            return SendResult(success=True)
-                        except (ImportError, AttributeError):
-                            return None
-                    except Exception:
-                        _logger.debug(
-                            "cron card delivery failed, falling back to plain text",
-                            exc_info=True,
-                        )
+                    _logger.info(
+                        "hermes-lark-streaming v%s: cron card delivered: chat=%s",
+                        __version__,
+                        chat_id_send[:12],
+                    )
+                    # Return a success result so the original _deliver_result
+                    # thinks the send succeeded
+                    try:
+                        from gateway.platforms.base import SendResult
+                        return SendResult(success=True)
+                    except (ImportError, AttributeError):
+                        return None
             except Exception:
-                _logger.debug("cron card intercept failed", exc_info=True)
+                _logger.debug(
+                    "hermes-lark-streaming v%s: cron card delivery failed, falling back to plain text",
+                    __version__,
+                    exc_info=True,
+                )
 
             # Fallback: send plain text via the original adapter
             return await original_send(chat_id_send, content_text, **send_kwargs)
@@ -1092,6 +1131,8 @@ def apply_patches() -> None:
         return
     apply_patches._applied = True  # type: ignore[attr-defined]
 
+    _logger.info("hermes-lark-streaming v%s: apply_patches() starting", __version__)
+
     # ── Probe Hermes layout ──
     layout = _detect_hermes_layout()
 
@@ -1199,8 +1240,9 @@ def apply_patches() -> None:
 
     # ── Summary ──
     _logger.info(
-        "hermes-lark-streaming: patch summary — "
+        "hermes-lark-streaming v%s: patch summary — "
         "GatewayRunner=%s, conversation_loop=%s, AIAgent=applied, cron=%s, background=%s",
+        __version__,
         "✓" if gw_patched else "✗",
         "✓" if _module_patch_applied else "n/a (direct AIAgent used)",
         "✓" if cron_patched else "n/a",

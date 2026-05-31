@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from . import __version__
+
 if TYPE_CHECKING:
     from hermes_cli.plugins import PluginContext
 
@@ -202,14 +204,14 @@ def register(ctx: "PluginContext") -> None:
     """
     _ensure_streaming_config()
 
-    _logger.info("hermes-lark-streaming: applying runtime patches...")
+    _logger.info("hermes-lark-streaming v%s: applying runtime patches...", __version__)
     try:
         from .monkey_patch import apply_patches
 
         apply_patches()
-        _logger.info("hermes-lark-streaming: patches applied (check logs for per-module status)")
+        _logger.info("hermes-lark-streaming v%s: patches applied (check logs for per-module status)", __version__)
     except Exception:
-        _logger.exception("hermes-lark-streaming: failed to apply patches")
+        _logger.exception("hermes-lark-streaming v%s: failed to apply patches", __version__)
 
 
 def unregister(ctx: "PluginContext") -> None:

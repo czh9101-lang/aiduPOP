@@ -283,3 +283,77 @@ class TestInjectTimeGuardReset:
             assert user_msg == "<time>14:30:05</time> msg2"
 
         _inject_time_guard.active = False
+
+
+# ── Version logging tests ──
+
+
+class TestVersionLogging:
+    """Verify __version__ is included in key log messages."""
+
+    def test_version_is_available(self) -> None:
+        """Plugin should expose __version__ from plugin.yaml."""
+        from hermes_lark_streaming import __version__
+        assert __version__
+        assert __version__ != "unknown"
+
+    def test_register_logs_version(self) -> None:
+        """register() should log the version number."""
+        from hermes_lark_streaming import __version__
+        from hermes_lark_streaming.plugin import register
+
+        mock_ctx = MagicMock()
+        with (
+            patch("hermes_lark_streaming.plugin._ensure_streaming_config"),
+            patch("hermes_lark_streaming.monkey_patch.apply_patches"),
+            patch("hermes_lark_streaming.plugin._logger") as mock_logger,
+        ):
+            register(mock_ctx)
+
+        # Check that version is in at least one info log
+        info_calls = [str(call) for call in mock_logger.info.call_args_list]
+        version_logged = any(__version__ in call for call in info_calls)
+        assert version_logged, f"Version {__version__} not found in log calls: {info_calls}"
+
+    def test_monkey_patch_module_imports_version(self) -> None:
+        """monkey_patch.py should import __version__ from the package."""
+        from hermes_lark_streaming.monkey_patch import __version__ as mp_version
+        from hermes_lark_streaming import __version__ as pkg_version
+        assert mp_version == pkg_version
+
+
+# ── Cron delivery wrapper tests ──
+
+
+class TestCronDeliveryWrapper:
+    """Verify _wrap_cron_deliver uses direct await instead of run_coroutine_threadsafe."""
+
+    def test_cron_wrapper_no_adapters_falls_through(self) -> None:
+        """When no adapters are provided, cron delivery falls through to original."""
+        from hermes_lark_streaming.monkey_patch import _wrap_cron_deliver
+
+        orig = MagicMock(return_value="original_result")
+        wrapper = _wrap_cron_deliver(orig)
+
+        result = wrapper(job={"id": "test"}, content="hello", adapters=None)
+
+        orig.assert_called_once()
+        assert result == "original_result"
+
+    def test_cron_wrapper_no_feishu_adapter_falls_through(self) -> None:
+        """When adapters exist but no Feishu adapter, falls through to original."""
+        from hermes_lark_streaming.monkey_patch import _wrap_cron_deliver
+
+        orig = MagicMock(return_value="original_result")
+        wrapper = _wrap_cron_deliver(orig)
+
+        # Create mock adapters dict with a non-Feishu platform
+        mock_adapters = {}
+        mock_platform = MagicMock()
+        mock_platform.value = "telegram"
+        mock_adapters[mock_platform] = MagicMock()
+
+        result = wrapper(job={"id": "test"}, content="hello", adapters=mock_adapters)
+
+        orig.assert_called_once()
+        assert result == "original_result"
