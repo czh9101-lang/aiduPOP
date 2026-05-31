@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.13.0 (DEV 分支) |
+| 版本 | 0.15.0 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.13.0")
+plugin.yaml (唯一版本号: "0.15.0")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -282,7 +282,7 @@ streaming:
 
 ### 10.2 内容重复显示
 **原因**: `interim_assistant_callback` 和 `stream_delta_callback` 处理同一段文本
-**解决** (v0.13.0): `_thinking_wrapper` 检查 `on_thinking_delta` 返回值：卡片消费文字时 `return`（不调原始回调）；文字已被 `stream_delta_callback` 消费时 dedup 跳过；仅在卡片未消费时才调原始回调作为降级
+**解决** (v0.15.0): `_thinking_wrapper` 检查 `on_thinking_delta` 返回值：卡片消费文字时 `return`（不调原始回调）；文字已被 `stream_delta_callback` 消费时 dedup 跳过；仅在卡片未消费时才调原始回调作为降级
 
 ### 10.3 版本号硬编码 fallback
 **❌ 错误**: `__version__ = "0.10.0"` 作为 fallback
@@ -407,7 +407,7 @@ hermes gateway restart
 | v0.12.2 | 2026-05-29 | 拆卡后依旧超元素修复：answer 估算对齐封卡实际元素数 + answer 内部拆分（`split_answer_segment`）+ answer 增长时动态重新估算 + 相邻 answer segment 拆卡触发 |
 | v0.12.3 | 2026-05-29 | CI 测试修复（添加 pytest-asyncio 依赖）+ 多 Profile 部署修复（`_get_hermes_config_path()` 动态读取 HERMES_HOME） |
 | v0.12.4 | 2026-05-29 | 默认页脚精简（移除 `cache`、`show_label` 默认 `false`）+ 状态文字去 emoji（✅❌🛑→纯文字）+ `show_label` 重复确认（插件只写 `footer.show_label`，不迁移用户配置）+ 致谢新增 joshcheng820222 + `test_version.py` 版本号动态读取 |
-| v0.13.0 | 2026-05-31 | Cron 推送卡片修复（`_card_sending_send` 死锁→直接 await）+ `_thinking_wrapper` 重复消息修复（检查 consumed 返回值）+ 关键日志含版本号 + `finish_reason` 诊断日志（`content_filter` 等异常可排查） |
+| v0.15.0 | 2026-05-31 | Cron 推送卡片修复（`_card_sending_send` 死锁→直接 await）+ `_thinking_wrapper` 重复消息修复（检查 consumed 返回值）+ 关键日志含版本号 + `finish_reason` 诊断日志（`content_filter` 等异常可排查） |
 
 ---
 
@@ -431,7 +431,7 @@ hermes gateway restart
 |------|------|------|
 | 卡片不出现 | `grep "GatewayRunner" agent.log` 看补丁是否成功 | monkey_patch.py |
 | 内容重复 | `interim_assistant_callback` 是否被包裹 | monkey_patch.py `_maybe_wrap_callbacks` |
-| Cron 推送纯文本 | `grep "cron" agent.log` 看是否有 patch 失败；v0.13.0 前有死锁 bug | monkey_patch.py `_wrap_cron_deliver` |
+| Cron 推送纯文本 | `grep "cron" agent.log` 看是否有 patch 失败；v0.15.0 前有死锁 bug | monkey_patch.py `_wrap_cron_deliver` |
 | 后台任务纯文本 | `grep "background" agent.log` 看 patch 是否成功 | monkey_patch.py `_wrap_run_background_task` |
 | 页脚无 cache 字段 | `cache_read_tokens` 是否从 agent 引用中提取 | monkey_patch.py `_maybe_wrap_callbacks` |
 | Apple Silicon 报错 | `grep "conversation_loop" agent.log` | monkey_patch.py `_resolve_hermes_agent_module` |
@@ -443,4 +443,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-05-31 | Version: 0.13.0 DEV*
+*Last updated: 2026-05-31 | Version: 0.15.0 DEV*
