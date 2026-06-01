@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.15.4 (master 分支) |
+| 版本 | 0.15.5 (master 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -70,7 +70,7 @@ monkey_patch.py (运行时拦截)
 
 | 文件 | 行数 | 职责 | 关键点 |
 |------|------|------|--------|
-| `monkey_patch.py` | 1380 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全；`_wrap_cron_deliver` 临时替换 adapter.send（直接 await，不用 `run_coroutine_threadsafe`）；`_wrap_run_background_task` 后台任务卡片；`_thinking_wrapper` 检查 consumed 返回值防重复；关键日志含 `__version__`；`finish_reason` 诊断日志；`_wrap_feishu_adapter_send_image_file`/`_wrap_feishu_adapter_send_image` 图片拦截→卡片会话；递归中断子级 COMPLETE hook 修复 |
+| `monkey_patch.py` | 2260 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全；`_wrap_cron_deliver` 临时替换 adapter.send（直接 await，不用 `run_coroutine_threadsafe`）；`_wrap_run_background_task` 后台任务卡片；`_thinking_wrapper` 检查 consumed 返回值防重复；关键日志含 `__version__`；`finish_reason` 诊断日志；递归中断子级 COMPLETE hook 修复；`_original_msg_context_ref` card_sent 传播修复；卡会话存在性检查（`_wrap_handle_message_with_agent` + `_wrap_feishu_adapter_send`）；高频日志降级 debug；启动延迟 5s→2s |
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async；`on_message_completed` 传递 cache tokens |
 | `controller.py` | 681 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记；footer 新增 `cache_read_tokens`/`cache_write_tokens` |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.15.4")
+plugin.yaml (唯一版本号: "0.15.5")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -412,6 +412,7 @@ hermes gateway restart
 | v0.15.2 | 2026-06-04 | 网关卡片 `plain_text` schema 修复 + `edit_message` metadata 参数修复 + `NoneType` 下标防御 + 中断旧卡片立即 ABORTED + `_force_rewrap` 中断回调重包装 + 图片 `_try_add_image_to_session` |
 | v0.15.3 | 2026-06-05 | 递归中断子级 COMPLETE hook 修复（核心 bug：B 的卡片永远不完成→重复卡片+错误内容）+ 图片拦截器 `send_image_file`/`send_image`（Agent 管道中图片→卡片会话）+ `upload_local_image()` + `_MAX_CARD_TABLES` 10→20 + README 版本徽章同步 |
 | v0.15.4 | 2026-06-05 | **图片回归修复 + 中断重复文本修复**：① 移除 `send_image_file`/`send_image` 的 monkey-patching（三个根本性缺陷：`file://` URL 被 `_strip_invalid_image_keys` 移除、`ImageResolver` 仅匹配 `http(s)://`、终态 session 跳过更新；且抑制了原独立发送→图片完全消失）。独立 MEDIA 发送恢复为独立图片消息。② 中断场景 `card_sent` 传播修复：`_saved_parent_ctx = dict(ctx)` 创建副本后，`card_sent=True` 只在副本上设置，原始 `msg_context` 未更新→Hermes 文本回复未被抑制→重复纯文本。新增 `_original_msg_context_ref` 引用传播 `card_sent` |
+| v0.15.5 | 2026-06-06 | **中断重复文本兜底修复 + 日志优化**：① `_wrap_handle_message_with_agent` 卡会话存在性检查（`card_sent=False` 但 controller 有 session → 抑制 Hermes 回复）；② `_wrap_feishu_adapter_send` 卡会话存在性检查（`card_sent=False` 但 controller 有 session → 抑制纯文本）；③ `_wrap_run_agent` Step 2 父级 ABORTED COMPLETE 新增 `result["already_sent"] = True`；④ 高频日志从 info→debug（`HLS_CALLED`、`HLS_WRAP` 等）；⑤ 启动延迟 5s→2s |
 
 ---
 
@@ -447,4 +448,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-05 | Version: 0.15.4*
+*Last updated: 2026-06-06 | Version: 0.15.5*

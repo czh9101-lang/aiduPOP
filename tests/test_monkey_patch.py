@@ -592,3 +592,172 @@ class TestImageInterception:
                     break
         assert found_orig_send_in_block, \
             "Non-string content should pass through to orig_send directly"
+
+
+# ── v0.15.5: Card session existence check + logging/perf fixes ──
+
+
+class TestCardSessionExistenceCheck:
+    """v0.15.5 bug fix: card session existence check when card_sent=False.
+
+    When card_sent wasn't propagated correctly (e.g., interrupt scenarios
+    with complex context chains), the controller may still have a card
+    session in _sessions with a card_msg_id. The fix adds fallback checks
+    in both _wrap_handle_message_with_agent and _wrap_feishu_adapter_send
+    to query the controller's _sessions and suppress text when a card exists.
+    """
+
+    def test_card_session_existence_check_in_handle_message(self) -> None:
+        """_wrap_handle_message_with_agent should check controller._sessions when card_sent=False."""
+        from hermes_lark_streaming.monkey_patch import _wrap_handle_message_with_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_handle_message_with_agent)
+        # The fix adds a check for controller._sessions when result is not None
+        # and card_sent is False but a session with card_msg_id exists
+        assert "_sessions" in source, \
+            "Controller _sessions check not found in _wrap_handle_message_with_agent"
+
+    def test_card_session_existence_check_in_feishu_adapter_send(self) -> None:
+        """_wrap_feishu_adapter_send should check controller._sessions when card_sent=False."""
+        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send
+        import inspect
+
+        source = inspect.getsource(_wrap_feishu_adapter_send)
+        # The fix adds a check in the Agent path when card_sent is False:
+        # query controller._sessions for a session with card_msg_id
+        assert "_sessions" in source, \
+            "Controller _sessions check not found in _wrap_feishu_adapter_send"
+
+    def test_feishu_adapter_send_session_check_sets_card_sent(self) -> None:
+        """When a card session is found, card_sent should be set to True."""
+        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send
+        import inspect
+
+        source = inspect.getsource(_wrap_feishu_adapter_send)
+        # In the agent path, after finding a session with card_msg_id,
+        # the fix sets ctx["card_sent"] = True and returns SendResult(success=True)
+        lines = source.split('\n')
+        in_session_check = False
+        found_card_sent_set = False
+        for i, line in enumerate(lines):
+            if '_sess' in line and 'card_msg_id' in line:
+                in_session_check = True
+            if in_session_check and 'card_sent' in line and '= True' in line:
+                found_card_sent_set = True
+                break
+        assert found_card_sent_set, \
+            "card_sent not set to True after finding card session in _wrap_feishu_adapter_send"
+
+
+class TestParentAbortedCompleteSetsAlreadySent:
+    """v0.15.5 bug fix: Step 2 parent ABORTED COMPLETE sets result["already_sent"] = True.
+
+    Without this, Hermes's _handle_message_with_agent still thinks the text
+    hasn't been sent and sends a duplicate plain text reply even though the
+    card already shows the content.
+    """
+
+    def test_step2_sets_already_sent(self) -> None:
+        """Step 2 (parent ABORTED COMPLETE) should set result['already_sent'] = True."""
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        # In the Step 2 block (parent ABORTED COMPLETE), there should be
+        # result["already_sent"] = True
+        lines = source.split('\n')
+        in_step2_block = False
+        found_already_sent = False
+        for i, line in enumerate(lines):
+            if 'Step 2' in line and ('parent' in line.lower() or 'ABORTED' in line):
+                in_step2_block = True
+            if in_step2_block and 'already_sent' in line:
+                found_already_sent = True
+                break
+            # Stop at next major section
+            if in_step2_block and line.strip().startswith('# ──') and 'Step 2' not in line:
+                break
+        assert found_already_sent, \
+            "result['already_sent'] = True not found in Step 2 (parent ABORTED COMPLETE) block"
+
+
+class TestHighFrequencyLoggingDowngrade:
+    """v0.15.5 perf: high-frequency logs downgraded from info to debug.
+
+    HLS_CALLED, HLS_WRAP guard checks, guard SKIP, recursive interrupt,
+    and parent COMPLETE hook logs were generating excessive info-level output.
+    These are now debug-level to reduce log noise in production.
+    """
+
+    def test_hls_called_is_debug(self) -> None:
+        """HLS_CALLED log should use debug level, not info."""
+        from hermes_lark_streaming.monkey_patch import _maybe_wrap_callbacks
+        import inspect
+
+        source = inspect.getsource(_maybe_wrap_callbacks)
+        # Find the HLS_CALLED log line and check it uses debug
+        lines = source.split('\n')
+        for line in lines:
+            if 'HLS_CALLED' in line:
+                assert '_logger.debug' in line, \
+                    f"HLS_CALLED should use _logger.debug, found: {line.strip()}"
+                break
+
+    def test_hls_wrap_guard_is_debug(self) -> None:
+        """HLS_WRAP guard check log should use debug level."""
+        from hermes_lark_streaming.monkey_patch import _maybe_wrap_callbacks
+        import inspect
+
+        source = inspect.getsource(_maybe_wrap_callbacks)
+        # The _logger.debug( call is on a separate line from the string literal,
+        # so we need to search the full source (not just single lines)
+        # for the pattern: _logger.debug( ... "HLS_WRAP: guard check"
+        assert '_logger.debug(' in source and 'HLS_WRAP: guard check' in source, \
+            "HLS_WRAP guard check should use _logger.debug"
+        # Also verify no _logger.info with guard check
+        lines = source.split('\n')
+        for i, line in enumerate(lines):
+            if 'HLS_WRAP' in line and 'guard check' in line:
+                # Check the line(s) above for _logger.debug
+                context = '\n'.join(lines[max(0, i-3):i+1])
+                assert '_logger.debug' in context, \
+                    f"HLS_WRAP guard check should use _logger.debug, found context: {context}"
+                break
+
+    def test_hls_wrap_skip_is_debug(self) -> None:
+        """HLS_WRAP guard SKIP log should use debug level."""
+        from hermes_lark_streaming.monkey_patch import _maybe_wrap_callbacks
+        import inspect
+
+        source = inspect.getsource(_maybe_wrap_callbacks)
+        lines = source.split('\n')
+        for line in lines:
+            if 'HLS_WRAP' in line and 'SKIP' in line:
+                assert '_logger.debug' in line, \
+                    f"HLS_WRAP SKIP should use _logger.debug, found: {line.strip()}"
+                break
+
+
+class TestStartupDelay:
+    """v0.15.5 perf: startup delay reduced from 5s to 2s."""
+
+    def test_startup_delay_is_2s(self) -> None:
+        """_schedule_direct_patch should sleep 2 seconds, not 5."""
+        from hermes_lark_streaming.monkey_patch import _schedule_direct_patch
+        import inspect
+
+        source = inspect.getsource(_schedule_direct_patch)
+        assert "time.sleep(2)" in source, \
+            "Startup delay should be 2 seconds (reduced from 5)"
+        assert "time.sleep(5)" not in source, \
+            "Startup delay should NOT be 5 seconds (reduced to 2)"
+
+    def test_startup_delay_log_says_2s(self) -> None:
+        """Log message should reflect the 2s delay."""
+        from hermes_lark_streaming.monkey_patch import _schedule_direct_patch
+        import inspect
+
+        source = inspect.getsource(_schedule_direct_patch)
+        assert "2s delay" in source, \
+            "Log message should mention '2s delay'"

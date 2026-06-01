@@ -182,6 +182,27 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                 with _started_msg_ids_lock:
                     _started_msg_ids.discard(mid)
                 return None
+            # Also check if a card session exists (even in terminal state).
+            # This catches cases where card_sent wasn't propagated correctly
+            # (e.g., interrupt scenarios with complex context chains).
+            try:
+                from .controller import get_controller
+                _ctrl = get_controller()
+                if _ctrl and _ctrl.enabled:
+                    _eid = ctx.get("event_message_id", "") if ctx else ""
+                    if _eid:
+                        _sess = _ctrl._sessions.get(_eid)
+                        if _sess and _sess.card_msg_id:
+                            _logger.info(
+                                "card session exists for msg=%s (state=%s), suppressing gateway reply",
+                                mid[:12], _sess.state,
+                            )
+                            ctx["card_sent"] = True
+                            with _started_msg_ids_lock:
+                                _started_msg_ids.discard(mid)
+                            return None
+            except Exception:
+                pass
 
         # ── ABORT / INTERRUPT detection ──
         # When card was already sent, _handle_message_with_agent returns
@@ -282,7 +303,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 # causing Hermes to send a duplicate plain text reply.
                 _original_msg_context_ref = ctx.get("_original_msg_context_ref") or ctx
                 _saved_parent_ctx = dict(ctx)  # Save a copy for restoration after orig()
-                _logger.info(
+                _logger.debug(
                     "run_agent: recursive interrupt follow-up, creating new context "
                     "for msg=%s (parent msg=%s, depth=%d)",
                     event_message_id[:12] if event_message_id else "?",
@@ -437,7 +458,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
             # Fire its COMPLETE as ABORTED so A's card shows "已停止".
             try:
                 from .patch import on_message_completed
-                _logger.info(
+                _logger.debug(
                     "run_agent: parent COMPLETE hook firing as interrupted "
                     "for msg=%s (child msg=%s completed normally)",
                     (_saved_parent_ctx.get("message_id") or "?")[:12],
@@ -461,6 +482,9 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         "msg_context for msg=%s",
                         (_saved_parent_ctx.get("message_id") or "?")[:12],
                     )
+                # Also mark already_sent so Hermes's gateway doesn't send text reply
+                if isinstance(result, dict):
+                    result["already_sent"] = True
             except Exception:
                 _logger.debug("run_agent: parent ABORTED completion failed", exc_info=True)
         elif ctx is not None:
@@ -669,11 +693,11 @@ def _maybe_wrap_callbacks(agent) -> None:
     """Replace streaming callbacks on *agent* with wrappers that also fire
     Feishu CardKit updates.  Skips silently when outside a Feishu message
     context (i.e. no event_message_id in context)."""
-    _logger.info("HLS_CALLED: _maybe_wrap_callbacks invoked, has_stream=%s, eid_lookup=%s", bool(getattr(agent, "stream_delta_callback", None)), bool(_get_event_message_id()))
+    _logger.debug("HLS_CALLED: _maybe_wrap_callbacks invoked, has_stream=%s, eid_lookup=%s", bool(getattr(agent, "stream_delta_callback", None)), bool(_get_event_message_id()))
 
     eid = _get_event_message_id()
     if not eid:
-        _logger.info("HLS_CALLED: skip — no event_message_id in ctx")
+        _logger.debug("HLS_CALLED: skip — no event_message_id in ctx")
         return  # Not in a hermes-lark-streaming context — skip
 
     _logger.debug(
@@ -702,7 +726,7 @@ def _maybe_wrap_callbacks(agent) -> None:
     _current_reasoning = getattr(agent, "reasoning_callback", None)
     _current_bg = getattr(agent, "background_review_callback", None)
     _force_rewrap = bool(ctx and ctx.get("_force_rewrap")) if (ctx := _msg_ctx.get()) else False
-    _logger.info(
+    _logger.debug(
         "HLS_WRAP: guard check stream=%s(hls=%s) interim=%s tool=%s reasoning=%s bg=%s eid=%s force_rewrap=%s",
         bool(_current_stream),
         getattr(_current_stream, "_hls_wrapper", False) if _current_stream else "N/A",
@@ -714,7 +738,7 @@ def _maybe_wrap_callbacks(agent) -> None:
         _force_rewrap,
     )
     if _current_stream and getattr(_current_stream, "_hls_wrapper", False) and not _force_rewrap:
-        _logger.info("HLS_WRAP: guard SKIP — stream_delta already wrapped")
+        _logger.debug("HLS_WRAP: guard SKIP — stream_delta already wrapped")
         return
 
     # ── ANSWER: wrap stream_delta_callback ──
@@ -1313,6 +1337,29 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                     except (ImportError, AttributeError):
                         return None
                 else:
+                    # card_sent is False, but check if a card session exists
+                    # (even in terminal state like ABORTED). If a card was
+                    # created and is visible, suppress the plain text to
+                    # avoid duplicates.
+                    try:
+                        from .controller import get_controller
+                        _ctrl = get_controller()
+                        if _ctrl and _ctrl.enabled:
+                            _sess = _ctrl._sessions.get(eid)
+                            if _sess and _sess.card_msg_id:
+                                _logger.info(
+                                    "feishu_adapter_send: suppressing text reply "
+                                    "(card exists for msg=%s, state=%s, card_sent=%s)",
+                                    eid[:12], _sess.state, ctx.get("card_sent"),
+                                )
+                                ctx["card_sent"] = True
+                                try:
+                                    from gateway.platforms.base import SendResult
+                                    return SendResult(success=True)
+                                except (ImportError, AttributeError):
+                                    return None
+                    except Exception:
+                        pass
                     # Agent still running, card not yet sent — don't interfere
                     return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
@@ -2144,12 +2191,12 @@ def _schedule_direct_patch() -> None:
 
     def _delayed_patch():
         import time
-        time.sleep(5)  # Wait for Hermes to finish loading
+        time.sleep(2)  # Wait for Hermes to finish loading
         _apply_direct_agent_patch()
 
     t = threading.Thread(target=_delayed_patch, daemon=True)
     t.start()
-    _logger.info("hermes-lark-streaming: scheduled direct agent patch (5s delay)")
+    _logger.info("hermes-lark-streaming: scheduled direct agent patch (2s delay)")
 
 
 def _apply_direct_agent_patch() -> None:
