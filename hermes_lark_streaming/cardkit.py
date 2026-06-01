@@ -760,20 +760,31 @@ def build_gateway_card(
     # ── Status indicator (Phase 3: from reaction interception) ──
     # When active, shows "👀 Reading..." or "⏳ Processing..." instead
     # of the static category icon.
+    #
+    # IMPORTANT: In CardKit 2.0 schema (body.elements), "plain_text" is
+    # NOT a valid direct child — it must be wrapped inside a "div.text".
+    # Using plain_text directly triggers Feishu API error 230099/
+    # 200621: "type of element is not supported tag: plain_text".
     if status_label and status_emoji:
         elements.append({
-            "tag": "plain_text",
-            "content": f"{status_emoji} {status_label}",
-            "text_color": "turquoise",
-            "text_size": "notation",
+            "tag": "div",
+            "text": {
+                "tag": "plain_text",
+                "content": f"{status_emoji} {status_label}",
+                "text_color": "turquoise",
+                "text_size": "notation",
+            },
         })
     else:
         # Subtle header line with category icon
         elements.append({
-            "tag": "plain_text",
-            "content": icon,
-            "text_color": "grey",
-            "text_size": "notation",
+            "tag": "div",
+            "text": {
+                "tag": "plain_text",
+                "content": icon,
+                "text_color": "grey",
+                "text_size": "notation",
+            },
         })
 
     # ── Media elements (Phase 4: media message card wrapping) ──
@@ -792,12 +803,16 @@ def build_gateway_card(
                 })
             elif media_type == "file" and media_key:
                 # Files show as a link element
+                # Wrap in div.text to avoid Feishu API 230099/200621 error
                 file_name = part.get("name", "File")
                 elements.append({
-                    "tag": "plain_text",
-                    "content": f"📎 {file_name}",
-                    "text_color": "blue",
-                    "text_size": "notation",
+                    "tag": "div",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": f"📎 {file_name}",
+                        "text_color": "blue",
+                        "text_size": "notation",
+                    },
                 })
 
     if content.strip():

@@ -276,7 +276,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     "run_agent: recursive interrupt follow-up, creating new context "
                     "for msg=%s (parent msg=%s, depth=%d)",
                     event_message_id[:12] if event_message_id else "?",
-                    ctx.get("message_id", "?")[:12],
+                    (ctx.get("message_id") or "?")[:12],
                     _interrupt_depth,
                 )
                 ctx = {
@@ -289,8 +289,26 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     "_agent_ref": None,
                     "_interrupt_depth": _interrupt_depth,
                     "_parent_message_id": ctx.get("message_id"),  # Track parent for cleanup
+                    "_force_rewrap": True,  # Signal _maybe_wrap_callbacks to re-wrap
                 }
                 _msg_ctx.set(ctx)
+                _thread_local_ctx.data = dict(ctx)
+
+                # ── Fire INTERRUPT hook for the parent message immediately ──
+                # This ensures the old card is marked as ABORTED before the
+                # child starts processing, so the old card shows "Interrupted"
+                # state instead of staying in streaming/marquee animation.
+                try:
+                    from .patch import on_message_interrupted
+                    on_message_interrupted(
+                        message_id=_saved_parent_ctx.get("message_id", ""),
+                        new_message_id=event_message_id,
+                        chat_id=ctx["chat_id"],
+                        anchor_id=ctx.get("anchor_id"),
+                    )
+                except Exception:
+                    _logger.debug("run_agent: interrupt hook failed", exc_info=True)
+
                 # Fire START hook for the new (interrupted-into) message
                 try:
                     from .patch import on_message_started
@@ -342,8 +360,8 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 _logger.info(
                     "run_agent: parent COMPLETE hook firing as interrupted "
                     "for msg=%s (child msg=%s completed normally)",
-                    _saved_parent_ctx.get("message_id", "?")[:12],
-                    ctx.get("message_id", "?")[:12],
+                    (_saved_parent_ctx.get("message_id") or "?")[:12],
+                    (ctx.get("message_id") or "?")[:12],
                 )
                 on_message_completed(
                     message_id=_saved_parent_ctx["message_id"],
@@ -382,7 +400,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         __version__,
                         _finish_reason,
                         result.get("model", "?"),
-                        ctx["message_id"][:12],
+                        (ctx["message_id"] or "?")[:12],
                     )
                 if _error_msg:
                     _logger.warning(
@@ -390,7 +408,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         __version__,
                         _error_msg[:200],
                         result.get("model", "?"),
-                        ctx["message_id"][:12],
+                        (ctx["message_id"] or "?")[:12],
                     )
 
                 # ── Extract cache tokens from agent reference ──
@@ -583,13 +601,19 @@ def _maybe_wrap_callbacks(agent) -> None:
     # check the function itself for our wrapper mark rather than a global
     # agent flag. This ensures new messages get freshly wrapped callbacks
     # while preventing double-wrapping within a single run_conversation.
+    #
+    # EXCEPTION: When a recursive interrupt follow-up occurs, the
+    # event_message_id changes but the agent object is reused. We must
+    # re-wrap the callbacks with the new eid so that streaming text goes
+    # to the new message's card, not the old one.
     _current_stream = getattr(agent, "stream_delta_callback", None)
     _current_interim = getattr(agent, "interim_assistant_callback", None)
     _current_tool = getattr(agent, "tool_progress_callback", None)
     _current_reasoning = getattr(agent, "reasoning_callback", None)
     _current_bg = getattr(agent, "background_review_callback", None)
+    _force_rewrap = bool(ctx and ctx.get("_force_rewrap")) if (ctx := _msg_ctx.get()) else False
     _logger.info(
-        "HLS_WRAP: guard check stream=%s(hls=%s) interim=%s tool=%s reasoning=%s bg=%s eid=%s",
+        "HLS_WRAP: guard check stream=%s(hls=%s) interim=%s tool=%s reasoning=%s bg=%s eid=%s force_rewrap=%s",
         bool(_current_stream),
         getattr(_current_stream, "_hls_wrapper", False) if _current_stream else "N/A",
         bool(_current_interim),
@@ -597,8 +621,9 @@ def _maybe_wrap_callbacks(agent) -> None:
         bool(_current_reasoning),
         bool(_current_bg),
         eid[:12] if eid else "?",
+        _force_rewrap,
     )
-    if _current_stream and getattr(_current_stream, "_hls_wrapper", False):
+    if _current_stream and getattr(_current_stream, "_hls_wrapper", False) and not _force_rewrap:
         _logger.info("HLS_WRAP: guard SKIP — stream_delta already wrapped")
         return
 
@@ -757,6 +782,8 @@ def _maybe_wrap_callbacks(agent) -> None:
     ctx = _msg_ctx.get()
     if ctx is not None:
         ctx["_agent_ref"] = agent
+        # Clear _force_rewrap flag after callbacks have been re-wrapped
+        ctx.pop("_force_rewrap", None)
         _thread_local_ctx.data = dict(ctx)
 
 
@@ -1033,6 +1060,62 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
 # ── FeishuAdapter interception layer (Phase 1: gateway message cards) ─
 
 
+def _try_add_image_to_session(message_id: str, content: Any) -> bool:
+    """Try to add an image from FeishuAdapter.send() to the card session.
+
+    When Hermes sends an image via FeishuAdapter.send() with non-string
+    content (e.g. a dict with image_key or a file:// URL string wrapped
+    in a non-str type), we attempt to add it to the active card session
+    so it appears inside the card instead of as a standalone message.
+
+    Returns True if the image was added to the session, False otherwise.
+    """
+    try:
+        from .controller import get_controller
+        ctrl = get_controller()
+        if not ctrl.enabled:
+            return False
+
+        session = ctrl._get_active_session(message_id)
+        if session is None:
+            return False
+
+        # Extract image_key from Hermes's content format
+        img_key = None
+        if isinstance(content, dict):
+            # Hermes may send a dict with image_key
+            img_key = content.get("image_key") or content.get("img_key")
+        elif isinstance(content, str):
+            # Sometimes Hermes sends a file:// URL or MEDIA tag
+            if content.startswith("file://") or "image" in content.lower():
+                # We can't directly use file:// URLs in cards,
+                # but the ImageResolver handles markdown image syntax
+                return False
+
+        if not img_key:
+            return False
+
+        # Add the image key to the session's image_resolver cache
+        # so it gets included in the next card update
+        if session.image_resolver:
+            # Create a fake URL→img_key mapping so resolve_images
+            # will replace markdown image refs with the img_key
+            _fake_url = f"hermes_image://{img_key}"
+            session.image_resolver._cache[_fake_url] = img_key
+            _logger.info(
+                "image added to session: msg=%s img_key=%s",
+                message_id[:12], img_key[:12] if img_key else "?",
+            )
+            # Schedule a card update to include the image
+            ctrl._schedule_card_update(session)
+            return True
+
+        return False
+    except Exception:
+        _logger.debug("_try_add_image_to_session failed", exc_info=True)
+        return False
+
+
 def _classify_gateway_message(content: str) -> str:
     """Classify a gateway-internal message by its content for card category.
 
@@ -1082,9 +1165,44 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
     and should be converted to a card.
     """
     async def _intercepted_send(self_feishu, chat_id, content, reply_to=None, metadata=None, **kwargs):
-        # ── Guard: skip non-text content ──
-        # If content is not a string (e.g. card dict, image key), pass through
+        # ── Agent path: handle image sends during agent pipeline ──
+        # When Hermes sends an image (non-string content like a dict with
+        # image_key) during the agent pipeline, we need to either:
+        # 1. Add the image to the existing card session, OR
+        # 2. Suppress it if the card already handles images
+        # This prevents standalone image messages appearing outside the card.
         if not isinstance(content, str):
+            ctx = _msg_ctx.get(None)
+            if ctx is not None:
+                eid = ctx.get("event_message_id", "")
+                if eid:
+                    # We're inside an agent message pipeline.
+                    # Try to add the image to the card session.
+                    _image_added = _try_add_image_to_session(eid, content)
+                    if _image_added:
+                        _logger.info(
+                            "feishu_adapter_send: image added to card session, "
+                            "suppressing standalone send, eid=%s",
+                            eid[:12],
+                        )
+                        try:
+                            from gateway.platforms.base import SendResult
+                            return SendResult(success=True)
+                        except (ImportError, AttributeError):
+                            return None
+                    # If card was already sent, suppress the image entirely
+                    # (the card completion includes any referenced images)
+                    if ctx.get("card_sent"):
+                        _logger.debug(
+                            "feishu_adapter_send: suppressing image send "
+                            "(card already sent), eid=%s",
+                            eid[:12],
+                        )
+                        try:
+                            from gateway.platforms.base import SendResult
+                            return SendResult(success=True)
+                        except (ImportError, AttributeError):
+                            return None
             return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
         # ── Guard: skip empty content ──
@@ -1289,7 +1407,15 @@ def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
             message_id[:12] if message_id else "?",
             len(content) if isinstance(content, str) else 0,
         )
-        return await orig_edit(self_feishu, message_id, content, metadata=metadata, **kwargs)
+        # Strip 'metadata' kwarg — Hermes's StreamConsumer passes it but
+        # the original FeishuAdapter.edit_message() may not accept it.
+        # This prevents: "edit_message() got an unexpected keyword argument 'metadata'"
+        _fallback_kwargs = {k: v for k, v in kwargs.items() if k != "metadata"}
+        try:
+            return await orig_edit(self_feishu, message_id, content, **_fallback_kwargs)
+        except TypeError:
+            # If the original still rejects kwargs, try with no extra kwargs
+            return await orig_edit(self_feishu, message_id, content)
 
     return _intercepted_edit
 
