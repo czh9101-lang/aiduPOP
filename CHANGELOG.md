@@ -1,5 +1,16 @@
 # 更新日志 / Changelog
 
+## v0.15.5 (2026-06-06)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 中断场景：卡片显示"已停止"但仍出现重复纯文本消息 | `_wrap_handle_message_with_agent` 检查 `card_sent` 后，若 `card_sent=False` 但 controller 中已存在卡会话（如 ABORTED 终态），说明卡片实际已创建可见，但 `card_sent` 因上下文传播链路复杂未能正确设置。此时 Hermes 仍会通过 `FeishuAdapter.send()` 发送纯文本回复，导致卡片+纯文本重复 | `_wrap_handle_message_with_agent` 新增卡会话存在性检查：当 `card_sent=False` 但 controller 的 `_sessions` 中存在对应 `card_msg_id` 的会话时，也设置 `card_sent=True` 并返回 None 抑制 Hermes 回复 |
+| 2 | Bug | `_wrap_feishu_adapter_send` 未拦截中断后的纯文本回复 | 当 `card_sent=False`（传播失败）但卡会话已存在（ABORTED 终态）时，`FeishuAdapter.send()` 的 Agent 路径不会抑制文本，导致纯文本作为独立消息发送 | `_wrap_feishu_adapter_send` 的 Agent 路径新增卡会话存在性检查：`card_sent=False` 时查询 controller 的 `_sessions`，若存在 `card_msg_id` 则设置 `card_sent=True` 并返回 `SendResult(success=True)` 抑制纯文本 |
+| 3 | Bug | 递归中断父级 ABORTED COMPLETE 后 Hermes 仍发送纯文本 | `_wrap_run_agent` Step 2 父级 ABORTED COMPLETE 只设置了 `_saved_parent_ctx["card_sent"] = True` 和 `_original_msg_context_ref["card_sent"] = True`，但未设置 `result["already_sent"] = True`，Hermes 的 `_handle_message_with_agent` 仍认为文本未发送 → 发送纯文本 | `_wrap_run_agent` Step 2 新增 `result["already_sent"] = True`，确保 Hermes 的 gateway 层也跳过文本回复 |
+| 4 | Perf | 日志量过大：高频回调场景下 info 级别日志过多 | `_maybe_wrap_callbacks` 的 `HLS_CALLED`、`HLS_WRAP` 守卫检查等日志使用 `_logger.info`，每次消息触发多次，在高频场景下产生大量不必要的日志输出 | 高频/低价值日志从 `_logger.info` 降级为 `_logger.debug`：`HLS_CALLED`、`HLS_WRAP` guard check、guard SKIP、递归中断日志、父级 COMPLETE hook 日志 |
+| 5 | Perf | 启动延迟过长：`_schedule_direct_patch` 5 秒等待 | `_schedule_direct_patch` 使用 `time.sleep(5)` 等待 Hermes 加载完成，实际 2 秒已足够，多余的 3 秒增加了插件生效延迟 | `time.sleep(5)` → `time.sleep(2)`；日志消息同步更新 |
+| 6 | Test | 新增中断卡会话存在性检查测试 | Bug 1-3 修复需测试覆盖 | 新增 `test_card_session_existence_check_in_handle_message`：验证 `_wrap_handle_message_with_agent` 存在卡会话存在性检查逻辑；新增 `test_card_session_existence_check_in_feishu_adapter_send`：验证 `_wrap_feishu_adapter_send` 存在卡会话存在性检查逻辑；新增 `test_parent_aborted_complete_sets_already_sent`：验证 Step 2 设置 `result["already_sent"] = True`；新增 `test_startup_delay_is_2s`：验证启动延迟从 5s 降为 2s |
+
 ## v0.15.4 (2026-06-05)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
