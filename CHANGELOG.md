@@ -1,11 +1,16 @@
 # 更新日志 / Changelog
 
-## v0.15.3 (2026-06-04)
+## v0.15.3 (2026-06-05)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
-| 1 | Perf | 卡片中超过 10 个表格时后续表格仍被降级为代码块 | `_MAX_CARD_TABLES = 10` 在复杂场景下不够用，超限表格被降级为 Markdown 源码显示 | `_MAX_CARD_TABLES` 由 10 调整为 20，绝大多数场景不再触发降级 |
-| 2 | Chore | README 版本徽章未随版本号更新 | 版本号更新时遗漏了 README.md / README.zh-CN.md 中的 shields.io badge 版本号 | 所有文档中的版本徽章统一更新至当前版本 |
+| 1 | Bug | 中断场景：新消息卡片卡在"已停止"状态，永远不完成 | `_wrap_run_agent` 处理递归中断时，只触发了父级(A)的 ABORTED COMPLETE，**从未触发子级(B)的 COMPLETE hook**。B 的卡片会话一直停在 STREAMING 状态，没有完成更新。注释中声称"The child COMPLETE hook has already handled message B"是错误的——子级 COMPLETE 在此代码路径中从未被调用 | 重新设计 `_wrap_run_agent` 的 COMPLETE hook 逻辑：在 `_saved_parent_ctx is not None` 分支中，**先触发子级 B 的 COMPLETE hook**（使用 `result.get("final_response")` 等 B 的结果数据），**再触发父级 A 的 ABORTED COMPLETE**。确保 B 的卡片正常完成并显示回答内容，A 的卡片显示"已停止"中断状态 |
+| 2 | Bug | 中断场景：额外出现一个带 🔔 的重复卡片 | B 的 COMPLETE 从未触发 → B 的 `result["already_sent"]` 未设置 → Hermes 的 `_handle_message_with_agent` 认为文本未发送 → 通过 `adapter.send()` 发送 B 的回复文本 → `_wrap_feishu_adapter_send` 拦截后创建新的 gateway 卡片（因为此时 `_msg_ctx` 已被清除或指向 A 的上下文） | 修复 Bug 1 后，B 的 COMPLETE 正确设置 `result["already_sent"] = True` 和 `ctx["card_sent"] = True`，Hermes 不再重复发送文本 |
+| 3 | Bug | 中断场景：新卡片引用的是旧消息的文字 | B 的 COMPLETE 从未触发 → B 的卡片停留在 STREAMING 状态 → 卡片内容来自 B 开始前的流式文本（可能包含 A 的残留内容）；加上 `_force_rewrap` 在某些竞态条件下未及时生效 | 修复 Bug 1 后，B 的 COMPLETE 正确传入 B 的 `final_response` 作为回答文本，卡片最终内容与 B 的实际回复一致 |
+| 4 | Bug | 图片仍作为纯图片消息发送，未包含在卡片内 | Hermes 通过 `FeishuAdapter.send_image_file()` 和 `send_image()` 发送图片，而非 `send()`。`_wrap_feishu_adapter_send` 只包装了 `send()`，图片发送方法未被拦截 | 新增 `_wrap_feishu_adapter_send_image_file` 和 `_wrap_feishu_adapter_send_image` 拦截器：在 Agent 管道中拦截图片发送 → 上传到飞书获取 img_key → 注入到卡片会话的 ImageResolver 缓存 + 文本中 → 触发卡片更新；不在 Agent 管道中则原样透传。`FeishuClient` 新增 `upload_local_image()` 方法用于上传本地文件。`apply_patches()` 注册图片拦截补丁 |
+| 5 | Perf | 卡片中超过 10 个表格时后续表格仍被降级为代码块 | `_MAX_CARD_TABLES = 10` 在复杂场景下不够用，超限表格被降级为 Markdown 源码显示 | `_MAX_CARD_TABLES` 由 10 调整为 20，绝大多数场景不再触发降级 |
+| 6 | Chore | README 版本徽章未随版本号更新 | 版本号更新时遗漏了 README.md / README.zh-CN.md 中的 shields.io badge 版本号 | 所有文档中的版本徽章统一更新至当前版本 |
+| 7 | Test | 新增中断子级 COMPLETE hook 测试 + 图片拦截测试 | Bug 1-4 的修复需测试覆盖 | 新增 `test_child_complete_hook_fired_before_parent_aborted`：验证子级 COMPLETE 在父级 ABORTED 之前触发；新增 `test_child_complete_includes_result`：验证子级 COMPLETE 使用 B 的结果数据；新增 `TestImageInterception`（4 个测试）：验证 `send_image_file` / `send_image` 拦截器存在且检查 Agent 上下文 |
 
 ## v0.15.2 (2026-06-04)
 

@@ -296,6 +296,38 @@ class FeishuClient:
             return str(resp.data.image_key)
         return None
 
+    async def upload_local_image(self, image_path: str) -> str | None:
+        """Upload a local image file to Feishu and return the img_key.
+
+        Used by the image interception wrapper to upload local images
+        and add them to card sessions.
+        """
+        import os
+        try:
+            if not os.path.exists(image_path):
+                return None
+            with open(image_path, "rb") as f:
+                image_bytes = f.read()
+            image_file = io.BytesIO(image_bytes)
+            image_file.name = os.path.basename(image_path)
+            request = (
+                CreateImageRequest.builder()
+                .request_body(
+                    CreateImageRequestBody.builder()
+                    .image_type("message")
+                    .image(image_file)
+                    .build()
+                )
+                .build()
+            )
+            resp = await self._client.im.v1.image.acreate(request)
+            if resp.success() and resp.data and resp.data.image_key:
+                return str(resp.data.image_key)
+            return None
+        except Exception:
+            _logger.debug("local image upload failed for %s", image_path, exc_info=True)
+            return None
+
     @staticmethod
     def _download_image(url: str, timeout: int = 15) -> bytes | None:
         """同步下载图片（在线程池中运行）."""

@@ -70,7 +70,7 @@ monkey_patch.py (运行时拦截)
 
 | 文件 | 行数 | 职责 | 关键点 |
 |------|------|------|--------|
-| `monkey_patch.py` | 1280 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全；`_wrap_cron_deliver` 临时替换 adapter.send（直接 await，不用 `run_coroutine_threadsafe`）；`_wrap_run_background_task` 后台任务卡片；`_thinking_wrapper` 检查 consumed 返回值防重复；关键日志含 `__version__`；`finish_reason` 诊断日志 |
+| `monkey_patch.py` | 1380 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全；`_wrap_cron_deliver` 临时替换 adapter.send（直接 await，不用 `run_coroutine_threadsafe`）；`_wrap_run_background_task` 后台任务卡片；`_thinking_wrapper` 检查 consumed 返回值防重复；关键日志含 `__version__`；`finish_reason` 诊断日志；`_wrap_feishu_adapter_send_image_file`/`_wrap_feishu_adapter_send_image` 图片拦截→卡片会话；递归中断子级 COMPLETE hook 修复 |
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async；`on_message_completed` 传递 cache tokens |
 | `controller.py` | 681 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记；footer 新增 `cache_read_tokens`/`cache_write_tokens` |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
@@ -79,7 +79,7 @@ monkey_patch.py (运行时拦截)
 | `cardkit_i18n.py` | 45 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数；新增 `cache` 条目 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤20)、图片 key 剥离、长文本分块(2400 chars) |
 | `config.py` | 190 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer `[status, elapsed, model, compression_exhausted]`（`cache` 需手动添加）；`_get_hermes_config_path()` 动态路径（多 Profile 支持） |
-| `feishu.py` | 291 | 飞书 API 客户端 | CardKit v1/v2 + IM API；错误码分类；token 脱敏 |
+| `feishu.py` | 342 | 飞书 API 客户端 | CardKit v1/v2 + IM API；错误码分类；token 脱敏；`upload_local_image()` 本地文件上传 |
 | `flush.py` | 156 | 节流调度器 | CardKit 100ms / IM PATCH 1.5s；互斥锁 + re-flush |
 | `linear.py` | 180 | 线性 segment 状态 | `Segment` 数据类；`LinearState` 扁平管理；`split_tool_segment` / `split_answer_segment` 拆分 |
 | `text.py` | 111 | 文本增量追踪 | `<think|thinking|thought>` 标签拆分；`TextState` 累积器 |
@@ -408,7 +408,9 @@ hermes gateway restart
 | v0.12.3 | 2026-05-29 | CI 测试修复（添加 pytest-asyncio 依赖）+ 多 Profile 部署修复（`_get_hermes_config_path()` 动态读取 HERMES_HOME） |
 | v0.12.4 | 2026-05-29 | 默认页脚精简（移除 `cache`、`show_label` 默认 `false`）+ 状态文字去 emoji（✅❌🛑→纯文字）+ `show_label` 重复确认（插件只写 `footer.show_label`，不迁移用户配置）+ 致谢新增 joshcheng820222 + `test_version.py` 版本号动态读取 |
 | v0.15.0 | 2026-05-31 | Cron 推送卡片修复（`_card_sending_send` 死锁→直接 await）+ `_thinking_wrapper` 重复消息修复（检查 consumed 返回值）+ 关键日志含版本号 + `finish_reason` 诊断日志（`content_filter` 等异常可排查） |
-| v0.15.3 | 2026-06-04 | `_MAX_CARD_TABLES` 由 10 调整为 20，更多表格不再被降级为代码块 |
+| v0.15.1 | 2026-06-03 | `_msg_ctx` 泄漏修复（消息处理后清除上下文）+ 递归中断上下文隔离（`_saved_parent_ctx` + `_force_rewrap`）+ 并发消息 `card_sent` 误判修复（每消息独立 `msg_context` 字典） |
+| v0.15.2 | 2026-06-04 | 网关卡片 `plain_text` schema 修复 + `edit_message` metadata 参数修复 + `NoneType` 下标防御 + 中断旧卡片立即 ABORTED + `_force_rewrap` 中断回调重包装 + 图片 `_try_add_image_to_session` |
+| v0.15.3 | 2026-06-05 | 递归中断子级 COMPLETE hook 修复（核心 bug：B 的卡片永远不完成→重复卡片+错误内容）+ 图片拦截器 `send_image_file`/`send_image`（Agent 管道中图片→卡片会话）+ `upload_local_image()` + `_MAX_CARD_TABLES` 10→20 + README 版本徽章同步 |
 
 ---
 
