@@ -1,5 +1,14 @@
 # 更新日志 / Changelog
 
+## v0.15.1 (2026-06-03)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 网关内部消息（/status、/help、错误等）仍为纯文本，未转为卡片 | `_msg_ctx` ContextVar 在消息处理完成后从未清除，残留的 `event_message_id` + `card_sent=True` 导致后续 `FeishuAdapter.send()` 调用进入"Agent 抑制路径"，网关内部消息被静默丢弃而非转为卡片 | `_wrap_handle_message_with_agent` 在消息处理完成后（return 前）清除 `_msg_ctx` 和 `_thread_local_ctx`，防止残留上下文泄漏到后续非 Agent 消息 |
+| 2 | Bug | 媒体消息卡片包装未生效 | 同上——`_msg_ctx` 泄漏导致 `FeishuAdapter.send()` 的媒体消息也被 Agent 抑制路径丢弃 | 同上——清除 `_msg_ctx` 后媒体消息可正确进入"Gateway-internal path"并被转为包含媒体元素的卡片 |
+| 3 | Bug | 用户发送第二条消息打断第一条时，第二条消息被静默忽略 | Hermes 中断消息后通过递归 `_run_agent(_interrupt_depth+1)` 处理新消息，但插件未为新消息创建独立上下文——`_msg_ctx` 仍指向旧消息的上下文字典，导致：① 新消息的回调写入旧消息的卡片；② COMPLETE hook 使用旧 message_id 处理新消息的结果；③ 新消息的卡片会话从未被创建 | `_wrap_run_agent` 检测递归调用（`_interrupt_depth > 0` 且 `event_message_id` 变化）：为递归消息创建全新上下文字典 + 触发 `on_message_started` 创建新卡片会话；保存父级上下文副本，在子级 COMPLETE hook 完成后恢复父级上下文；父级 COMPLETE hook 检测递归场景时以 `aborted=True` 完成旧消息卡片（标记为"已中断"），避免用新消息结果错误完成旧卡片 |
+| 4 | Bug | 并发/重叠消息的 `card_sent` 状态误判 | `_wrap_handle_message_with_agent` 通过 `_msg_ctx.get()` 读取 `card_sent`，但当新消息覆盖了 `_msg_ctx` 后，旧消息的返回检查读到了新消息的上下文 | 使用每消息独立 `msg_context` 字典代替 `_msg_ctx.get()`，确保每条消息的 `card_sent` 判断不受并发消息干扰 |
+
 ## v0.15.0 (2026-06-02)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

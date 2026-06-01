@@ -148,25 +148,32 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
             pass
 
         # Seed message context for downstream hooks
-        _msg_ctx.set(
-            {
-                "message_id": mid,
-                "chat_id": chat_id,
-                "anchor_id": anchor_id,
-                "event_message_id": "",  # filled by _wrap_run_agent
-                "card_sent": False,
-                "_msg_start_time": time.monotonic(),  # 自计时：替代无法获取的 _response_time 局部变量
-            }
-        )
+        # Use a dedicated dict per message to prevent context leakage
+        # between concurrent/overlapping messages.
+        msg_context = {
+            "message_id": mid,
+            "chat_id": chat_id,
+            "anchor_id": anchor_id,
+            "event_message_id": "",  # filled by _wrap_run_agent
+            "card_sent": False,
+            "_msg_start_time": time.monotonic(),  # 自计时：替代无法获取的 _response_time 局部变量
+        }
+        _msg_ctx.set(msg_context)
 
         result = await orig(self, event, source, *args, **kwargs)
+
+        # ── Use the per-message context dict instead of _msg_ctx ──
+        # When a new message interrupts the old one, _msg_ctx may already
+        # point to the new message's context. We must use the original
+        # per-message dict captured at entry to correctly detect
+        # card_sent and interrupt states.
+        ctx = msg_context
 
         # ── CARD ALREADY SENT → suppress Hermes reply ──
         # Runtime wrapping cannot modify gateway internals like the old
         # AST injection, so we return None to simulate "stale agent result",
         # causing Hermes to skip the text reply.
         if result is not None:
-            ctx = _msg_ctx.get()
             if ctx and ctx.get("card_sent"):
                 _logger.info(
                     "card already sent for msg=%s, suppressing gateway reply",
@@ -179,8 +186,9 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
         # ── ABORT / INTERRUPT detection ──
         # When card was already sent, _handle_message_with_agent returns
         # None (the "Discarding stale agent result" path).
+        # Use the per-message context (not _msg_ctx) because the global
+        # context may have been overwritten by a newer message.
         if result is None:
-            ctx = _msg_ctx.get()
             if ctx and ctx.get("card_sent"):
                 # Card was sent successfully via on_message_completed.
                 # Only fire interrupt if a newer message started after this one.
@@ -214,6 +222,19 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
         with _started_msg_ids_lock:
             _started_msg_ids.discard(mid)
 
+        # ── Clear message context to prevent stale leakage ──
+        # After this message is fully processed, the context must be
+        # cleared so that subsequent non-agent messages (gateway-internal
+        # messages like /status, /help, errors, etc.) sent through
+        # FeishuAdapter.send() are NOT incorrectly routed to the "Agent
+        # path" where they would be silently suppressed.
+        #
+        # Bug: Without this cleanup, _msg_ctx retains the old event_message_id
+        # and card_sent=True, causing the next FeishuAdapter.send() call
+        # to enter the agent suppression path and drop the message.
+        _msg_ctx.set(None)
+        _thread_local_ctx.data = None
+
         return result
 
     return wrapper
@@ -238,9 +259,50 @@ def _wrap_run_agent(orig: Callable) -> Callable:
         **kwargs,
     ):
         # Store event_message_id so callback wrappers can consume it
+        # When Hermes recursively calls _run_agent for an interrupt follow-up
+        # (_interrupt_depth > 0), the event_message_id changes to the new
+        # message's ID. We must create a fresh context for the recursive call
+        # instead of mutating the parent message's context dict, because:
+        # 1. The parent's COMPLETE hook (after orig() returns) still needs
+        #    the original message_id and card_sent state.
+        # 2. The recursive call's COMPLETE hook needs the new message_id.
+        _saved_parent_ctx = None  # Will hold parent context for restoration
         ctx = _msg_ctx.get()
         if ctx is not None and event_message_id:
-            ctx["event_message_id"] = event_message_id
+            if _interrupt_depth > 0 and ctx.get("event_message_id") != event_message_id:
+                # Recursive interrupt follow-up: save parent context, create new context
+                _saved_parent_ctx = dict(ctx)  # Save a copy for restoration after orig()
+                _logger.info(
+                    "run_agent: recursive interrupt follow-up, creating new context "
+                    "for msg=%s (parent msg=%s, depth=%d)",
+                    event_message_id[:12] if event_message_id else "?",
+                    ctx.get("message_id", "?")[:12],
+                    _interrupt_depth,
+                )
+                ctx = {
+                    "message_id": event_message_id,
+                    "chat_id": ctx.get("chat_id", ""),
+                    "anchor_id": ctx.get("anchor_id"),
+                    "event_message_id": event_message_id,
+                    "card_sent": False,
+                    "_msg_start_time": time.monotonic(),
+                    "_agent_ref": None,
+                    "_interrupt_depth": _interrupt_depth,
+                    "_parent_message_id": ctx.get("message_id"),  # Track parent for cleanup
+                }
+                _msg_ctx.set(ctx)
+                # Fire START hook for the new (interrupted-into) message
+                try:
+                    from .patch import on_message_started
+                    on_message_started(
+                        message_id=event_message_id,
+                        chat_id=ctx["chat_id"],
+                        anchor_id=ctx.get("anchor_id"),
+                    )
+                except Exception:
+                    pass
+            else:
+                ctx["event_message_id"] = event_message_id
             # Copy to thread-local for thread-pool workers
             _thread_local_ctx.data = dict(ctx)
 
@@ -260,8 +322,40 @@ def _wrap_run_agent(orig: Callable) -> Callable:
         )
 
         # ── COMPLETE hook ──
+        # After orig() returns, check if we created a new context for a
+        # recursive interrupt follow-up. If so, the child's COMPLETE hook
+        # has already fired for message B. We must NOT fire the parent's
+        # COMPLETE hook with message B's result but message A's context,
+        # because that would incorrectly complete message A's card with
+        # message B's answer.
+        #
+        # Instead, for the parent context (message A), we fire an ABORTED
+        # completion since the message was interrupted and the card should
+        # be marked as stopped/interrupted.
         ctx = _msg_ctx.get()
-        if ctx is not None:
+        if _saved_parent_ctx is not None:
+            # We were in a recursive interrupt follow-up.
+            # The child COMPLETE hook has already handled message B.
+            # Now handle message A's completion as ABORTED (interrupted).
+            try:
+                from .patch import on_message_completed
+                _logger.info(
+                    "run_agent: parent COMPLETE hook firing as interrupted "
+                    "for msg=%s (child msg=%s completed normally)",
+                    _saved_parent_ctx.get("message_id", "?")[:12],
+                    ctx.get("message_id", "?")[:12],
+                )
+                on_message_completed(
+                    message_id=_saved_parent_ctx["message_id"],
+                    answer="",
+                    duration=time.monotonic() - _saved_parent_ctx.get("_msg_start_time", time.monotonic()),
+                    aborted=True,
+                    error_message="Interrupted by new message",
+                )
+                _saved_parent_ctx["card_sent"] = True
+            except Exception:
+                _logger.debug("run_agent: parent ABORTED completion failed", exc_info=True)
+        elif ctx is not None:
             try:
                 from .patch import on_message_completed
 
@@ -333,6 +427,16 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     ctx["card_sent"] = True
             except Exception:
                 pass
+
+        # ── Restore parent context after recursive interrupt follow-up ──
+        # When we created a new context for the recursive call (above),
+        # _msg_ctx now points to the child message's context. We must
+        # restore the parent's context so that the parent _wrap_run_agent's
+        # COMPLETE hook (which fires after this wrapper returns) can
+        # correctly read the parent message's context.
+        if _saved_parent_ctx is not None:
+            _msg_ctx.set(_saved_parent_ctx)
+            _thread_local_ctx.data = dict(_saved_parent_ctx)
 
         return result
 
