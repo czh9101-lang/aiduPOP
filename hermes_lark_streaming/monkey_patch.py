@@ -267,16 +267,26 @@ def _wrap_run_agent(orig: Callable) -> Callable:
         #    the original message_id and card_sent state.
         # 2. The recursive call's COMPLETE hook needs the new message_id.
         _saved_parent_ctx = None  # Will hold parent context for restoration
+        _original_msg_context_ref = None  # Reference to the original msg_context dict
         ctx = _msg_ctx.get()
         if ctx is not None and event_message_id:
             if _interrupt_depth > 0 and ctx.get("event_message_id") != event_message_id:
                 # Recursive interrupt follow-up: save parent context, create new context
+                #
+                # BUG FIX (v0.15.4): We must keep a reference to the original
+                # msg_context dict (from _wrap_handle_message_with_agent) so
+                # that when we set card_sent=True on the parent context, the
+                # _wrap_handle_message_with_agent wrapper can also see it.
+                # Without this, _saved_parent_ctx is a *copy* of the original
+                # dict, and the original msg_context.card_sent stays False,
+                # causing Hermes to send a duplicate plain text reply.
+                _original_msg_context_ref = ctx.get("_original_msg_context_ref") or ctx
                 _saved_parent_ctx = dict(ctx)  # Save a copy for restoration after orig()
                 _logger.info(
                     "run_agent: recursive interrupt follow-up, creating new context "
                     "for msg=%s (parent msg=%s, depth=%d)",
                     event_message_id[:12] if event_message_id else "?",
-                    ctx.get("message_id", "?")[:12],
+                    (ctx.get("message_id") or "?")[:12],
                     _interrupt_depth,
                 )
                 ctx = {
@@ -289,8 +299,27 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     "_agent_ref": None,
                     "_interrupt_depth": _interrupt_depth,
                     "_parent_message_id": ctx.get("message_id"),  # Track parent for cleanup
+                    "_force_rewrap": True,  # Signal _maybe_wrap_callbacks to re-wrap
+                    "_original_msg_context_ref": _original_msg_context_ref,  # Propagate ref to original
                 }
                 _msg_ctx.set(ctx)
+                _thread_local_ctx.data = dict(ctx)
+
+                # ── Fire INTERRUPT hook for the parent message immediately ──
+                # This ensures the old card is marked as ABORTED before the
+                # child starts processing, so the old card shows "Interrupted"
+                # state instead of staying in streaming/marquee animation.
+                try:
+                    from .patch import on_message_interrupted
+                    on_message_interrupted(
+                        message_id=_saved_parent_ctx.get("message_id", ""),
+                        new_message_id=event_message_id,
+                        chat_id=ctx["chat_id"],
+                        anchor_id=ctx.get("anchor_id"),
+                    )
+                except Exception:
+                    _logger.debug("run_agent: interrupt hook failed", exc_info=True)
+
                 # Fire START hook for the new (interrupted-into) message
                 try:
                     from .patch import on_message_started
@@ -322,28 +351,97 @@ def _wrap_run_agent(orig: Callable) -> Callable:
         )
 
         # ── COMPLETE hook ──
-        # After orig() returns, check if we created a new context for a
-        # recursive interrupt follow-up. If so, the child's COMPLETE hook
-        # has already fired for message B. We must NOT fire the parent's
-        # COMPLETE hook with message B's result but message A's context,
-        # because that would incorrectly complete message A's card with
-        # message B's answer.
+        # After orig() returns, we need to fire the COMPLETE hooks for
+        # the appropriate message(s).
         #
-        # Instead, for the parent context (message A), we fire an ABORTED
-        # completion since the message was interrupted and the card should
-        # be marked as stopped/interrupted.
+        # When _saved_parent_ctx is not None, we're in a recursive
+        # interrupt follow-up: the inner _run_agent(B) has just returned.
+        # We must fire B's COMPLETE hook first (with B's result), then
+        # fire A's ABORTED COMPLETE (parent was interrupted).
+        #
+        # Previous bug: only A's ABORTED COMPLETE was fired, leaving
+        # B's card stuck in STREAMING state forever, causing:
+        # - B's card shows "已停止" (no completion update)
+        # - Duplicate gateway card when Hermes sends B's result via
+        #   adapter.send() (not intercepted because context was cleared)
+        # - B's card quotes A's text (stale session content)
         ctx = _msg_ctx.get()
         if _saved_parent_ctx is not None:
-            # We were in a recursive interrupt follow-up.
-            # The child COMPLETE hook has already handled message B.
-            # Now handle message A's completion as ABORTED (interrupted).
+            # ── Step 1: Fire B's (child) COMPLETE hook normally ──
+            # B's context is still in _msg_ctx at this point.
+            # We use B's result (the inner _run_agent's return value)
+            # to complete B's card properly.
+            if ctx is not None:
+                try:
+                    from .patch import on_message_completed
+
+                    _elapsed_child = time.monotonic() - ctx.get("_msg_start_time", time.monotonic())
+                    is_interrupted_child = result.get("interrupted", False) or result.get("partial", False)
+
+                    _finish_reason_child = result.get("finish_reason", "")
+                    _error_msg_child = result.get("error") or result.get("interrupt_message", "")
+                    if _finish_reason_child and _finish_reason_child != "stop":
+                        _logger.warning(
+                            "hermes-lark-streaming v%s: child non-stop finish_reason=%s model=%s msg=%s",
+                            __version__,
+                            _finish_reason_child,
+                            result.get("model", "?"),
+                            (ctx["message_id"] or "?")[:12],
+                        )
+                    if _error_msg_child:
+                        _logger.warning(
+                            "hermes-lark-streaming v%s: child agent error: %s model=%s msg=%s",
+                            __version__,
+                            _error_msg_child[:200],
+                            result.get("model", "?"),
+                            (ctx["message_id"] or "?")[:12],
+                        )
+
+                    _agent_ref_child = ctx.get("_agent_ref")
+                    cache_read_child = getattr(_agent_ref_child, "session_cache_read_tokens", 0) if _agent_ref_child else 0
+                    cache_write_child = getattr(_agent_ref_child, "session_cache_write_tokens", 0) if _agent_ref_child else 0
+
+                    card_sent_child = on_message_completed(
+                        message_id=ctx["message_id"],
+                        answer=result.get("final_response", ""),
+                        duration=_elapsed_child,
+                        model=result.get("model", ""),
+                        tokens={
+                            "input_tokens": result.get("input_tokens", 0),
+                            "output_tokens": result.get("output_tokens", 0),
+                            "cache_read_tokens": cache_read_child,
+                            "cache_write_tokens": cache_write_child,
+                        },
+                        context={
+                            "used_tokens": result.get("last_prompt_tokens", 0),
+                            "max_tokens": result.get("context_length", 0),
+                        },
+                        api_calls=result.get("api_calls", 0),
+                        history_offset=result.get("history_offset", 0),
+                        compression_exhausted=result.get("compression_exhausted", False),
+                        aborted=is_interrupted_child,
+                        error_message=_error_msg_child,
+                    )
+                    if card_sent_child:
+                        result["already_sent"] = True
+                        ctx["card_sent"] = True
+                        _logger.info(
+                            "run_agent: child COMPLETE hook fired for msg=%s card_sent=True",
+                            (ctx["message_id"] or "?")[:12],
+                        )
+                except Exception:
+                    _logger.debug("run_agent: child COMPLETE hook failed", exc_info=True)
+
+            # ── Step 2: Fire A's (parent) ABORTED COMPLETE ──
+            # The parent message was interrupted by the child (B).
+            # Fire its COMPLETE as ABORTED so A's card shows "已停止".
             try:
                 from .patch import on_message_completed
                 _logger.info(
                     "run_agent: parent COMPLETE hook firing as interrupted "
                     "for msg=%s (child msg=%s completed normally)",
-                    _saved_parent_ctx.get("message_id", "?")[:12],
-                    ctx.get("message_id", "?")[:12],
+                    (_saved_parent_ctx.get("message_id") or "?")[:12],
+                    (ctx.get("message_id") or "?")[:12] if ctx else "?",
                 )
                 on_message_completed(
                     message_id=_saved_parent_ctx["message_id"],
@@ -353,6 +451,16 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     error_message="Interrupted by new message",
                 )
                 _saved_parent_ctx["card_sent"] = True
+                # BUG FIX (v0.15.4): Also set card_sent on the original
+                # msg_context dict so that _wrap_handle_message_with_agent
+                # can suppress the duplicate plain text reply.
+                if _original_msg_context_ref is not None:
+                    _original_msg_context_ref["card_sent"] = True
+                    _logger.debug(
+                        "run_agent: propagated card_sent=True to original "
+                        "msg_context for msg=%s",
+                        (_saved_parent_ctx.get("message_id") or "?")[:12],
+                    )
             except Exception:
                 _logger.debug("run_agent: parent ABORTED completion failed", exc_info=True)
         elif ctx is not None:
@@ -382,7 +490,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         __version__,
                         _finish_reason,
                         result.get("model", "?"),
-                        ctx["message_id"][:12],
+                        (ctx["message_id"] or "?")[:12],
                     )
                 if _error_msg:
                     _logger.warning(
@@ -390,7 +498,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         __version__,
                         _error_msg[:200],
                         result.get("model", "?"),
-                        ctx["message_id"][:12],
+                        (ctx["message_id"] or "?")[:12],
                     )
 
                 # ── Extract cache tokens from agent reference ──
@@ -583,13 +691,19 @@ def _maybe_wrap_callbacks(agent) -> None:
     # check the function itself for our wrapper mark rather than a global
     # agent flag. This ensures new messages get freshly wrapped callbacks
     # while preventing double-wrapping within a single run_conversation.
+    #
+    # EXCEPTION: When a recursive interrupt follow-up occurs, the
+    # event_message_id changes but the agent object is reused. We must
+    # re-wrap the callbacks with the new eid so that streaming text goes
+    # to the new message's card, not the old one.
     _current_stream = getattr(agent, "stream_delta_callback", None)
     _current_interim = getattr(agent, "interim_assistant_callback", None)
     _current_tool = getattr(agent, "tool_progress_callback", None)
     _current_reasoning = getattr(agent, "reasoning_callback", None)
     _current_bg = getattr(agent, "background_review_callback", None)
+    _force_rewrap = bool(ctx and ctx.get("_force_rewrap")) if (ctx := _msg_ctx.get()) else False
     _logger.info(
-        "HLS_WRAP: guard check stream=%s(hls=%s) interim=%s tool=%s reasoning=%s bg=%s eid=%s",
+        "HLS_WRAP: guard check stream=%s(hls=%s) interim=%s tool=%s reasoning=%s bg=%s eid=%s force_rewrap=%s",
         bool(_current_stream),
         getattr(_current_stream, "_hls_wrapper", False) if _current_stream else "N/A",
         bool(_current_interim),
@@ -597,8 +711,9 @@ def _maybe_wrap_callbacks(agent) -> None:
         bool(_current_reasoning),
         bool(_current_bg),
         eid[:12] if eid else "?",
+        _force_rewrap,
     )
-    if _current_stream and getattr(_current_stream, "_hls_wrapper", False):
+    if _current_stream and getattr(_current_stream, "_hls_wrapper", False) and not _force_rewrap:
         _logger.info("HLS_WRAP: guard SKIP — stream_delta already wrapped")
         return
 
@@ -757,6 +872,8 @@ def _maybe_wrap_callbacks(agent) -> None:
     ctx = _msg_ctx.get()
     if ctx is not None:
         ctx["_agent_ref"] = agent
+        # Clear _force_rewrap flag after callbacks have been re-wrapped
+        ctx.pop("_force_rewrap", None)
         _thread_local_ctx.data = dict(ctx)
 
 
@@ -1033,6 +1150,62 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
 # ── FeishuAdapter interception layer (Phase 1: gateway message cards) ─
 
 
+def _try_add_image_to_session(message_id: str, content: Any) -> bool:
+    """Try to add an image from FeishuAdapter.send() to the card session.
+
+    When Hermes sends an image via FeishuAdapter.send() with non-string
+    content (e.g. a dict with image_key or a file:// URL string wrapped
+    in a non-str type), we attempt to add it to the active card session
+    so it appears inside the card instead of as a standalone message.
+
+    Returns True if the image was added to the session, False otherwise.
+    """
+    try:
+        from .controller import get_controller
+        ctrl = get_controller()
+        if not ctrl.enabled:
+            return False
+
+        session = ctrl._get_active_session(message_id)
+        if session is None:
+            return False
+
+        # Extract image_key from Hermes's content format
+        img_key = None
+        if isinstance(content, dict):
+            # Hermes may send a dict with image_key
+            img_key = content.get("image_key") or content.get("img_key")
+        elif isinstance(content, str):
+            # Sometimes Hermes sends a file:// URL or MEDIA tag
+            if content.startswith("file://") or "image" in content.lower():
+                # We can't directly use file:// URLs in cards,
+                # but the ImageResolver handles markdown image syntax
+                return False
+
+        if not img_key:
+            return False
+
+        # Add the image key to the session's image_resolver cache
+        # so it gets included in the next card update
+        if session.image_resolver:
+            # Create a fake URL→img_key mapping so resolve_images
+            # will replace markdown image refs with the img_key
+            _fake_url = f"hermes_image://{img_key}"
+            session.image_resolver._cache[_fake_url] = img_key
+            _logger.info(
+                "image added to session: msg=%s img_key=%s",
+                message_id[:12], img_key[:12] if img_key else "?",
+            )
+            # Schedule a card update to include the image
+            ctrl._schedule_card_update(session)
+            return True
+
+        return False
+    except Exception:
+        _logger.debug("_try_add_image_to_session failed", exc_info=True)
+        return False
+
+
 def _classify_gateway_message(content: str) -> str:
     """Classify a gateway-internal message by its content for card category.
 
@@ -1082,8 +1255,16 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
     and should be converted to a card.
     """
     async def _intercepted_send(self_feishu, chat_id, content, reply_to=None, metadata=None, **kwargs):
-        # ── Guard: skip non-text content ──
-        # If content is not a string (e.g. card dict, image key), pass through
+        # ── Agent path: handle image sends during agent pipeline ──
+        # When Hermes sends an image (non-string content like a dict with
+        # image_key) during the agent pipeline, we let it through as a
+        # standalone image message. Previously (v0.15.3) we tried to suppress
+        # standalone images and inject them into the card, but this caused
+        # images to disappear entirely (see issue-v0.15.3-image-card-wrapping).
+        # Images from the AI's markdown response are already handled by the
+        # card streaming pipeline (ImageResolver). Standalone MEDIA sends
+        # (send_message tool with <MEDIA>) should go through as independent
+        # messages — they are NOT part of the streaming card content.
         if not isinstance(content, str):
             return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
@@ -1289,7 +1470,15 @@ def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
             message_id[:12] if message_id else "?",
             len(content) if isinstance(content, str) else 0,
         )
-        return await orig_edit(self_feishu, message_id, content, metadata=metadata, **kwargs)
+        # Strip 'metadata' kwarg — Hermes's StreamConsumer passes it but
+        # the original FeishuAdapter.edit_message() may not accept it.
+        # This prevents: "edit_message() got an unexpected keyword argument 'metadata'"
+        _fallback_kwargs = {k: v for k, v in kwargs.items() if k != "metadata"}
+        try:
+            return await orig_edit(self_feishu, message_id, content, **_fallback_kwargs)
+        except TypeError:
+            # If the original still rejects kwargs, try with no extra kwargs
+            return await orig_edit(self_feishu, message_id, content)
 
     return _intercepted_edit
 
@@ -1416,6 +1605,155 @@ def _wrap_feishu_adapter_delete_reaction(orig_delete_reaction: Callable) -> Call
         return await orig_delete_reaction(self_feishu, message_id, emoji, **kwargs)
 
     return _intercepted_delete_reaction
+
+
+def _wrap_feishu_adapter_send_image_file(orig_send_image_file: Callable) -> Callable:
+    """Intercept ``FeishuAdapter.send_image_file()`` — add image to card session.
+
+    When Hermes sends a local image via ``send_image_file()`` during the
+    agent pipeline, we upload it to Feishu first (to get an img_key), then
+    add the img_key to the card session's image resolver and inject a
+    markdown image reference into the session text. This renders the image
+    inside the card instead of as a standalone image message.
+
+    When not in an agent pipeline, or if the upload/interception fails,
+    the original method is called as fallback.
+    """
+
+    async def _intercepted_send_image_file(
+        self_feishu, chat_id, image_path, caption=None, reply_to=None, metadata=None, **kwargs
+    ):
+        ctx = _msg_ctx.get(None)
+        if ctx is not None:
+            eid = ctx.get("event_message_id", "")
+            if eid:
+                # Inside agent pipeline — try to add image to card session
+                try:
+                    from .controller import get_controller
+                    ctrl = get_controller()
+                    if ctrl.enabled:
+                        session = ctrl._get_active_session(eid)
+                        if session is not None and ctrl._client is not None:
+                            _logger.info(
+                                "feishu_adapter_send_image_file: intercepting image for "
+                                "card session, eid=%s path=%s",
+                                eid[:12],
+                                image_path[:40] if image_path else "?",
+                            )
+                            # Upload the image file to Feishu to get img_key
+                            import os as _os
+                            img_key = None
+                            if _os.path.exists(image_path):
+                                try:
+                                    img_key = await ctrl._client.upload_local_image(image_path)
+                                except Exception:
+                                    _logger.debug(
+                                        "feishu_adapter_send_image_file: upload failed",
+                                        exc_info=True,
+                                    )
+
+                            if img_key:
+                                # Register the img_key in the image resolver cache
+                                _fake_url = f"file://{image_path}"
+                                if session.image_resolver:
+                                    session.image_resolver._cache[_fake_url] = img_key
+                                # Inject a markdown image reference into the session text
+                                _img_md = f"![{caption or 'image'}]({_fake_url})"
+                                session.text.on_partial(_img_md)
+                                ctrl._schedule_card_update(session)
+                                _logger.info(
+                                    "feishu_adapter_send_image_file: image added to card, "
+                                    "eid=%s img_key=%s",
+                                    eid[:12], img_key[:12],
+                                )
+                                try:
+                                    from gateway.platforms.base import SendResult
+                                    return SendResult(success=True)
+                                except (ImportError, AttributeError):
+                                    return None
+                            else:
+                                _logger.debug(
+                                    "feishu_adapter_send_image_file: upload failed, "
+                                    "falling back to standalone send, eid=%s",
+                                    eid[:12],
+                                )
+                except Exception:
+                    _logger.debug(
+                        "feishu_adapter_send_image_file: interception failed, "
+                        "falling back to standalone send",
+                        exc_info=True,
+                    )
+
+        # Fallback: original send_image_file
+        return await orig_send_image_file(
+            self_feishu, chat_id, image_path,
+            caption=caption, reply_to=reply_to, metadata=metadata, **kwargs
+        )
+
+    return _intercepted_send_image_file
+
+
+def _wrap_feishu_adapter_send_image(orig_send_image: Callable) -> Callable:
+    """Intercept ``FeishuAdapter.send_image()`` — add image to card session.
+
+    When Hermes sends a remote image via ``send_image()`` during the agent
+    pipeline, we add it to the active card session's image resolver instead
+    of sending it as a standalone image message.
+
+    When not in an agent pipeline, the original method is called unchanged.
+    """
+
+    async def _intercepted_send_image(
+        self_feishu, chat_id, image_url, caption=None, reply_to=None, metadata=None, **kwargs
+    ):
+        ctx = _msg_ctx.get(None)
+        if ctx is not None:
+            eid = ctx.get("event_message_id", "")
+            if eid:
+                # Inside agent pipeline — try to add image to card session
+                try:
+                    from .controller import get_controller
+                    ctrl = get_controller()
+                    if ctrl.enabled:
+                        session = ctrl._get_active_session(eid)
+                        if session is not None:
+                            _logger.info(
+                                "feishu_adapter_send_image: intercepting remote image for "
+                                "card session, eid=%s url=%s",
+                                eid[:12],
+                                image_url[:40] if image_url else "?",
+                            )
+                            # If image_resolver exists, it will handle the URL
+                            # via resolve_images on next card update
+                            # Inject a markdown image reference into the session text
+                            _img_md = f"![{caption or 'image'}]({image_url})"
+                            session.text.on_partial(_img_md)
+                            ctrl._schedule_card_update(session)
+                            _logger.info(
+                                "feishu_adapter_send_image: image added to card session, "
+                                "eid=%s url=%s",
+                                eid[:12],
+                                image_url[:40] if image_url else "?",
+                            )
+                            try:
+                                from gateway.platforms.base import SendResult
+                                return SendResult(success=True)
+                            except (ImportError, AttributeError):
+                                return None
+                except Exception:
+                    _logger.debug(
+                        "feishu_adapter_send_image: interception failed, "
+                        "falling back to standalone send",
+                        exc_info=True,
+                    )
+
+        # Fallback: original send_image
+        return await orig_send_image(
+            self_feishu, chat_id, image_url,
+            caption=caption, reply_to=reply_to, metadata=metadata, **kwargs
+        )
+
+    return _intercepted_send_image
 
 
 # ── Namespace-collision-safe module resolver ────────────────────────
@@ -1770,8 +2108,15 @@ def apply_patches() -> None:
             FeishuAdapter.delete_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter.delete_reaction)
         except AttributeError:
             _logger.debug("hermes-lark-streaming: FeishuAdapter.delete_reaction not found, reaction interception skipped")
+        # NOTE(v0.15.4): send_image_file / send_image interception REMOVED.
+        # The interception was fundamentally broken — it injected file:// URLs
+        # into session.text.on_partial() which were then stripped by
+        # _strip_invalid_image_keys(), and suppressed the original standalone
+        # send, causing images to disappear entirely.
+        # Images are now sent as standalone messages (pre-v0.15.3 behavior).
+        # See: issue-v0.15.3-image-card-wrapping
         feishu_patched = True
-        _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit/reaction patched ✓ (gateway message cards enabled)")
+        _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit/reaction/image patched ✓ (gateway message cards enabled)")
     except (ImportError, AttributeError) as e:
         _logger.info("hermes-lark-streaming: FeishuAdapter patch skipped (%s)", e)
 

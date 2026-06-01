@@ -395,6 +395,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         old_session = self._get_active_session(old_message_id)
         if old_session is not None:
+            old_session._was_aborted = True
+            old_session.error_message = "Interrupted by new message"
             old_session.state = ABORTED
             old_session.flush.mark_completed()
             _logger.info(

@@ -16,9 +16,12 @@ class TestBuildGatewayCard:
         assert "elements" not in card  # schema 2.0 uses body
         assert "body" in card
         elements = card["body"]["elements"]
-        # First element should be the icon header
-        assert elements[0]["tag"] == "plain_text"
-        assert elements[0]["content"] == "🔔"
+        # First element should be the icon header wrapped in div.text
+        # (plain_text is NOT valid as a direct child of body.elements in
+        # CardKit 2.0 — must be wrapped in div.text to avoid API error 230099)
+        assert elements[0]["tag"] == "div"
+        assert elements[0]["text"]["tag"] == "plain_text"
+        assert elements[0]["text"]["content"] == "🔔"
         # Second element should be the content markdown
         assert elements[1]["tag"] == "markdown"
         assert "System notification" in elements[1]["content"]
@@ -26,39 +29,40 @@ class TestBuildGatewayCard:
     def test_error_category(self):
         card = build_gateway_card("Something failed", category="error")
         elements = card["body"]["elements"]
-        assert elements[0]["content"] == "❌"
+        assert elements[0]["text"]["content"] == "❌"
 
     def test_auth_category(self):
         card = build_gateway_card("Pairing code: 1234", category="auth")
         elements = card["body"]["elements"]
-        assert elements[0]["content"] == "🔐"
+        assert elements[0]["text"]["content"] == "🔐"
 
     def test_session_category(self):
         card = build_gateway_card("Session reset", category="session")
         elements = card["body"]["elements"]
-        assert elements[0]["content"] == "🔄"
+        assert elements[0]["text"]["content"] == "🔄"
 
     def test_slash_category(self):
         card = build_gateway_card("/help output", category="slash")
         elements = card["body"]["elements"]
-        assert elements[0]["content"] == "⌨️"
+        assert elements[0]["text"]["content"] == "⌨️"
 
     def test_default_category_is_system(self):
         card = build_gateway_card("Hello", category="")
         elements = card["body"]["elements"]
-        assert elements[0]["content"] == "🔔"
+        assert elements[0]["text"]["content"] == "🔔"
 
     def test_unknown_category_defaults_to_system(self):
         card = build_gateway_card("Hello", category="unknown_category")
         elements = card["body"]["elements"]
-        assert elements[0]["content"] == "🔔"
+        assert elements[0]["text"]["content"] == "🔔"
 
     def test_empty_content_produces_card(self):
         card = build_gateway_card("")
         assert card["schema"] == "2.0"
         elements = card["body"]["elements"]
-        # Still has icon header
-        assert elements[0]["tag"] == "plain_text"
+        # Still has icon header (wrapped in div.text)
+        assert elements[0]["tag"] == "div"
+        assert elements[0]["text"]["tag"] == "plain_text"
 
     def test_summary_generated(self):
         card = build_gateway_card("This is a long message that should have a summary")
@@ -90,29 +94,30 @@ class TestBuildGatewayCardStatusIndicator:
             status_emoji="👀",
         )
         elements = card["body"]["elements"]
-        # First element should be the status indicator, not the category icon
-        assert elements[0]["tag"] == "plain_text"
-        assert elements[0]["content"] == "👀 Reading"
-        assert elements[0]["text_color"] == "turquoise"
+        # First element should be the status indicator wrapped in div.text
+        assert elements[0]["tag"] == "div"
+        assert elements[0]["text"]["tag"] == "plain_text"
+        assert elements[0]["text"]["content"] == "👀 Reading"
+        assert elements[0]["text"]["text_color"] == "turquoise"
 
     def test_no_status_shows_category_icon(self):
         """When no status is set, the category icon is shown (default behavior)."""
         card = build_gateway_card("Hello", category="error")
         elements = card["body"]["elements"]
-        assert elements[0]["content"] == "❌"
-        assert elements[0]["text_color"] == "grey"
+        assert elements[0]["text"]["content"] == "❌"
+        assert elements[0]["text"]["text_color"] == "grey"
 
     def test_empty_status_shows_category_icon(self):
         """When status_label is empty, the category icon is shown."""
         card = build_gateway_card("Hello", status_label="", status_emoji="👀")
         elements = card["body"]["elements"]
         # No status → show category icon (default system)
-        assert elements[0]["content"] == "🔔"
+        assert elements[0]["text"]["content"] == "🔔"
 
     def test_processing_status(self):
         card = build_gateway_card("Working...", status_label="Processing", status_emoji="⏳")
         elements = card["body"]["elements"]
-        assert elements[0]["content"] == "⏳ Processing"
+        assert elements[0]["text"]["content"] == "⏳ Processing"
 
 
 class TestBuildGatewayCardMedia:
@@ -125,7 +130,7 @@ class TestBuildGatewayCardMedia:
             media_parts=[{"type": "image", "key": "img_v3_test123"}],
         )
         elements = card["body"]["elements"]
-        # Should have: icon + img + markdown
+        # Should have: icon div + img + markdown
         assert len(elements) >= 3
         # Find the img element
         img_elements = [e for e in elements if e.get("tag") == "img"]
@@ -133,16 +138,16 @@ class TestBuildGatewayCardMedia:
         assert img_elements[0]["img_key"] == "img_v3_test123"
 
     def test_file_media_element(self):
-        """File media parts are rendered as text links in the card."""
+        """File media parts are rendered as text links in the card (wrapped in div.text)."""
         card = build_gateway_card(
             "Here is a file",
             media_parts=[{"type": "file", "key": "file_v3_test456", "name": "report.pdf"}],
         )
         elements = card["body"]["elements"]
-        # Find the file element
-        file_elements = [e for e in elements if "📎" in e.get("content", "")]
+        # Find the file element (wrapped in div.text)
+        file_elements = [e for e in elements if e.get("tag") == "div" and "📎" in e.get("text", {}).get("content", "")]
         assert len(file_elements) == 1
-        assert "report.pdf" in file_elements[0]["content"]
+        assert "report.pdf" in file_elements[0]["text"]["content"]
 
     def test_multiple_media_parts(self):
         """Multiple media parts are all included in the card."""
@@ -157,7 +162,7 @@ class TestBuildGatewayCardMedia:
         elements = card["body"]["elements"]
         img_elements = [e for e in elements if e.get("tag") == "img"]
         assert len(img_elements) == 2
-        file_elements = [e for e in elements if "📎" in e.get("content", "")]
+        file_elements = [e for e in elements if e.get("tag") == "div" and "📎" in e.get("text", {}).get("content", "")]
         assert len(file_elements) == 1
 
     def test_no_media_parts(self):

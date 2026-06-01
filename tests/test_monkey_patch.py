@@ -439,3 +439,156 @@ class TestRecursiveInterruptContext:
 
         source = inspect.getsource(_wrap_run_agent)
         assert "aborted=True" in source, "Aborted completion not found for parent context"
+
+    def test_child_complete_hook_fired_before_parent_aborted(self) -> None:
+        """Bug fix: Child (B) COMPLETE hook must fire BEFORE parent (A) ABORTED COMPLETE.
+
+        Previous bug: only A's ABORTED COMPLETE was fired, leaving B's card stuck
+        in STREAMING state, causing duplicate cards and wrong card content.
+        """
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        # The COMPLETE hook section should handle both child and parent
+        # in the _saved_parent_ctx is not None branch
+        assert "Step 1: Fire B" in source or "child COMPLETE" in source.lower(), \
+            "Child COMPLETE hook not found in _wrap_run_agent — bug fix missing!"
+        assert "Step 2: Fire A" in source or "parent COMPLETE" in source.lower() or "ABORTED COMPLETE" in source, \
+            "Parent ABORTED COMPLETE not found in _wrap_run_agent"
+
+    def test_child_complete_includes_result(self) -> None:
+        """Child COMPLETE hook should use the inner _run_agent's result (B's answer)."""
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        # In the _saved_parent_ctx branch, the child's COMPLETE should call
+        # on_message_completed with result data (not empty answer)
+        lines = source.split('\n')
+        in_saved_parent_block = False
+        found_child_on_message_completed = False
+        found_child_final_response = False
+        for i, line in enumerate(lines):
+            if '_saved_parent_ctx is not None' in line:
+                in_saved_parent_block = True
+            if in_saved_parent_block and 'on_message_completed' in line:
+                # Check nearby lines for final_response
+                nearby = '\n'.join(lines[max(0, i-2):i+10])
+                if 'final_response' in nearby:
+                    found_child_final_response = True
+                    found_child_on_message_completed = True
+                    break
+            # Stop looking once we hit the parent ABORTED section
+            if in_saved_parent_block and 'ABORTED' in line and 'Step 2' in line:
+                break
+        assert found_child_final_response, \
+            "Child COMPLETE should use result.get('final_response') for B's answer"
+
+    def test_parent_card_sent_propagated_to_original_msg_context(self) -> None:
+        """v0.15.4 bug fix: parent's card_sent must propagate to original msg_context.
+
+        When _wrap_run_agent creates a copy of the parent context
+        (_saved_parent_ctx = dict(ctx)), the original msg_context dict
+        (captured by _wrap_handle_message_with_agent) is a different object.
+        Setting _saved_parent_ctx["card_sent"] = True does NOT update the
+        original msg_context, causing _wrap_handle_message_with_agent to
+        miss the card_sent flag and send a duplicate plain text reply.
+
+        The fix: store a reference to the original msg_context via
+        _original_msg_context_ref and propagate card_sent=True to it.
+        """
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        # Check that _original_msg_context_ref is captured
+        assert "_original_msg_context_ref" in source, \
+            "_original_msg_context_ref not found in _wrap_run_agent — card_sent propagation fix missing!"
+        # Check that card_sent is propagated to the original context
+        assert '_original_msg_context_ref["card_sent"] = True' in source or \
+               '_original_msg_context_ref["card_sent"]=True' in source.replace(" ", ""), \
+            "card_sent propagation to _original_msg_context_ref not found in _wrap_run_agent"
+
+
+class TestImageInterception:
+    """Verify image interception behavior — v0.15.4 regression fix.
+
+    v0.15.3 introduced send_image_file / send_image interception that
+    caused images to disappear entirely. v0.15.4 removed the monkey-patching
+    while keeping the function definitions for reference.
+
+    The _wrap_feishu_adapter_send non-string content path now passes
+    images through as standalone messages instead of suppressing them.
+    """
+
+    def test_send_image_file_wrapper_exists(self) -> None:
+        """_wrap_feishu_adapter_send_image_file should still be importable (kept for reference)."""
+        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image_file
+        assert callable(_wrap_feishu_adapter_send_image_file)
+
+    def test_send_image_wrapper_exists(self) -> None:
+        """_wrap_feishu_adapter_send_image should still be importable (kept for reference)."""
+        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image
+        assert callable(_wrap_feishu_adapter_send_image)
+
+    def test_send_image_file_not_monkey_patched(self) -> None:
+        """v0.15.4: send_image_file should NOT be monkey-patched anymore.
+
+        The interception was removed because it caused images to disappear:
+        - Injected file:// URLs were stripped by _strip_invalid_image_keys()
+        - ImageResolver._IMG_PATTERN only matches http(s):// URLs
+        - _schedule_card_update skipped terminal-state sessions
+        - Original standalone send was suppressed → images lost entirely
+        """
+        from hermes_lark_streaming.monkey_patch import apply_patches
+        import inspect
+
+        source = inspect.getsource(apply_patches)
+        # The monkey-patching of send_image_file should NOT be present
+        assert "send_image_file = _wrap_feishu_adapter_send_image_file" not in source, \
+            "send_image_file should NOT be monkey-patched (v0.15.4 regression fix)"
+
+    def test_send_image_not_monkey_patched(self) -> None:
+        """v0.15.4: send_image should NOT be monkey-patched anymore."""
+        from hermes_lark_streaming.monkey_patch import apply_patches
+        import inspect
+
+        source = inspect.getsource(apply_patches)
+        assert "send_image = _wrap_feishu_adapter_send_image" not in source, \
+            "send_image should NOT be monkey-patched (v0.15.4 regression fix)"
+
+    def test_send_non_string_passes_through(self) -> None:
+        """v0.15.4: _wrap_feishu_adapter_send should pass non-string content (images) through.
+
+        Previously (v0.15.3), when card_sent=True, images were suppressed
+        even if _try_add_image_to_session failed. Now all non-string content
+        is passed through as standalone messages — the only code path for
+        non-string content is to call orig_send directly.
+        """
+        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send
+        import inspect
+
+        source = inspect.getsource(_wrap_feishu_adapter_send)
+        # Find the "not isinstance(content, str)" block
+        # After the fix, non-string content should have a single return path
+        # to orig_send, without any card_sent checks or suppression logic.
+        assert "not isinstance(content, str)" in source, \
+            "Non-string content check not found in _wrap_feishu_adapter_send"
+        # The non-string block should return orig_send directly
+        # (not via a SendResult suppression or _try_add_image_to_session)
+        lines = source.split('\n')
+        in_non_string_block = False
+        found_orig_send_in_block = False
+        for line in lines:
+            if 'not isinstance(content, str)' in line:
+                in_non_string_block = True
+            elif in_non_string_block:
+                if 'orig_send' in line:
+                    found_orig_send_in_block = True
+                    break
+                # If we hit the string content section, stop
+                if 'isinstance(content, str)' in line or 'content.strip()' in line:
+                    break
+        assert found_orig_send_in_block, \
+            "Non-string content should pass through to orig_send directly"

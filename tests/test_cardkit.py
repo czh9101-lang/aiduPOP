@@ -118,8 +118,8 @@ class TestDowngradeTables:
 
     def test_over_limit_downgraded(self) -> None:
         table = "| A | B |\n|---|---|\n| 1 | 2 |"
-        # _MAX_CARD_TABLES = 10, so 12 tables triggers downgrade
-        text = "\n\n".join([table] * 12)
+        # _MAX_CARD_TABLES = 20, so 22 tables triggers downgrade
+        text = "\n\n".join([table] * 22)
         result = _downgrade_tables(text)
         assert result.count("```") >= 4  # 超限表格被包装为代码块
 
@@ -713,8 +713,8 @@ class TestBuildCronCard:
         from hermes_lark_streaming.cardkit import build_cron_card
 
         table = "| A | B |\n|---|---|\n| 1 | 2 |"
-        # _MAX_CARD_TABLES = 10, so 12 tables triggers _downgrade_tables
-        content = "\n\n".join([table] * 12)
+        # _MAX_CARD_TABLES = 20, so 22 tables triggers _downgrade_tables
+        content = "\n\n".join([table] * 22)
         card = build_cron_card(content)
         # Excess tables are wrapped in code blocks by _downgrade_tables
         combined = " ".join(e["content"] for e in card["body"]["elements"])

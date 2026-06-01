@@ -1,5 +1,36 @@
 # 更新日志 / Changelog
 
+## v0.15.4 (2026-06-05)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 图片完全消失：卡片内没有、直接发送的也没有 | v0.15.3 新增的 `_wrap_feishu_adapter_send_image_file` / `_wrap_feishu_adapter_send_image` 拦截器存在三个根本性缺陷：① 注入 `![image](file://path)` 后被 `_strip_invalid_image_keys()` 移除（仅保留 `img_` 前缀的 URL）；② `ImageResolver._IMG_PATTERN` 仅匹配 `http(s)://` URL，不匹配 `file://`；③ `_schedule_card_update` 对终态 session 直接跳过。同时拦截成功后立即 `return SendResult(success=True)` 抑制了原独立发送，图片唯一的展示路径（卡片）又无法渲染 → 图片完全消失 | 移除 `send_image_file()` / `send_image()` 的 monkey-patching：这两个方法仅在 Agent 使用 `send_message` 工具发送 `<MEDIA>` 图片时调用，属于**独立 MEDIA 发送**，不是 AI 流式回复中的图片。AI 回复中的图片已通过 markdown → ImageResolver → 卡片渲染管线正确处理。独立 MEDIA 发送应作为独立图片消息投递（恢复 v0.15.3 前的行为）；`_wrap_feishu_adapter_send` 非字符串内容路径同步修复：移除 `card_sent=True` 时抑制图片的逻辑，确保图片始终透传 |
+| 2 | Bug | 中断场景：卡片显示"已停止"但仍出现重复纯文本消息 | `_wrap_run_agent` 递归中断时创建新上下文，用 `_saved_parent_ctx = dict(ctx)` 保存父级上下文**副本**。当父级 ABORTED COMPLETE 触发后设置 `_saved_parent_ctx["card_sent"] = True`，但 `_wrap_handle_message_with_agent` 使用的是原始 `msg_context` 字典（不是副本），`card_sent` 仍为 `False` → Hermes 的文本回复未被抑制 → 重复发送纯文本 | 新增 `_original_msg_context_ref` 引用：在创建子级上下文时捕获对原始 `msg_context` 字典的引用，并在父级 ABORTED COMPLETE 时同步设置 `_original_msg_context_ref["card_sent"] = True`，确保 `_wrap_handle_message_with_agent` 能正确检测到卡片已发送，抑制重复文本。`_original_msg_context_ref` 通过上下文字典的 `_original_msg_context_ref` 键在递归层级间传播 |
+| 3 | Test | 中断 card_sent 传播测试 | v0.15.4 新增 `_original_msg_context_ref` 机制 | 新增 `test_parent_card_sent_propagated_to_original_msg_context`：验证 `_wrap_run_agent` 中 `_original_msg_context_ref` 存在且 `card_sent` 被传播到原始 msg_context |
+
+## v0.15.3 (2026-06-05)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 中断场景：新消息卡片卡在"已停止"状态，永远不完成 | `_wrap_run_agent` 处理递归中断时，只触发了父级(A)的 ABORTED COMPLETE，**从未触发子级(B)的 COMPLETE hook**。B 的卡片会话一直停在 STREAMING 状态，没有完成更新。注释中声称"The child COMPLETE hook has already handled message B"是错误的——子级 COMPLETE 在此代码路径中从未被调用 | 重新设计 `_wrap_run_agent` 的 COMPLETE hook 逻辑：在 `_saved_parent_ctx is not None` 分支中，**先触发子级 B 的 COMPLETE hook**（使用 `result.get("final_response")` 等 B 的结果数据），**再触发父级 A 的 ABORTED COMPLETE**。确保 B 的卡片正常完成并显示回答内容，A 的卡片显示"已停止"中断状态 |
+| 2 | Bug | 中断场景：额外出现一个带 🔔 的重复卡片 | B 的 COMPLETE 从未触发 → B 的 `result["already_sent"]` 未设置 → Hermes 的 `_handle_message_with_agent` 认为文本未发送 → 通过 `adapter.send()` 发送 B 的回复文本 → `_wrap_feishu_adapter_send` 拦截后创建新的 gateway 卡片（因为此时 `_msg_ctx` 已被清除或指向 A 的上下文） | 修复 Bug 1 后，B 的 COMPLETE 正确设置 `result["already_sent"] = True` 和 `ctx["card_sent"] = True`，Hermes 不再重复发送文本 |
+| 3 | Bug | 中断场景：新卡片引用的是旧消息的文字 | B 的 COMPLETE 从未触发 → B 的卡片停留在 STREAMING 状态 → 卡片内容来自 B 开始前的流式文本（可能包含 A 的残留内容）；加上 `_force_rewrap` 在某些竞态条件下未及时生效 | 修复 Bug 1 后，B 的 COMPLETE 正确传入 B 的 `final_response` 作为回答文本，卡片最终内容与 B 的实际回复一致 |
+| 4 | Bug | 图片仍作为纯图片消息发送，未包含在卡片内 | Hermes 通过 `FeishuAdapter.send_image_file()` 和 `send_image()` 发送图片，而非 `send()`。`_wrap_feishu_adapter_send` 只包装了 `send()`，图片发送方法未被拦截 | 新增 `_wrap_feishu_adapter_send_image_file` 和 `_wrap_feishu_adapter_send_image` 拦截器：在 Agent 管道中拦截图片发送 → 上传到飞书获取 img_key → 注入到卡片会话的 ImageResolver 缓存 + 文本中 → 触发卡片更新；不在 Agent 管道中则原样透传。`FeishuClient` 新增 `upload_local_image()` 方法用于上传本地文件。`apply_patches()` 注册图片拦截补丁 |
+| 5 | Perf | 卡片中超过 10 个表格时后续表格仍被降级为代码块 | `_MAX_CARD_TABLES = 10` 在复杂场景下不够用，超限表格被降级为 Markdown 源码显示 | `_MAX_CARD_TABLES` 由 10 调整为 20，绝大多数场景不再触发降级 |
+| 6 | Chore | README 版本徽章未随版本号更新 | 版本号更新时遗漏了 README.md / README.zh-CN.md 中的 shields.io badge 版本号 | 所有文档中的版本徽章统一更新至当前版本 |
+| 7 | Test | 新增中断子级 COMPLETE hook 测试 + 图片拦截测试 | Bug 1-4 的修复需测试覆盖 | 新增 `test_child_complete_hook_fired_before_parent_aborted`：验证子级 COMPLETE 在父级 ABORTED 之前触发；新增 `test_child_complete_includes_result`：验证子级 COMPLETE 使用 B 的结果数据；新增 `TestImageInterception`（4 个测试）：验证 `send_image_file` / `send_image` 拦截器存在且检查 Agent 上下文 |
+
+## v0.15.2 (2026-06-04)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 网关卡片发送全部失败：Feishu API 230099/200621 `plain_text` 不支持 | `build_gateway_card()` 将 `plain_text` 元素直接放入 CardKit 2.0 `body.elements`，但飞书 CardKit 2.0 schema 中 `plain_text` 不是 `body.elements` 的合法直接子元素，必须包裹在 `div.text` 中 | 将所有 `plain_text` 直接子元素改为 `div.text.plain_text` 结构：① 分类图标头部 ② 状态指示器 ③ 文件链接元素 |
+| 2 | Bug | `edit_message()` 报 `unexpected keyword argument 'metadata'` | Hermes StreamConsumer 调用 `edit_message()` 时传入 `metadata` 参数，但原始 `FeishuAdapter.edit_message()` 不接受该参数；插件 fallback 时原样透传 `metadata=metadata` 导致 TypeError | `_wrap_feishu_adapter_edit` 的 fallback 路径移除 `metadata` 参数：先尝试不带 `metadata` 调用原始方法，若仍失败则去掉所有额外 kwargs |
+| 3 | Bug | `TypeError: 'NoneType' object is not subscriptable` | `_wrap_run_agent` 中 `ctx.get("message_id", "?")[:12]` 当 `message_id` 键存在但值为 `None` 时，`get()` 返回 `None` 而非默认值 `"?"`（自动恢复会话无 message_id 触发） | 全部改为 `(ctx.get("message_id") or "?")[:12]` 和 `(ctx["message_id"] or "?")[:12]`，防御 `None` 值 |
+| 4 | Bug | 中断场景：旧卡片停留在跑马灯状态，未标记"已中断" | `on_interrupted` 仅在 `_wrap_handle_message_with_agent` 返回时检测触发，但递归中断场景中 `_wrap_run_agent` 已创建了新上下文，旧卡片的 ABORTED 完成要等到父级 COMPLETE hook 才触发，与子级 COMPLETE hook 竞态导致旧卡片被 idempotent 跳过 | `_wrap_run_agent` 检测递归中断时立即触发 `on_interrupted(old_msg, new_msg)`，在子级开始处理前就将旧卡片标记为 ABORTED + 触发 `_complete_session`；`on_interrupted` 新增 `_was_aborted = True` + `error_message = "Interrupted by new message"` 确保卡片显示中断面板 |
+| 5 | Bug | 中断场景：新卡片引用的是第一条消息的文字，而非第二条 | 递归中断时 agent 对象被复用，`_maybe_wrap_callbacks` 的防重复包装守卫检测到 `stream_delta_callback` 已有 `_hls_wrapper` 标记就跳过，导致回调闭包仍捕获旧 `eid`，新消息的流式文本写入旧卡片会话 | 新增 `_force_rewrap` 标志：递归中断时在上下文中设置 `_force_rewrap=True`；`_maybe_wrap_callbacks` 检测到该标志时强制重新包装回调（更新 `eid` 闭包），确保新消息的文本写入新卡片会话；包装完成后自动清除标志 |
+| 6 | Bug | 图片发送为纯图片消息，未包含在卡片中 | `_wrap_feishu_adapter_send` 对非字符串内容（如图片 dict）直接 `return await orig_send()`，在 Agent 管道中图片绕过卡片系统作为独立消息发送 | 新增 `_try_add_image_to_session()` 辅助函数：当 Agent 管道中发送图片时，尝试将 `image_key` 注入卡片会话的 `ImageResolver` 缓存并触发卡片更新；若卡片已发送则抑制独立图片消息（卡片完成时会包含引用的图片） |
+
 ## v0.15.1 (2026-06-03)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
