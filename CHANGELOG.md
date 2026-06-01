@@ -1,5 +1,16 @@
 # 更新日志 / Changelog
 
+## v0.15.2 (2026-06-04)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 网关卡片发送全部失败：Feishu API 230099/200621 `plain_text` 不支持 | `build_gateway_card()` 将 `plain_text` 元素直接放入 CardKit 2.0 `body.elements`，但飞书 CardKit 2.0 schema 中 `plain_text` 不是 `body.elements` 的合法直接子元素，必须包裹在 `div.text` 中 | 将所有 `plain_text` 直接子元素改为 `div.text.plain_text` 结构：① 分类图标头部 ② 状态指示器 ③ 文件链接元素 |
+| 2 | Bug | `edit_message()` 报 `unexpected keyword argument 'metadata'` | Hermes StreamConsumer 调用 `edit_message()` 时传入 `metadata` 参数，但原始 `FeishuAdapter.edit_message()` 不接受该参数；插件 fallback 时原样透传 `metadata=metadata` 导致 TypeError | `_wrap_feishu_adapter_edit` 的 fallback 路径移除 `metadata` 参数：先尝试不带 `metadata` 调用原始方法，若仍失败则去掉所有额外 kwargs |
+| 3 | Bug | `TypeError: 'NoneType' object is not subscriptable` | `_wrap_run_agent` 中 `ctx.get("message_id", "?")[:12]` 当 `message_id` 键存在但值为 `None` 时，`get()` 返回 `None` 而非默认值 `"?"`（自动恢复会话无 message_id 触发） | 全部改为 `(ctx.get("message_id") or "?")[:12]` 和 `(ctx["message_id"] or "?")[:12]`，防御 `None` 值 |
+| 4 | Bug | 中断场景：旧卡片停留在跑马灯状态，未标记"已中断" | `on_interrupted` 仅在 `_wrap_handle_message_with_agent` 返回时检测触发，但递归中断场景中 `_wrap_run_agent` 已创建了新上下文，旧卡片的 ABORTED 完成要等到父级 COMPLETE hook 才触发，与子级 COMPLETE hook 竞态导致旧卡片被 idempotent 跳过 | `_wrap_run_agent` 检测递归中断时立即触发 `on_interrupted(old_msg, new_msg)`，在子级开始处理前就将旧卡片标记为 ABORTED + 触发 `_complete_session`；`on_interrupted` 新增 `_was_aborted = True` + `error_message = "Interrupted by new message"` 确保卡片显示中断面板 |
+| 5 | Bug | 中断场景：新卡片引用的是第一条消息的文字，而非第二条 | 递归中断时 agent 对象被复用，`_maybe_wrap_callbacks` 的防重复包装守卫检测到 `stream_delta_callback` 已有 `_hls_wrapper` 标记就跳过，导致回调闭包仍捕获旧 `eid`，新消息的流式文本写入旧卡片会话 | 新增 `_force_rewrap` 标志：递归中断时在上下文中设置 `_force_rewrap=True`；`_maybe_wrap_callbacks` 检测到该标志时强制重新包装回调（更新 `eid` 闭包），确保新消息的文本写入新卡片会话；包装完成后自动清除标志 |
+| 6 | Bug | 图片发送为纯图片消息，未包含在卡片中 | `_wrap_feishu_adapter_send` 对非字符串内容（如图片 dict）直接 `return await orig_send()`，在 Agent 管道中图片绕过卡片系统作为独立消息发送 | 新增 `_try_add_image_to_session()` 辅助函数：当 Agent 管道中发送图片时，尝试将 `image_key` 注入卡片会话的 `ImageResolver` 缓存并触发卡片更新；若卡片已发送则抑制独立图片消息（卡片完成时会包含引用的图片） |
+
 ## v0.15.1 (2026-06-03)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
