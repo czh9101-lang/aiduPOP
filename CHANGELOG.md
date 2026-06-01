@@ -1,5 +1,12 @@
 # 更新日志 / Changelog
 
+## v0.15.4 (2026-06-05)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 图片完全消失：卡片内没有、直接发送的也没有 | v0.15.3 新增的 `_wrap_feishu_adapter_send_image_file` / `_wrap_feishu_adapter_send_image` 拦截器存在三个根本性缺陷：① 注入 `![image](file://path)` 后被 `_strip_invalid_image_keys()` 移除（仅保留 `img_` 前缀的 URL）；② `ImageResolver._IMG_PATTERN` 仅匹配 `http(s)://` URL，不匹配 `file://`；③ `_schedule_card_update` 对终态 session 直接跳过。同时拦截成功后立即 `return SendResult(success=True)` 抑制了原独立发送，图片唯一的展示路径（卡片）又无法渲染 → 图片完全消失 | 移除 `send_image_file()` / `send_image()` 的 monkey-patching：这两个方法仅在 Agent 使用 `send_message` 工具发送 `<MEDIA>` 图片时调用，属于**独立 MEDIA 发送**，不是 AI 流式回复中的图片。AI 回复中的图片已通过 markdown → ImageResolver → 卡片渲染管线正确处理。独立 MEDIA 发送应作为独立图片消息投递（恢复 v0.15.3 前的行为）；`_wrap_feishu_adapter_send` 非字符串内容路径同步修复：移除 `card_sent=True` 时抑制图片的逻辑，确保图片始终透传 |
+| 2 | Test | 图片拦截回归测试更新 | v0.15.4 移除了图片拦截的 monkey-patching | 更新 `TestImageInterception`：新增 `test_send_image_file_not_monkey_patched` / `test_send_image_not_monkey_patched` 验证拦截已移除；新增 `test_send_non_string_passes_through` 验证非字符串内容透传；保留 wrapper 函数导入测试（函数定义保留供参考） |
+
 ## v0.15.3 (2026-06-05)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

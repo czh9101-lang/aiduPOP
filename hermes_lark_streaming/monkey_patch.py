@@ -1236,42 +1236,15 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
     async def _intercepted_send(self_feishu, chat_id, content, reply_to=None, metadata=None, **kwargs):
         # ── Agent path: handle image sends during agent pipeline ──
         # When Hermes sends an image (non-string content like a dict with
-        # image_key) during the agent pipeline, we need to either:
-        # 1. Add the image to the existing card session, OR
-        # 2. Suppress it if the card already handles images
-        # This prevents standalone image messages appearing outside the card.
+        # image_key) during the agent pipeline, we let it through as a
+        # standalone image message. Previously (v0.15.3) we tried to suppress
+        # standalone images and inject them into the card, but this caused
+        # images to disappear entirely (see issue-v0.15.3-image-card-wrapping).
+        # Images from the AI's markdown response are already handled by the
+        # card streaming pipeline (ImageResolver). Standalone MEDIA sends
+        # (send_message tool with <MEDIA>) should go through as independent
+        # messages — they are NOT part of the streaming card content.
         if not isinstance(content, str):
-            ctx = _msg_ctx.get(None)
-            if ctx is not None:
-                eid = ctx.get("event_message_id", "")
-                if eid:
-                    # We're inside an agent message pipeline.
-                    # Try to add the image to the card session.
-                    _image_added = _try_add_image_to_session(eid, content)
-                    if _image_added:
-                        _logger.info(
-                            "feishu_adapter_send: image added to card session, "
-                            "suppressing standalone send, eid=%s",
-                            eid[:12],
-                        )
-                        try:
-                            from gateway.platforms.base import SendResult
-                            return SendResult(success=True)
-                        except (ImportError, AttributeError):
-                            return None
-                    # If card was already sent, suppress the image entirely
-                    # (the card completion includes any referenced images)
-                    if ctx.get("card_sent"):
-                        _logger.debug(
-                            "feishu_adapter_send: suppressing image send "
-                            "(card already sent), eid=%s",
-                            eid[:12],
-                        )
-                        try:
-                            from gateway.platforms.base import SendResult
-                            return SendResult(success=True)
-                        except (ImportError, AttributeError):
-                            return None
             return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
         # ── Guard: skip empty content ──
@@ -2114,17 +2087,13 @@ def apply_patches() -> None:
             FeishuAdapter.delete_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter.delete_reaction)
         except AttributeError:
             _logger.debug("hermes-lark-streaming: FeishuAdapter.delete_reaction not found, reaction interception skipped")
-        # Phase 4: Image → card session interception
-        try:
-            FeishuAdapter.send_image_file = _wrap_feishu_adapter_send_image_file(FeishuAdapter.send_image_file)
-            _logger.info("hermes-lark-streaming: FeishuAdapter.send_image_file patched ✓ (image card wrapping)")
-        except AttributeError:
-            _logger.debug("hermes-lark-streaming: FeishuAdapter.send_image_file not found, image interception skipped")
-        try:
-            FeishuAdapter.send_image = _wrap_feishu_adapter_send_image(FeishuAdapter.send_image)
-            _logger.info("hermes-lark-streaming: FeishuAdapter.send_image patched ✓ (remote image card wrapping)")
-        except AttributeError:
-            _logger.debug("hermes-lark-streaming: FeishuAdapter.send_image not found, image interception skipped")
+        # NOTE(v0.15.4): send_image_file / send_image interception REMOVED.
+        # The interception was fundamentally broken — it injected file:// URLs
+        # into session.text.on_partial() which were then stripped by
+        # _strip_invalid_image_keys(), and suppressed the original standalone
+        # send, causing images to disappear entirely.
+        # Images are now sent as standalone messages (pre-v0.15.3 behavior).
+        # See: issue-v0.15.3-image-card-wrapping
         feishu_patched = True
         _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit/reaction/image patched ✓ (gateway message cards enabled)")
     except (ImportError, AttributeError) as e:
