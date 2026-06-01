@@ -77,7 +77,7 @@ monkey_patch.py (运行时拦截)
 | `controller_linear_mixin.py` | 800 | 线性模式编排 | 拆卡阈值 180 元素；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算 |
 | `cardkit.py` | 712 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%） |
 | `cardkit_i18n.py` | 45 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数；新增 `cache` 条目 |
-| `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤10)、图片 key 剥离、长文本分块(2400 chars) |
+| `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤20)、图片 key 剥离、长文本分块(2400 chars) |
 | `config.py` | 190 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer `[status, elapsed, model, compression_exhausted]`（`cache` 需手动添加）；`_get_hermes_config_path()` 动态路径（多 Profile 支持） |
 | `feishu.py` | 342 | 飞书 API 客户端 | CardKit v1/v2 + IM API；错误码分类；token 脱敏；`upload_local_image()` 本地文件上传 |
 | `flush.py` | 156 | 节流调度器 | CardKit 100ms / IM PATCH 1.5s；互斥锁 + re-flush |
@@ -410,7 +410,7 @@ hermes gateway restart
 | v0.15.0 | 2026-05-31 | Cron 推送卡片修复（`_card_sending_send` 死锁→直接 await）+ `_thinking_wrapper` 重复消息修复（检查 consumed 返回值）+ 关键日志含版本号 + `finish_reason` 诊断日志（`content_filter` 等异常可排查） |
 | v0.15.1 | 2026-06-03 | `_msg_ctx` 泄漏修复（消息处理后清除上下文）+ 递归中断上下文隔离（`_saved_parent_ctx` + `_force_rewrap`）+ 并发消息 `card_sent` 误判修复（每消息独立 `msg_context` 字典） |
 | v0.15.2 | 2026-06-04 | 网关卡片 `plain_text` schema 修复 + `edit_message` metadata 参数修复 + `NoneType` 下标防御 + 中断旧卡片立即 ABORTED + `_force_rewrap` 中断回调重包装 + 图片 `_try_add_image_to_session` |
-| v0.15.3 | 2026-06-05 | 递归中断子级 COMPLETE hook 修复（核心 bug：B 的卡片永远不完成→重复卡片+错误内容）+ 图片拦截器 `send_image_file`/`send_image`（Agent 管道中图片→卡片会话）+ `upload_local_image()` |
+| v0.15.3 | 2026-06-05 | 递归中断子级 COMPLETE hook 修复（核心 bug：B 的卡片永远不完成→重复卡片+错误内容）+ 图片拦截器 `send_image_file`/`send_image`（Agent 管道中图片→卡片会话）+ `upload_local_image()` + `_MAX_CARD_TABLES` 10→20 + README 版本徽章同步 |
 
 ---
 
@@ -446,4 +446,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-05-31 | Version: 0.15.2 DEV*
+*Last updated: 2026-06-04 | Version: 0.15.3 DEV*
