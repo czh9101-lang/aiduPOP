@@ -485,6 +485,31 @@ class TestRecursiveInterruptContext:
         assert found_child_final_response, \
             "Child COMPLETE should use result.get('final_response') for B's answer"
 
+    def test_parent_card_sent_propagated_to_original_msg_context(self) -> None:
+        """v0.15.4 bug fix: parent's card_sent must propagate to original msg_context.
+
+        When _wrap_run_agent creates a copy of the parent context
+        (_saved_parent_ctx = dict(ctx)), the original msg_context dict
+        (captured by _wrap_handle_message_with_agent) is a different object.
+        Setting _saved_parent_ctx["card_sent"] = True does NOT update the
+        original msg_context, causing _wrap_handle_message_with_agent to
+        miss the card_sent flag and send a duplicate plain text reply.
+
+        The fix: store a reference to the original msg_context via
+        _original_msg_context_ref and propagate card_sent=True to it.
+        """
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        # Check that _original_msg_context_ref is captured
+        assert "_original_msg_context_ref" in source, \
+            "_original_msg_context_ref not found in _wrap_run_agent — card_sent propagation fix missing!"
+        # Check that card_sent is propagated to the original context
+        assert '_original_msg_context_ref["card_sent"] = True' in source or \
+               '_original_msg_context_ref["card_sent"]=True' in source.replace(" ", ""), \
+            "card_sent propagation to _original_msg_context_ref not found in _wrap_run_agent"
+
 
 class TestImageInterception:
     """Verify image interception behavior — v0.15.4 regression fix.
@@ -538,13 +563,32 @@ class TestImageInterception:
 
         Previously (v0.15.3), when card_sent=True, images were suppressed
         even if _try_add_image_to_session failed. Now all non-string content
-        is passed through as standalone messages.
+        is passed through as standalone messages — the only code path for
+        non-string content is to call orig_send directly.
         """
         from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send
         import inspect
 
         source = inspect.getsource(_wrap_feishu_adapter_send)
-        # The non-string path should pass through to orig_send
-        # without suppressing based on card_sent
-        assert "card_sent" not in source.split("isinstance(content, str)")[1].split("isinstance")[0] if "isinstance(content, str)" in source else True, \
-            "Non-string content should not be suppressed based on card_sent"
+        # Find the "not isinstance(content, str)" block
+        # After the fix, non-string content should have a single return path
+        # to orig_send, without any card_sent checks or suppression logic.
+        assert "not isinstance(content, str)" in source, \
+            "Non-string content check not found in _wrap_feishu_adapter_send"
+        # The non-string block should return orig_send directly
+        # (not via a SendResult suppression or _try_add_image_to_session)
+        lines = source.split('\n')
+        in_non_string_block = False
+        found_orig_send_in_block = False
+        for line in lines:
+            if 'not isinstance(content, str)' in line:
+                in_non_string_block = True
+            elif in_non_string_block:
+                if 'orig_send' in line:
+                    found_orig_send_in_block = True
+                    break
+                # If we hit the string content section, stop
+                if 'isinstance(content, str)' in line or 'content.strip()' in line:
+                    break
+        assert found_orig_send_in_block, \
+            "Non-string content should pass through to orig_send directly"

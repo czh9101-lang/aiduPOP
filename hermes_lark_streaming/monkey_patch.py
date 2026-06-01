@@ -267,10 +267,20 @@ def _wrap_run_agent(orig: Callable) -> Callable:
         #    the original message_id and card_sent state.
         # 2. The recursive call's COMPLETE hook needs the new message_id.
         _saved_parent_ctx = None  # Will hold parent context for restoration
+        _original_msg_context_ref = None  # Reference to the original msg_context dict
         ctx = _msg_ctx.get()
         if ctx is not None and event_message_id:
             if _interrupt_depth > 0 and ctx.get("event_message_id") != event_message_id:
                 # Recursive interrupt follow-up: save parent context, create new context
+                #
+                # BUG FIX (v0.15.4): We must keep a reference to the original
+                # msg_context dict (from _wrap_handle_message_with_agent) so
+                # that when we set card_sent=True on the parent context, the
+                # _wrap_handle_message_with_agent wrapper can also see it.
+                # Without this, _saved_parent_ctx is a *copy* of the original
+                # dict, and the original msg_context.card_sent stays False,
+                # causing Hermes to send a duplicate plain text reply.
+                _original_msg_context_ref = ctx.get("_original_msg_context_ref") or ctx
                 _saved_parent_ctx = dict(ctx)  # Save a copy for restoration after orig()
                 _logger.info(
                     "run_agent: recursive interrupt follow-up, creating new context "
@@ -290,6 +300,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     "_interrupt_depth": _interrupt_depth,
                     "_parent_message_id": ctx.get("message_id"),  # Track parent for cleanup
                     "_force_rewrap": True,  # Signal _maybe_wrap_callbacks to re-wrap
+                    "_original_msg_context_ref": _original_msg_context_ref,  # Propagate ref to original
                 }
                 _msg_ctx.set(ctx)
                 _thread_local_ctx.data = dict(ctx)
@@ -440,6 +451,16 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     error_message="Interrupted by new message",
                 )
                 _saved_parent_ctx["card_sent"] = True
+                # BUG FIX (v0.15.4): Also set card_sent on the original
+                # msg_context dict so that _wrap_handle_message_with_agent
+                # can suppress the duplicate plain text reply.
+                if _original_msg_context_ref is not None:
+                    _original_msg_context_ref["card_sent"] = True
+                    _logger.debug(
+                        "run_agent: propagated card_sent=True to original "
+                        "msg_context for msg=%s",
+                        (_saved_parent_ctx.get("message_id") or "?")[:12],
+                    )
             except Exception:
                 _logger.debug("run_agent: parent ABORTED completion failed", exc_info=True)
         elif ctx is not None:
