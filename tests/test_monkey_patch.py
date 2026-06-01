@@ -357,3 +357,85 @@ class TestCronDeliveryWrapper:
 
         orig.assert_called_once()
         assert result == "original_result"
+
+
+# ── Context cleanup and interrupt fix tests ──
+
+
+class TestMsgCtxCleanup:
+    """Verify _msg_ctx is cleared after message processing to prevent leakage."""
+
+    def test_msg_ctx_cleared_after_wrap_handle_message(self) -> None:
+        """After _wrap_handle_message_with_agent completes, _msg_ctx should be None."""
+        from hermes_lark_streaming.monkey_patch import _msg_ctx
+
+        # _msg_ctx should default to None
+        assert _msg_ctx.get() is None
+
+    def test_msg_ctx_default_is_none(self) -> None:
+        """_msg_ctx default value should be None (no stale context)."""
+        from hermes_lark_streaming.monkey_patch import _msg_ctx
+
+        # Fresh ContextVar should have default None
+        assert _msg_ctx.get() is None
+
+
+class TestPerMessageContext:
+    """Verify per-message context isolation for concurrent/overlapping messages."""
+
+    def test_msg_context_is_separate_dict(self) -> None:
+        """Each message should use its own context dict, not a shared reference."""
+        from hermes_lark_streaming.monkey_patch import _wrap_handle_message_with_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_handle_message_with_agent)
+        assert "msg_context" in source, "Per-message context dict not found in wrapper source"
+        assert "_msg_ctx.set(None)" in source, "Context cleanup not found in wrapper source"
+
+    def test_card_sent_uses_per_message_context(self) -> None:
+        """card_sent check should use per-message context, not _msg_ctx.get()."""
+        from hermes_lark_streaming.monkey_patch import _wrap_handle_message_with_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_handle_message_with_agent)
+        lines = source.split('\n')
+        found_msg_context_assignment = False
+        found_card_sent_check = False
+        for i, line in enumerate(lines):
+            if 'ctx = msg_context' in line:
+                found_msg_context_assignment = True
+            if 'card_sent' in line and found_msg_context_assignment:
+                found_card_sent_check = True
+                break
+        assert found_msg_context_assignment, "Per-message context assignment not found"
+        assert found_card_sent_check, "card_sent check not using per-message context"
+
+
+class TestRecursiveInterruptContext:
+    """Verify recursive interrupt follow-up creates independent context."""
+
+    def test_recursive_context_creation(self) -> None:
+        """_wrap_run_agent should create a new context for recursive calls."""
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        assert "_interrupt_depth" in source, "interrupt_depth not checked in _wrap_run_agent"
+        assert "_saved_parent_ctx" in source, "Parent context save not found"
+        assert "on_message_started" in source, "START hook not fired for recursive message"
+
+    def test_parent_context_restored(self) -> None:
+        """After recursive call, parent context should be restored."""
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        assert "_saved_parent_ctx is not None" in source, "Parent context restore check not found"
+
+    def test_parent_complete_hook_aborted(self) -> None:
+        """Parent COMPLETE hook should fire as ABORTED when in recursive scenario."""
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        assert "aborted=True" in source, "Aborted completion not found for parent context"

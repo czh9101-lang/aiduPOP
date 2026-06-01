@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.15.0 (DEV 分支) |
+| 版本 | 0.15.1 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.15.0")
+plugin.yaml (唯一版本号: "0.15.1")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -443,4 +443,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-05-31 | Version: 0.15.0 DEV*
+*Last updated: 2026-05-31 | Version: 0.15.1 DEV*
