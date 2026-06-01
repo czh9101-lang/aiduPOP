@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.12.4 (DEV 分支) |
+| 版本 | 0.15.0 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -70,7 +70,7 @@ monkey_patch.py (运行时拦截)
 
 | 文件 | 行数 | 职责 | 关键点 |
 |------|------|------|--------|
-| `monkey_patch.py` | 1237 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全；`_wrap_cron_deliver` 临时替换 adapter.send；`_wrap_run_background_task` 后台任务卡片 |
+| `monkey_patch.py` | 1280 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全；`_wrap_cron_deliver` 临时替换 adapter.send（直接 await，不用 `run_coroutine_threadsafe`）；`_wrap_run_background_task` 后台任务卡片；`_thinking_wrapper` 检查 consumed 返回值防重复；关键日志含 `__version__`；`finish_reason` 诊断日志 |
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async；`on_message_completed` 传递 cache tokens |
 | `controller.py` | 681 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记；footer 新增 `cache_read_tokens`/`cache_write_tokens` |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.12.4")
+plugin.yaml (唯一版本号: "0.15.0")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -282,7 +282,7 @@ streaming:
 
 ### 10.2 内容重复显示
 **原因**: `interim_assistant_callback` 和 `stream_delta_callback` 处理同一段文本
-**解决**: 不包裹 `interim_assistant_callback`，思考内容由 `reasoning_callback` 处理
+**解决** (v0.15.0): `_thinking_wrapper` 检查 `on_thinking_delta` 返回值：卡片消费文字时 `return`（不调原始回调）；文字已被 `stream_delta_callback` 消费时 dedup 跳过；仅在卡片未消费时才调原始回调作为降级
 
 ### 10.3 版本号硬编码 fallback
 **❌ 错误**: `__version__ = "0.10.0"` 作为 fallback
@@ -357,7 +357,7 @@ tests/
   test_image.py      — 图片解析
   test_linear.py     — 线性 segment 管理
   test_tooluse.py    — 工具调用追踪
-  test_monkey_patch.py — 时间注入格式（XML 标签）、重入守卫、prefix cache 一致性
+  test_monkey_patch.py — 时间注入格式（XML 标签）、重入守卫、prefix cache 一致性、版本日志、cron 投递降级
   test_unavailable_guard.py — 消息不可用保护
 ```
 
@@ -407,6 +407,7 @@ hermes gateway restart
 | v0.12.2 | 2026-05-29 | 拆卡后依旧超元素修复：answer 估算对齐封卡实际元素数 + answer 内部拆分（`split_answer_segment`）+ answer 增长时动态重新估算 + 相邻 answer segment 拆卡触发 |
 | v0.12.3 | 2026-05-29 | CI 测试修复（添加 pytest-asyncio 依赖）+ 多 Profile 部署修复（`_get_hermes_config_path()` 动态读取 HERMES_HOME） |
 | v0.12.4 | 2026-05-29 | 默认页脚精简（移除 `cache`、`show_label` 默认 `false`）+ 状态文字去 emoji（✅❌🛑→纯文字）+ `show_label` 重复确认（插件只写 `footer.show_label`，不迁移用户配置）+ 致谢新增 joshcheng820222 + `test_version.py` 版本号动态读取 |
+| v0.15.0 | 2026-05-31 | Cron 推送卡片修复（`_card_sending_send` 死锁→直接 await）+ `_thinking_wrapper` 重复消息修复（检查 consumed 返回值）+ 关键日志含版本号 + `finish_reason` 诊断日志（`content_filter` 等异常可排查） |
 
 ---
 
@@ -430,7 +431,7 @@ hermes gateway restart
 |------|------|------|
 | 卡片不出现 | `grep "GatewayRunner" agent.log` 看补丁是否成功 | monkey_patch.py |
 | 内容重复 | `interim_assistant_callback` 是否被包裹 | monkey_patch.py `_maybe_wrap_callbacks` |
-| Cron 推送纯文本 | `grep "cron" agent.log` 看是否有死锁或 patch 失败 | monkey_patch.py `_wrap_cron_deliver` |
+| Cron 推送纯文本 | `grep "cron" agent.log` 看是否有 patch 失败；v0.15.0 前有死锁 bug | monkey_patch.py `_wrap_cron_deliver` |
 | 后台任务纯文本 | `grep "background" agent.log` 看 patch 是否成功 | monkey_patch.py `_wrap_run_background_task` |
 | 页脚无 cache 字段 | `cache_read_tokens` 是否从 agent 引用中提取 | monkey_patch.py `_maybe_wrap_callbacks` |
 | Apple Silicon 报错 | `grep "conversation_loop" agent.log` | monkey_patch.py `_resolve_hermes_agent_module` |
@@ -442,4 +443,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-05-29 | Version: 0.12.4 DEV*
+*Last updated: 2026-05-31 | Version: 0.15.0 DEV*
