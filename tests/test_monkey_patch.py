@@ -487,32 +487,64 @@ class TestRecursiveInterruptContext:
 
 
 class TestImageInterception:
-    """Verify image method interception wrappers exist."""
+    """Verify image interception behavior — v0.15.4 regression fix.
+
+    v0.15.3 introduced send_image_file / send_image interception that
+    caused images to disappear entirely. v0.15.4 removed the monkey-patching
+    while keeping the function definitions for reference.
+
+    The _wrap_feishu_adapter_send non-string content path now passes
+    images through as standalone messages instead of suppressing them.
+    """
 
     def test_send_image_file_wrapper_exists(self) -> None:
-        """_wrap_feishu_adapter_send_image_file should be importable."""
+        """_wrap_feishu_adapter_send_image_file should still be importable (kept for reference)."""
         from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image_file
         assert callable(_wrap_feishu_adapter_send_image_file)
 
     def test_send_image_wrapper_exists(self) -> None:
-        """_wrap_feishu_adapter_send_image should be importable."""
+        """_wrap_feishu_adapter_send_image should still be importable (kept for reference)."""
         from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image
         assert callable(_wrap_feishu_adapter_send_image)
 
-    def test_send_image_file_checks_agent_context(self) -> None:
-        """send_image_file wrapper should check for agent pipeline context."""
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image_file
+    def test_send_image_file_not_monkey_patched(self) -> None:
+        """v0.15.4: send_image_file should NOT be monkey-patched anymore.
+
+        The interception was removed because it caused images to disappear:
+        - Injected file:// URLs were stripped by _strip_invalid_image_keys()
+        - ImageResolver._IMG_PATTERN only matches http(s):// URLs
+        - _schedule_card_update skipped terminal-state sessions
+        - Original standalone send was suppressed → images lost entirely
+        """
+        from hermes_lark_streaming.monkey_patch import apply_patches
         import inspect
 
-        source = inspect.getsource(_wrap_feishu_adapter_send_image_file)
-        assert "event_message_id" in source, "event_message_id check not found in send_image_file wrapper"
-        assert "_msg_ctx" in source, "_msg_ctx check not found in send_image_file wrapper"
+        source = inspect.getsource(apply_patches)
+        # The monkey-patching of send_image_file should NOT be present
+        assert "send_image_file = _wrap_feishu_adapter_send_image_file" not in source, \
+            "send_image_file should NOT be monkey-patched (v0.15.4 regression fix)"
 
-    def test_send_image_checks_agent_context(self) -> None:
-        """send_image wrapper should check for agent pipeline context."""
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image
+    def test_send_image_not_monkey_patched(self) -> None:
+        """v0.15.4: send_image should NOT be monkey-patched anymore."""
+        from hermes_lark_streaming.monkey_patch import apply_patches
         import inspect
 
-        source = inspect.getsource(_wrap_feishu_adapter_send_image)
-        assert "event_message_id" in source, "event_message_id check not found in send_image wrapper"
-        assert "_msg_ctx" in source, "_msg_ctx check not found in send_image wrapper"
+        source = inspect.getsource(apply_patches)
+        assert "send_image = _wrap_feishu_adapter_send_image" not in source, \
+            "send_image should NOT be monkey-patched (v0.15.4 regression fix)"
+
+    def test_send_non_string_passes_through(self) -> None:
+        """v0.15.4: _wrap_feishu_adapter_send should pass non-string content (images) through.
+
+        Previously (v0.15.3), when card_sent=True, images were suppressed
+        even if _try_add_image_to_session failed. Now all non-string content
+        is passed through as standalone messages.
+        """
+        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send
+        import inspect
+
+        source = inspect.getsource(_wrap_feishu_adapter_send)
+        # The non-string path should pass through to orig_send
+        # without suppressing based on card_sent
+        assert "card_sent" not in source.split("isinstance(content, str)")[1].split("isinstance")[0] if "isinstance(content, str)" in source else True, \
+            "Non-string content should not be suppressed based on card_sent"
