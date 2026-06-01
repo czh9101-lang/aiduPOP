@@ -1,5 +1,43 @@
 # 更新日志 / Changelog
 
+## v0.15.1 (2026-06-03)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | 网关内部消息（/status、/help、错误等）仍为纯文本，未转为卡片 | `_msg_ctx` ContextVar 在消息处理完成后从未清除，残留的 `event_message_id` + `card_sent=True` 导致后续 `FeishuAdapter.send()` 调用进入"Agent 抑制路径"，网关内部消息被静默丢弃而非转为卡片 | `_wrap_handle_message_with_agent` 在消息处理完成后（return 前）清除 `_msg_ctx` 和 `_thread_local_ctx`，防止残留上下文泄漏到后续非 Agent 消息 |
+| 2 | Bug | 媒体消息卡片包装未生效 | 同上——`_msg_ctx` 泄漏导致 `FeishuAdapter.send()` 的媒体消息也被 Agent 抑制路径丢弃 | 同上——清除 `_msg_ctx` 后媒体消息可正确进入"Gateway-internal path"并被转为包含媒体元素的卡片 |
+| 3 | Bug | 用户发送第二条消息打断第一条时，第二条消息被静默忽略 | Hermes 中断消息后通过递归 `_run_agent(_interrupt_depth+1)` 处理新消息，但插件未为新消息创建独立上下文——`_msg_ctx` 仍指向旧消息的上下文字典，导致：① 新消息的回调写入旧消息的卡片；② COMPLETE hook 使用旧 message_id 处理新消息的结果；③ 新消息的卡片会话从未被创建 | `_wrap_run_agent` 检测递归调用（`_interrupt_depth > 0` 且 `event_message_id` 变化）：为递归消息创建全新上下文字典 + 触发 `on_message_started` 创建新卡片会话；保存父级上下文副本，在子级 COMPLETE hook 完成后恢复父级上下文；父级 COMPLETE hook 检测递归场景时以 `aborted=True` 完成旧消息卡片（标记为"已中断"），避免用新消息结果错误完成旧卡片 |
+| 4 | Bug | 并发/重叠消息的 `card_sent` 状态误判 | `_wrap_handle_message_with_agent` 通过 `_msg_ctx.get()` 读取 `card_sent`，但当新消息覆盖了 `_msg_ctx` 后，旧消息的返回检查读到了新消息的上下文 | 使用每消息独立 `msg_context` 字典代替 `_msg_ctx.get()`，确保每条消息的 `card_sent` 判断不受并发消息干扰 |
+
+## v0.15.0 (2026-06-02)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | `edit_message()` 拦截 — 网关卡片可编辑 | Phase 1 发送网关卡片后，Hermes 后续调用 `edit_message()` 更新内容时找不到原始纯文本消息（已被卡片替代），导致更新失败或行为异常 | 新增网关卡片注册表 `_gateway_cards`：`send()` 发送卡片后注册 `card_msg_id → {chat_id, card_id, category}`；`edit_message()` 拦截器查询注册表，若命中则调用 `_do_gateway_card_update()` 更新卡片内容（IM PATCH 模式），而非尝试编辑不存在的纯文本消息；新增 `_do_gateway_card_update()` 方法（controller_mixin.py）：支持 CardKit 和 IM PATCH 两种更新路径 |
+| 2 | Feature | Reaction → 卡片状态指示器 | Hermes 通过 emoji reaction（👀/👍/🤔）表示消息处理状态，但在卡片模式下 reaction 不可见或视觉不一致 | 新增 `add_reaction()` / `delete_reaction()` 拦截器：当 reaction 目标是网关卡片时，将 emoji 转为卡片内状态指示器（如 "👀 Reading"、"⏳ Processing"），而非在用户消息上添加 reaction；新增 `_REACTION_STATUS_MAP` 映射表：7 种常见 emoji → 状态标签；新增 `_do_gateway_card_status()` 方法（controller_mixin.py）：更新卡片状态指示器；`build_gateway_card()` 新增 `status_label` / `status_emoji` 参数：当有活动状态时，替换分类图标头部 |
+| 3 | Feature | 媒体消息卡片包装 | Hermes 发送的图片/文件消息（`<MEDIA>` 标签）在 Phase 1 中被提取 media 后仅保留文本，图片丢失 | `_wrap_feishu_adapter_send` 新增媒体感知：提取 MEDIA 标签后保留 `_media_parts`，传递给 `_do_gateway_deliver()`；`build_gateway_card()` 新增 `media_parts` 参数：图片渲染为 `img` 元素，文件渲染为 📎 链接文本；`_do_gateway_deliver()` 新增 `media_parts` 参数透传 |
+| 4 | Chore | `apply_patches()` 新增 reaction 补丁 | 无法确认 reaction 拦截是否成功应用 | 补丁日志新增 `add_reaction` / `delete_reaction` 补丁状态；汇总日志更新为 `FeishuAdapter=send/edit/reaction` |
+| 5 | Test | 新增 Phase 2-4 测试 | 新功能需测试覆盖 | 新增 `TestBuildGatewayCardStatusIndicator`（4 个测试）：状态指示器渲染、空状态回退；新增 `TestBuildGatewayCardMedia`（5 个测试）：图片/文件元素、多 media、空 media；新增 `TestGatewayCardRegistry`（3 个测试）：注册/查询/删除/空 ID；新增 `TestReactionStatusMap`（3 个测试）：映射存在性、常见 emoji、值类型 |
+
+## v0.14.0 (2026-06-01)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | 飞书渠道网关内部消息（slash 命令、错误、通知等）全部转为卡片 | 之前仅 AI 回复和 Cron 消息使用卡片，其他消息（授权/配对、会话生命周期、忙碌确认、网关启停、slash 命令回复、Provider 错误、压缩警告等）均为纯文本，视觉不统一 | 新增 `FeishuAdapter.send()` 拦截层：在类级别 monkey-patch `FeishuAdapter.send()` 和 `edit_message()`，对所有非 Agent 路径的文本消息自动转为 CardKit 卡片；Agent 路径通过 `_msg_ctx` 检测自动跳过（避免与现有 consumed 机制冲突）；Cron/Background 临时 send 替换通过 `_hls_cron_sending` / `_hls_bg_sending` 实例标志安全共存 |
+| 2 | Feature | 网关消息卡片分类图标 | 网关消息类型多样，需要视觉区分 | 新增 `build_gateway_card()` 卡片构建器，5 种分类图标：🔔 system、❌ error、🔐 auth、🔄 session、⌨️ slash；新增 `_classify_gateway_message()` 内容分类器，基于关键词自动识别消息类别 |
+| 3 | Feature | `streaming.gateway_cards` 配置开关 | 全量接管是重大变更，用户可能希望逐步切换 | 新增 `gateway_cards` 配置项（默认 `true`），设为 `false` 可关闭网关消息卡片化，仅保留 AI 回复和 Cron 卡片 |
+| 4 | Chore | `apply_patches()` 日志新增 FeishuAdapter 补丁状态 | 无法确认 FeishuAdapter 拦截层是否成功应用 | 补丁汇总日志新增 `FeishuAdapter=✓/✗` 字段 |
+
+## v0.13.0 (2026-05-31)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | Cron 推送消息仍为纯文本，不是卡片效果 | `_card_sending_send` 内部使用 `run_coroutine_threadsafe + future.result(timeout=30)` 调度卡片投递，由于 `_card_sending_send` 本身已在事件循环上运行，`future.result()` 阻塞事件循环导致 30 秒死锁超时，每次都降级为纯文本 | 改为直接 `await ctrl._do_cron_deliver(...)`：`_card_sending_send` 已在事件循环上被 `safe_schedule_threadsafe` 调度，直接 `await` 即可，无需 `run_coroutine_threadsafe`；新增 `_do_cron_deliver` 诊断日志（chat_id、content_len）；新增 `_card_sending_send` 诊断日志（ctrl.enabled、chat_id、content_len） |
+| 2 | Bug | 飞书重复消息：卡片 + 纯文本同时出现 | `_thinking_wrapper` 无条件调用 `_orig_interim()`，当卡片已消费文字时，原始回调仍触发 `_stream_consumer` 发送纯文本 | `_thinking_wrapper` 检查 `on_thinking_delta` 返回值：卡片消费文字时 `return`（不调原始回调）；文字已被 `stream_delta_callback` 消费时 dedup 跳过；仅在卡片未消费时才调原始回调作为降级（与 `_answer_wrapper` 逻辑一致） |
+| 3 | Chore | 日志无法确认消息来自哪个版本 | `register()`、`apply_patches()` 等关键日志未包含版本号 | `plugin.py` 的 `register()` 日志加入 `v{__version__}`；`monkey_patch.py` 的 `apply_patches()` 启动日志和汇总日志加入版本号；cron 投递日志加入版本号；新增 `__version__` 导入 |
+| 4 | Chore | `content_filter` 等异常 `finish_reason` 无诊断日志 | 模型 API 返回 `finish_reason=content_filter` 时 AI 回复为空，但插件无任何日志记录此异常，排查困难 | `_wrap_run_agent` 的 COMPLETE hook 新增诊断日志：非 `stop` 的 `finish_reason` 记录 WARNING 日志（含版本号、finish_reason、model、msg_id）；agent error 记录 WARNING 日志（含版本号、错误信息、model、msg_id） |
+| 5 | Test | 新增版本日志、cron 投递、`__version__` 导入测试 | 新功能需测试覆盖 | 新增 `TestVersionLogging`（3 个测试）：验证 `__version__` 可用、`register()` 日志包含版本号、`monkey_patch` 模块导入版本号；新增 `TestCronDeliveryWrapper`（2 个测试）：验证无 adapters 降级、无飞书 adapter 降级 |
+
 ## v0.12.4 (2026-05-29)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

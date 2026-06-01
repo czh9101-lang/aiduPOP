@@ -283,3 +283,159 @@ class TestInjectTimeGuardReset:
             assert user_msg == "<time>14:30:05</time> msg2"
 
         _inject_time_guard.active = False
+
+
+# ── Version logging tests ──
+
+
+class TestVersionLogging:
+    """Verify __version__ is included in key log messages."""
+
+    def test_version_is_available(self) -> None:
+        """Plugin should expose __version__ from plugin.yaml."""
+        from hermes_lark_streaming import __version__
+        assert __version__
+        assert __version__ != "unknown"
+
+    def test_register_logs_version(self) -> None:
+        """register() should log the version number."""
+        from hermes_lark_streaming import __version__
+        from hermes_lark_streaming.plugin import register
+
+        mock_ctx = MagicMock()
+        with (
+            patch("hermes_lark_streaming.plugin._ensure_streaming_config"),
+            patch("hermes_lark_streaming.monkey_patch.apply_patches"),
+            patch("hermes_lark_streaming.plugin._logger") as mock_logger,
+        ):
+            register(mock_ctx)
+
+        # Check that version is in at least one info log
+        info_calls = [str(call) for call in mock_logger.info.call_args_list]
+        version_logged = any(__version__ in call for call in info_calls)
+        assert version_logged, f"Version {__version__} not found in log calls: {info_calls}"
+
+    def test_monkey_patch_module_imports_version(self) -> None:
+        """monkey_patch.py should import __version__ from the package."""
+        from hermes_lark_streaming.monkey_patch import __version__ as mp_version
+        from hermes_lark_streaming import __version__ as pkg_version
+        assert mp_version == pkg_version
+
+
+# ── Cron delivery wrapper tests ──
+
+
+class TestCronDeliveryWrapper:
+    """Verify _wrap_cron_deliver uses direct await instead of run_coroutine_threadsafe."""
+
+    def test_cron_wrapper_no_adapters_falls_through(self) -> None:
+        """When no adapters are provided, cron delivery falls through to original."""
+        from hermes_lark_streaming.monkey_patch import _wrap_cron_deliver
+
+        orig = MagicMock(return_value="original_result")
+        wrapper = _wrap_cron_deliver(orig)
+
+        result = wrapper(job={"id": "test"}, content="hello", adapters=None)
+
+        orig.assert_called_once()
+        assert result == "original_result"
+
+    def test_cron_wrapper_no_feishu_adapter_falls_through(self) -> None:
+        """When adapters exist but no Feishu adapter, falls through to original."""
+        from hermes_lark_streaming.monkey_patch import _wrap_cron_deliver
+
+        orig = MagicMock(return_value="original_result")
+        wrapper = _wrap_cron_deliver(orig)
+
+        # Create mock adapters dict with a non-Feishu platform
+        mock_adapters = {}
+        mock_platform = MagicMock()
+        mock_platform.value = "telegram"
+        mock_adapters[mock_platform] = MagicMock()
+
+        result = wrapper(job={"id": "test"}, content="hello", adapters=mock_adapters)
+
+        orig.assert_called_once()
+        assert result == "original_result"
+
+
+# ── Context cleanup and interrupt fix tests ──
+
+
+class TestMsgCtxCleanup:
+    """Verify _msg_ctx is cleared after message processing to prevent leakage."""
+
+    def test_msg_ctx_cleared_after_wrap_handle_message(self) -> None:
+        """After _wrap_handle_message_with_agent completes, _msg_ctx should be None."""
+        from hermes_lark_streaming.monkey_patch import _msg_ctx
+
+        # _msg_ctx should default to None
+        assert _msg_ctx.get() is None
+
+    def test_msg_ctx_default_is_none(self) -> None:
+        """_msg_ctx default value should be None (no stale context)."""
+        from hermes_lark_streaming.monkey_patch import _msg_ctx
+
+        # Fresh ContextVar should have default None
+        assert _msg_ctx.get() is None
+
+
+class TestPerMessageContext:
+    """Verify per-message context isolation for concurrent/overlapping messages."""
+
+    def test_msg_context_is_separate_dict(self) -> None:
+        """Each message should use its own context dict, not a shared reference."""
+        from hermes_lark_streaming.monkey_patch import _wrap_handle_message_with_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_handle_message_with_agent)
+        assert "msg_context" in source, "Per-message context dict not found in wrapper source"
+        assert "_msg_ctx.set(None)" in source, "Context cleanup not found in wrapper source"
+
+    def test_card_sent_uses_per_message_context(self) -> None:
+        """card_sent check should use per-message context, not _msg_ctx.get()."""
+        from hermes_lark_streaming.monkey_patch import _wrap_handle_message_with_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_handle_message_with_agent)
+        lines = source.split('\n')
+        found_msg_context_assignment = False
+        found_card_sent_check = False
+        for i, line in enumerate(lines):
+            if 'ctx = msg_context' in line:
+                found_msg_context_assignment = True
+            if 'card_sent' in line and found_msg_context_assignment:
+                found_card_sent_check = True
+                break
+        assert found_msg_context_assignment, "Per-message context assignment not found"
+        assert found_card_sent_check, "card_sent check not using per-message context"
+
+
+class TestRecursiveInterruptContext:
+    """Verify recursive interrupt follow-up creates independent context."""
+
+    def test_recursive_context_creation(self) -> None:
+        """_wrap_run_agent should create a new context for recursive calls."""
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        assert "_interrupt_depth" in source, "interrupt_depth not checked in _wrap_run_agent"
+        assert "_saved_parent_ctx" in source, "Parent context save not found"
+        assert "on_message_started" in source, "START hook not fired for recursive message"
+
+    def test_parent_context_restored(self) -> None:
+        """After recursive call, parent context should be restored."""
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        assert "_saved_parent_ctx is not None" in source, "Parent context restore check not found"
+
+    def test_parent_complete_hook_aborted(self) -> None:
+        """Parent COMPLETE hook should fire as ABORTED when in recursive scenario."""
+        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        import inspect
+
+        source = inspect.getsource(_wrap_run_agent)
+        assert "aborted=True" in source, "Aborted completion not found for parent context"

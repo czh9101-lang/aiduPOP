@@ -130,6 +130,21 @@ class Config:
         footer = sec.get("footer", {})
         return bool(footer.get("show_label", False))
 
+    @property
+    def gateway_cards(self) -> bool:
+        """是否将飞书渠道的网关内部消息（slash命令、错误、通知等）转为卡片.
+
+        默认开启。关闭后，网关消息仍以原始文本发送，仅 AI 回复和
+        Cron 消息使用卡片。
+
+        通过 TTL 缓存读取，用户运行时修改配置文件后最多延迟
+        _RELOAD_CACHE_TTL 秒生效。
+        """
+        sec = self._reload_cached().get("streaming")
+        if not isinstance(sec, dict):
+            return True  # 默认开启
+        return bool(sec.get("gateway_cards", True))
+
     @staticmethod
     def _default_footer_fields() -> list[list[str]]:
         return [["status", "elapsed", "model", "compression_exhausted"]]

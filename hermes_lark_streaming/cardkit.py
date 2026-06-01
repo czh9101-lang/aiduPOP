@@ -707,3 +707,112 @@ def build_cron_card(content: str) -> dict[str, Any]:
         if chunk.strip():
             card["body"]["elements"].append({"tag": "markdown", "content": chunk})
     return card
+
+
+_CATEGORY_ICONS: dict[str, str] = {
+    "system": "🔔",
+    "error": "❌",
+    "auth": "🔐",
+    "session": "🔄",
+    "slash": "⌨️",
+}
+
+
+def build_gateway_card(
+    content: str,
+    *,
+    category: str = "",
+    status_label: str = "",
+    status_emoji: str = "",
+    media_parts: list[dict] | None = None,
+) -> dict[str, Any]:
+    """Gateway-internal message card — lightweight, static, no streaming.
+
+    Used for slash command replies, auth messages, session lifecycle
+    notifications, error messages, and all non-AI, non-interactive text
+    that Hermes sends to the Feishu user.
+
+    Unlike ``build_cron_card``, this adds a subtle header icon to
+    differentiate gateway messages from AI replies.
+
+    Args:
+        content: The text content to display in the card.
+        category: Optional category hint for the header icon:
+            - "system": system/notification messages (default)
+            - "error": error messages
+            - "auth": auth/pairing messages
+            - "session": session lifecycle messages
+            - "slash": slash command replies
+        status_label: Optional status indicator text (e.g. "Reading",
+            "Processing"). When set, replaces the category icon header
+            with a status line showing the emoji + label.
+        status_emoji: Optional emoji for the status indicator (e.g. "👀",
+            "⏳"). Used together with status_label.
+        media_parts: Optional list of media dicts extracted from Hermes's
+            MEDIA tags (Phase 4). Each dict should have at least a "type"
+            ("image" or "file") and a "key" (Feishu image_key or file_key).
+    """
+    cat = category or "system"
+    icon = _CATEGORY_ICONS.get(cat, _CATEGORY_ICONS["system"])
+
+    elements: list[dict] = []
+
+    # ── Status indicator (Phase 3: from reaction interception) ──
+    # When active, shows "👀 Reading..." or "⏳ Processing..." instead
+    # of the static category icon.
+    if status_label and status_emoji:
+        elements.append({
+            "tag": "plain_text",
+            "content": f"{status_emoji} {status_label}",
+            "text_color": "turquoise",
+            "text_size": "notation",
+        })
+    else:
+        # Subtle header line with category icon
+        elements.append({
+            "tag": "plain_text",
+            "content": icon,
+            "text_color": "grey",
+            "text_size": "notation",
+        })
+
+    # ── Media elements (Phase 4: media message card wrapping) ──
+    # Hermes wraps images/files in <MEDIA> tags. When we extract them,
+    # we include the media elements in the card before the text content.
+    if media_parts:
+        for part in media_parts:
+            media_type = part.get("type", "")
+            media_key = part.get("key", "")
+            if media_type == "image" and media_key:
+                elements.append({
+                    "tag": "img",
+                    "img_key": media_key,
+                    "mode": "fit_horizontal",
+                    "compact_width": False,
+                })
+            elif media_type == "file" and media_key:
+                # Files show as a link element
+                file_name = part.get("name", "File")
+                elements.append({
+                    "tag": "plain_text",
+                    "content": f"📎 {file_name}",
+                    "text_color": "blue",
+                    "text_size": "notation",
+                })
+
+    if content.strip():
+        for chunk in _split_long_text(_downgrade_tables(optimize_markdown_style(content))):
+            if chunk.strip():
+                elements.append({"tag": "markdown", "content": chunk})
+
+    card: dict[str, Any] = {
+        "schema": "2.0",
+        "config": {"wide_screen_mode": True, "locales": _LOCALES},
+        "body": {"elements": elements},
+    }
+
+    summary = content[:120].replace("\n", " ").replace("```", "").strip() if content.strip() else ""
+    if summary:
+        card["config"]["summary"] = {"content": summary}
+
+    return card

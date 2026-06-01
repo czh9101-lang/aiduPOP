@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.12.4-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.15.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 
 ## 效果预览
 
-![效果预览](assets/img1.png)
+<img src="assets/img1.png" width="45%" /> <img src="assets/img2.png" width="25%" /> <img src="assets/img3.png" width="25%" />
 
 ---
 
