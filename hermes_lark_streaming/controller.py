@@ -159,6 +159,12 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             app_id = self._cfg.feishu_app_id or self._cfg.env_app_id
             app_secret = self._cfg.feishu_app_secret or self._cfg.env_app_secret
             if not app_id or not app_secret:
+                _logger.error(
+                    "FeishuClient init failed: credentials not configured "
+                    "(app_id=%s, env_app_id=%s)",
+                    bool(app_id),
+                    bool(self._cfg.env_app_id),
+                )
                 raise RuntimeError("feishu credentials not configured")
             self._client = FeishuClient(
                 FeishuClientConfig(
@@ -168,6 +174,11 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 )
             )
             self._initialized = True
+            _logger.info(
+                "FeishuClient initialized: app_id=%s base_url=%s",
+                app_id[:8] + "..." if len(app_id) > 8 else app_id,
+                self._cfg.feishu_base_url,
+            )
 
     def _client_ok(self) -> bool:
         return self._initialized and self._client is not None

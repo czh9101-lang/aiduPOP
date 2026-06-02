@@ -1364,6 +1364,12 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                     return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
         # ── Gateway-internal path: convert to card ──
+        _logger.info(
+            "gateway_send: entering gateway-internal path, chat=%s content_len=%d has_media=%s",
+            chat_id[:12] if chat_id else "?",
+            len(content),
+            bool(_media_parts),
+        )
         try:
             from .controller import get_controller
             ctrl = get_controller()
@@ -1371,6 +1377,7 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                 # Check if gateway_cards feature is enabled
                 cfg = _get_config()
                 if not cfg.gateway_cards:
+                    _logger.info("gateway_send: gateway_cards disabled, falling back to plain text")
                     return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
                 # Phase 4: Media-aware card building
@@ -1409,8 +1416,13 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                         return SendResult(success=True, message_id=card_msg_id)
                     except (ImportError, AttributeError):
                         return None
+            else:
+                _logger.info(
+                    "gateway_send: controller not enabled (ctrl=%s), falling back to plain text",
+                    bool(ctrl),
+                )
         except Exception:
-            _logger.debug(
+            _logger.info(
                 "hermes-lark-streaming v%s: gateway card delivery failed, "
                 "falling back to plain text",
                 __version__,
@@ -1418,6 +1430,11 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
             )
 
         # ── Fallback: original plain text send ──
+        _logger.info(
+            "gateway_send: plain text fallback, chat=%s content_len=%d",
+            chat_id[:12] if chat_id else "?",
+            len(content),
+        )
         return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
     return _intercepted_send

@@ -1,5 +1,35 @@
 # 更新日志 / Changelog
 
+## v0.18.0 (2026-06-07)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Docs | 插件更新命令修正 | README 中更新命令使用 `hermes plugins install`，但正确的更新命令是 `hermes plugins update` | 中英文 README 的更新章节统一改为 `hermes plugins update hermes-lark-streaming` + `hermes gateway restart`；移除关于 `install` 支持覆盖安装的说明 |
+| 2 | Feature | 启动时配置诊断日志 | Termux 等纯网关卡片环境下问题排查困难，缺少关键配置值的日志 | `plugin.py:register()` 新增配置诊断日志：启动时输出 enabled、linear、gateway_cards、inject_time、print_strategy、card_ttl、footer_fields 等关键配置值，方便通过 `grep hermes_lark_streaming agent.log` 快速确认插件运行状态 |
+| 3 | Feature | 网关卡片路径决策点日志 | `_wrap_feishu_adapter_send` 中网关消息走卡片还是纯文本的决策过程无日志，出问题时无法判断走了哪条路径 | 新增决策点 info 日志：① 进入网关内部路径时记录 `gateway_send: entering gateway-internal path`；② gateway_cards 关闭时记录 `gateway_cards disabled, falling back`；③ controller 未启用时记录 `controller not enabled`；④ 降级为纯文本时记录 `plain text fallback`；⑤ 网关卡片投递失败从 debug 升级为 info |
+| 4 | Feature | FeishuClient 初始化诊断日志 | 飞书客户端初始化成功/失败时无日志，凭据配置错误难以定位 | `_ensure_init()` 成功时记录 `FeishuClient initialized`（含 app_id 前缀和 base_url）；失败时记录 `FeishuClient init failed: credentials not configured`（含 app_id 和 env_app_id 是否存在） |
+| 5 | Chore | 网关卡片投递日志增强 | `gateway card delivered` 日志缺少内容长度信息 | 新增 `content_len=%d` 字段到 `_do_gateway_deliver` 的成功投递日志 |
+
+## v0.17.0 (2026-06-07)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | 网关卡片图片升级为 Card 2.0 结构 | `build_gateway_card()` 中的图片元素使用旧版字段 `mode: "fit_horizontal"` + `compact_width: False`，不符合 Card 2.0 规范，未来可能被废弃 | 升级为 Card 2.0 标准：`scale_type: "fit_horizontal"` + `alt` + `corner_radius: "8px"` + `preview: true`；移除旧版 `mode` 和 `compact_width` 字段 |
+| 2 | Feature | 完成态卡片图片独立渲染 | AI 回复中的图片以 markdown `![alt](img_key)` 嵌入，飞书 markdown 渲染图片效果一般（不支持圆角、点击放大、裁剪控制等） | 新增 `_extract_images_from_markdown()` 函数：完成态卡片构建时提取 `![alt](img_v3_xxx)` 图片为独立 `tag: "img"` Card 2.0 元素，支持 `scale_type`、`corner_radius`、`preview` 等控制；图片从 markdown 文本中移除避免重复显示；`build_complete_card`（cardkit 模式）和 `build_linear_complete_card` 均支持；非 cardkit 模式保持 markdown 内嵌不变 |
+| 3 | Change | 页脚缓存字段去掉💾 emoji | 页脚 cache 字段显示 `💾 136.3K/137.4K (99%)`，emoji 增加视觉噪音，与其他字段风格不一致 | 移除💾前缀，改为纯数字格式 `136.3K/137.4K (99%)`，与 elapsed、tokens 等字段保持一致 |
+| 4 | Change | 时间注入 → 时间感知模式 | "时间注入"名称不够直观，"时间感知"更准确描述功能本质 | 所有面向用户文档统一重命名为"时间感知模式 / Time Awareness Mode"；配置项名 `inject_time` 不变（避免破坏用户配置） |
+| 5 | Docs | 新增插件更新说明 | README 仅有安装和卸载说明，缺少更新步骤 | 中英文 README 新增"更新 / Update"章节：`hermes plugins install hermes-lark-streaming` + `hermes gateway restart`；Footer 配置文档中 `show_label` 移到 `fields` 前面 |
+| 6 | Test | 新增图片提取和 Card 2.0 字段测试 | 新功能需测试覆盖 | 新增 `TestExtractImagesFromMarkdown`（7 个测试）：无图片、单图、多图、非 img_key、混合、空 alt、空行清理；新增 `TestCompleteCardImageExtraction`（4 个测试）：cardkit 模式提取、非 cardkit 保留、线性模式提取、多图提取；更新 `TestCacheFooterField`（5 个测试）：移除💾断言；更新 `test_image_media_element`：验证 Card 2.0 字段、排除旧版字段 |
+
+## v0.16.0 (2026-06-03)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | 流式态卡片面板展开/折叠可配置 | `panel_expanded` 只控制完成态卡片的面板状态，流式态（对话进行中）的面板展开状态写死为 True，无法配置 | 新增 `streaming_panel_expanded` 配置项（默认 `true`，保持现有行为）。设为 `false` 后，流式态的推理面板和工具面板默认折叠，用户可手动点击展开。与 `panel_expanded`（完成态面板）独立配置 |
+| 2 | Feature | 流式卡片上屏策略可配置 | 飞书 CardKit 2.0 支持两种上屏策略：`fast`（新内容到达时，未上屏的旧内容立即全部上屏）和 `delay`（旧内容继续按打字机效果输出，全部完成后再开始新内容上屏，更丝滑）。之前写死为 `fast` | 新增 `print_strategy` 配置项，可选 `"fast"` 或 `"delay"`（默认 `"delay"`，更丝滑的阅读体验）。无效值自动回退为 `"delay"` |
+| 3 | Change | 网关卡片头部去掉分类 emoji | 网关卡片（slash 命令回复、错误、通知等）顶部会显示分类 emoji（🔔系统、❌错误、🔐授权、🔄会话、⌨️命令），但这不是 Hermes 原生消息内容，属于插件额外添加的视觉修饰 | 移除 `_CATEGORY_ICONS` 字典和 `build_gateway_card()` 中的 emoji 头部元素。网关卡片现在只显示 Hermes 原生消息内容，无额外修饰。状态指示器（Reaction 拦截产生的 "👀 Reading" 等）仍然保留 |
+| 4 | Test | 新增配置和卡片测试 | 新功能需测试覆盖 | 新增 `TestStreamingPanelExpanded`（3 个测试）、`TestPrintStrategy`（4 个测试）；新增 `test_reasoning_panel_collapsed_in_streaming`、`test_print_strategy_delay`、`test_print_strategy_fast`、`test_no_category_icon_header`、`test_status_indicator_still_works`；更新 12 个网关卡片测试（移除 emoji 头部断言） |
+
 ## v0.15.5 (2026-06-06)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

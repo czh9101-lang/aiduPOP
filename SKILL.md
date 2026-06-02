@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.15.5 (master 分支) |
+| 版本 | 0.18.0 (master 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -70,15 +70,15 @@ monkey_patch.py (运行时拦截)
 
 | 文件 | 行数 | 职责 | 关键点 |
 |------|------|------|--------|
-| `monkey_patch.py` | 2260 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间注入 XML 标签 `<time>`；`_started_msg_ids` 线程安全；`_wrap_cron_deliver` 临时替换 adapter.send（直接 await，不用 `run_coroutine_threadsafe`）；`_wrap_run_background_task` 后台任务卡片；`_thinking_wrapper` 检查 consumed 返回值防重复；关键日志含 `__version__`；`finish_reason` 诊断日志；递归中断子级 COMPLETE hook 修复；`_original_msg_context_ref` card_sent 传播修复；卡会话存在性检查（`_wrap_handle_message_with_agent` + `_wrap_feishu_adapter_send`）；高频日志降级 debug；启动延迟 5s→2s |
+| `monkey_patch.py` | 2260 | 运行时方法替换 | `_resolve_hermes_agent_module()` 3层解析；4组补丁各有 try/except；Cron 补丁全链路 async；时间感知模式 XML 标签 `<time>`；`_started_msg_ids` 线程安全；`_wrap_cron_deliver` 临时替换 adapter.send（直接 await，不用 `run_coroutine_threadsafe`）；`_wrap_run_background_task` 后台任务卡片；`_thinking_wrapper` 检查 consumed 返回值防重复；关键日志含 `__version__`；`finish_reason` 诊断日志；递归中断子级 COMPLETE hook 修复；`_original_msg_context_ref` card_sent 传播修复；卡会话存在性检查（`_wrap_handle_message_with_agent` + `_wrap_feishu_adapter_send`）；高频日志降级 debug；启动延迟 5s→2s |
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async；`on_message_completed` 传递 cache tokens |
 | `controller.py` | 681 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记；footer 新增 `cache_read_tokens`/`cache_write_tokens` |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
 | `controller_linear_mixin.py` | 800 | 线性模式编排 | 拆卡阈值 180 元素；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算 |
-| `cardkit.py` | 712 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%） |
+| `cardkit.py` | 712 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%）；无 emoji 头部（已移除 `_CATEGORY_ICONS`） |
 | `cardkit_i18n.py` | 45 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数；新增 `cache` 条目 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤20)、图片 key 剥离、长文本分块(2400 chars) |
-| `config.py` | 190 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer `[status, elapsed, model, compression_exhausted]`（`cache` 需手动添加）；`_get_hermes_config_path()` 动态路径（多 Profile 支持） |
+| `config.py` | 190 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer `[status, elapsed, model, compression_exhausted]`（`cache` 需手动添加）；`streaming_panel_expanded` + `print_strategy` 配置；`_get_hermes_config_path()` 动态路径（多 Profile 支持） |
 | `feishu.py` | 342 | 飞书 API 客户端 | CardKit v1/v2 + IM API；错误码分类；token 脱敏；`upload_local_image()` 本地文件上传 |
 | `flush.py` | 156 | 节流调度器 | CardKit 100ms / IM PATCH 1.5s；互斥锁 + re-flush |
 | `linear.py` | 180 | 线性 segment 状态 | `Segment` 数据类；`LinearState` 扁平管理；`split_tool_segment` / `split_answer_segment` 拆分 |
@@ -86,7 +86,7 @@ monkey_patch.py (运行时拦截)
 | `tooluse.py` | 299 | 工具调用追踪 | `ToolStep` / `ToolSession`；敏感信息脱敏 |
 | `image.py` | 129 | 异步图片处理 | 下载远程图→上传飞书→替换 img_key；同步 strip + 异步上传 |
 | `unavailable_guard.py` | 144 | 消息不可用保护 | 删除/撤回检测；30分钟 TTL 缓存 |
-| `plugin.py` | 200 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml；`_get_hermes_config_path()` 动态路径（多 Profile 支持）；插件只写 `streaming.footer.show_label`，不迁移用户配置 |
+| `plugin.py` | 226 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml；默认配置含 `streaming_panel_expanded: true` + `print_strategy: "delay"`；`_get_hermes_config_path()` 动态路径（多 Profile 支持）；插件只写 `streaming.footer.show_label`，不迁移用户配置；启动配置诊断日志 |
 | `__init__.py`(子包) | 23 | 版本号导出 | 从 `plugin.yaml` 动态读取，失败 → warning + "unknown" |
 | `__init__.py`(根) | 39 | 桥接模块 | `spec_from_file_location` 桥接到子包，解决 Hermes 加载方式兼容 |
 | `setup.py` | 19 | 构建时版本 | 从 `plugin.yaml` 读版本，失败 raise |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.15.5")
+plugin.yaml (唯一版本号: "0.18.0")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -164,11 +164,11 @@ Hermes 用 `spec_from_file_location` 加载插件，会加载仓库根目录的 
 - 模块级：拦截所有调用者（v0.10+）
 - 实例级：兜底（所有版本）
 
-`_inject_time_prefix` 使用 `threading.local()` 重入守卫防止双重注入。
+`_inject_time_prefix` 使用 `threading.local()` 重入守卫防止双重时间注入。
 
-### 4.9 时间注入格式：XML 标签
+### 4.9 时间感知模式格式：XML 标签
 
-时间注入使用 XML 标签格式 `<time>HH:MM:SS</time>`，而非方括号格式 `[HH:MM:SS CST]`：
+时间感知模式使用 XML 标签格式 `<time>HH:MM:SS</time>`，而非方括号格式 `[HH:MM:SS CST]`：
 
 - **LLM 不模仿**：XML 标签被 LLM 理解为结构化元数据，不会在回复中生成 `<time>` 标签
 - **语义清晰**：方括号格式可能被部分模型忽略为噪声，或在回复中学样
@@ -243,12 +243,14 @@ streaming:
   enabled: true
   linear: true
   panel_expanded: false
+  streaming_panel_expanded: true   # 流式态面板展开（默认 true）
+  print_strategy: delay            # 上屏策略："fast" 或 "delay"（默认）
   card_ttl_sec: 600
   inject_time: false
   footer:
+    show_label: false
     fields:
       - [status, elapsed, model, compression_exhausted]
-    show_label: false
 ```
 
 首次安装时 `plugin.py:register()` 自动注入此段（并备份 config.yaml）。
@@ -350,15 +352,17 @@ tests/
   test_version.py    — 版本号读取逻辑（plugin.yaml 缺失/无版本字段 fallback）
   test_patch.py      — Hook 函数单元测试
   test_controller.py — 会话生命周期 + 线性模式 dispatch + 集成测试
-  test_cardkit.py    — 卡片 JSON 构建
-  test_config.py     — 配置读取（含 inject_time 开关）
+  test_cardkit.py    — 卡片 JSON 构建（含 streaming_panel_expanded + print_strategy 测试）
+  test_config.py     — 配置读取（含 streaming_panel_expanded、print_strategy、inject_time 测试）
   test_flush.py      — 节流调度器（含线程安全 call_soon_threadsafe 测试）
   test_text.py       — 文本增量追踪
   test_image.py      — 图片解析
   test_linear.py     — 线性 segment 管理
   test_tooluse.py    — 工具调用追踪
-  test_monkey_patch.py — 时间注入格式（XML 标签）、重入守卫、prefix cache 一致性、版本日志、cron 投递降级
+  test_monkey_patch.py — 时间感知模式格式（XML 标签）、重入守卫、prefix cache 一致性、版本日志、cron 投递降级
   test_unavailable_guard.py — 消息不可用保护
+  test_gateway_card.py — 网关卡片构建（去 emoji、状态指示器、媒体元素、分类）
+  test_callback_interception.py — 回调拦截（answer/thinking wrapper 消费判断）
 ```
 
 运行: `HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3 -m pytest tests/`
@@ -395,12 +399,14 @@ hermes gateway restart
 
 | 版本 | 日期 | 核心变更 |
 |------|------|----------|
+| v0.18.0 | 2026-06-07 | 插件更新命令修正 + 启动配置诊断日志 + 网关卡片路径决策点日志 + FeishuClient 初始化诊断日志 |
+| v0.17.0 | 2026-06-07 | 图片 Card 2.0 升级 + 完成态图片独立渲染 + 页脚去💾 + 时间感知模式重命名 |
 | v0.8.5 | 2026-05-26 | 初始 fork，修复桥接导入、回调重复、contextvars 跨线程 |
 | v0.8.6 | 2026-05-26 | Config 读取修复、配置序列化修复、卸载清理 |
 | v0.9.0 | 2026-05-27 | 内容重复修复、页脚耗时修复、CLI 路径修复、表格限制放宽、api_calls/history_offset |
-| v0.10.0 | 2026-05-28 | 时间注入、/stop 状态显示、错误面板、compression_exhausted、Apple Silicon 修复、补丁隔离、Cron 死锁修复、Cron 表格降级 |
+| v0.10.0 | 2026-05-28 | 时间感知模式、/stop 状态显示、错误面板、compression_exhausted、Apple Silicon 修复、补丁隔离、Cron 死锁修复、Cron 表格降级 |
 | v0.10.1 | 2026-05-28 | FlushController 线程安全修复（跑马灯无文字根因）、线性模式首次文字预填充、on_thinking reasoning_dirty 预防性修复 |
-| v0.10.2 | 2026-05-28 | 时间注入格式优化为 XML 标签 `<time>` （避免 LLM 忽略或模仿）、线性模式冗余 stream_element 调用优化 |
+| v0.10.2 | 2026-05-28 | 时间感知模式格式优化为 XML 标签 `<time>` （避免 LLM 忽略或模仿）、线性模式冗余 stream_element 调用优化 |
 | v0.11.0 | 2026-05-29 | 超限自动拆卡（卡片不再卡死）、拆卡失败+超限死局修复、Config TTL 缓存（减少磁盘读取）、`_started_msg_ids` 线程安全、`on_completed` 状态机+幂等容错（COMPLETING 状态 + 300317 错误处理） |
 | v0.12.0 | 2026-05-29 | README 效果图 + Cron 推送卡片补丁修复（adapter.send 临时替换策略）+ `/background` 后台任务卡片 + 页脚 `cache` 缓存命中率字段 + 默认页脚精简（移除 api_calls/history_offset） |
 | v0.12.1 | 2026-05-29 | 竞态条件修复（`_card_ready` 同步）+ 错误/状态消息卡片内显示（`interim_assistant_callback` 重新包装）+ `card_sent` 误报修复（文本回退）+ card_id 空值检查 |
@@ -448,4 +454,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-06 | Version: 0.15.5*
+*Last updated: 2026-06-07 | Version: 0.18.0*

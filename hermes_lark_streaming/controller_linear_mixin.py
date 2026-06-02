@@ -161,6 +161,8 @@ class LinearControllerMixin:
                     show_tool_use=False,
                     show_reasoning=False,
                     show_streaming_element=False,
+                    streaming_panel_expanded=self._cfg.streaming_panel_expanded,
+                    print_strategy=self._cfg.print_strategy,
                 )
                 card_id = await self._client.cardkit_create(card)
                 card_msg_id = await self._client.reply_card_by_id(
@@ -339,7 +341,7 @@ class LinearControllerMixin:
                     el = _build_reasoning_panel(
                         _reasoning_content,
                         seg.elapsed_ms,
-                        expanded=True,
+                        expanded=self._cfg.streaming_panel_expanded,
                         element_id=seg.el_id,
                         text_element_id=seg.text_el_id,
                     )
@@ -358,7 +360,7 @@ class LinearControllerMixin:
                 elif seg.type == "tool":
                     start = seg.tool_offset
                     end = seg.tool_end_offset if seg.tool_end_offset else len(all_steps)
-                    el = _build_tool_panel(all_steps[start:end], element_id=seg.el_id)
+                    el = _build_tool_panel(all_steps[start:end], expanded=self._cfg.streaming_panel_expanded, element_id=seg.el_id)
                     updated_tool_segs.append(seg)
                 new_el_ids.add(seg.el_id)
                 new_el_estimates[seg.el_id] = estimated
@@ -447,7 +449,7 @@ class LinearControllerMixin:
                     new_el_total = 0
                     continue
                 estimate = _estimate_tool_elements(start, end, all_steps)
-                panel = _build_tool_panel(all_steps[start:end])
+                panel = _build_tool_panel(all_steps[start:end], expanded=self._cfg.streaming_panel_expanded)
                 actions.append({
                     "action": "partial_update_element",
                     "params": {
@@ -649,7 +651,7 @@ class LinearControllerMixin:
             return None
 
         old_estimate = _estimate_tool_elements(seg.tool_offset, split_offset, all_steps)
-        panel = _build_tool_panel(all_steps[seg.tool_offset:split_offset])
+        panel = _build_tool_panel(all_steps[seg.tool_offset:split_offset], expanded=self._cfg.streaming_panel_expanded)
         actions.append({
             "action": "partial_update_element",
             "params": {
@@ -715,6 +717,8 @@ class LinearControllerMixin:
                 show_tool_use=False,
                 show_reasoning=False,
                 show_streaming_element=False,
+                streaming_panel_expanded=self._cfg.streaming_panel_expanded,
+                print_strategy=self._cfg.print_strategy,
             )
             new_card_id = await self._client.cardkit_create(card)
             new_msg_id = await self._client.reply_card_by_id(session.anchor_id or session.message_id, new_card_id)
