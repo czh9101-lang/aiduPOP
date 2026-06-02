@@ -461,11 +461,13 @@ class ControllerMixin:
             # Use send_card_to_chat which returns card_msg_id
             card_msg_id = await self._client.send_card_to_chat(chat_id, card)
             _logger.info(
-                "gateway card delivered: chat=%s category=%s card_msg_id=%s has_media=%s",
+                "gateway card delivered: chat=%s category=%s card_msg_id=%s "
+                "has_media=%s content_len=%d",
                 chat_id[:12],
                 category or "system",
                 card_msg_id[:12] if card_msg_id else None,
                 bool(media_parts),
+                len(content),
             )
             return card_msg_id, None  # No card_id for static gateway cards
         except Exception:

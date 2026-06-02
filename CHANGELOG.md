@@ -1,5 +1,15 @@
 # 更新日志 / Changelog
 
+## v0.18.0 (2026-06-07)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Docs | 插件更新命令修正 | README 中更新命令使用 `hermes plugins install`，但正确的更新命令是 `hermes plugins update` | 中英文 README 的更新章节统一改为 `hermes plugins update hermes-lark-streaming` + `hermes gateway restart`；移除关于 `install` 支持覆盖安装的说明 |
+| 2 | Feature | 启动时配置诊断日志 | Termux 等纯网关卡片环境下问题排查困难，缺少关键配置值的日志 | `plugin.py:register()` 新增配置诊断日志：启动时输出 enabled、linear、gateway_cards、inject_time、print_strategy、card_ttl、footer_fields 等关键配置值，方便通过 `grep hermes_lark_streaming agent.log` 快速确认插件运行状态 |
+| 3 | Feature | 网关卡片路径决策点日志 | `_wrap_feishu_adapter_send` 中网关消息走卡片还是纯文本的决策过程无日志，出问题时无法判断走了哪条路径 | 新增决策点 info 日志：① 进入网关内部路径时记录 `gateway_send: entering gateway-internal path`；② gateway_cards 关闭时记录 `gateway_cards disabled, falling back`；③ controller 未启用时记录 `controller not enabled`；④ 降级为纯文本时记录 `plain text fallback`；⑤ 网关卡片投递失败从 debug 升级为 info |
+| 4 | Feature | FeishuClient 初始化诊断日志 | 飞书客户端初始化成功/失败时无日志，凭据配置错误难以定位 | `_ensure_init()` 成功时记录 `FeishuClient initialized`（含 app_id 前缀和 base_url）；失败时记录 `FeishuClient init failed: credentials not configured`（含 app_id 和 env_app_id 是否存在） |
+| 5 | Chore | 网关卡片投递日志增强 | `gateway card delivered` 日志缺少内容长度信息 | 新增 `content_len=%d` 字段到 `_do_gateway_deliver` 的成功投递日志 |
+
 ## v0.17.0 (2026-06-07)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

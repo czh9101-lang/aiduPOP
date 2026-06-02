@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.17.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.18.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -59,11 +59,9 @@ hermes gateway restart
 ### Update
 
 ```bash
-hermes plugins install hermes-lark-streaming
+hermes plugins update hermes-lark-streaming
 hermes gateway restart
 ```
-
-> `hermes plugins install` supports reinstall/overwrite, so the same command is used for updating.
 
 ### Uninstallation
 

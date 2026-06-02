@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.17.0 (master 分支) |
+| 版本 | 0.18.0 (master 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -86,7 +86,7 @@ monkey_patch.py (运行时拦截)
 | `tooluse.py` | 299 | 工具调用追踪 | `ToolStep` / `ToolSession`；敏感信息脱敏 |
 | `image.py` | 129 | 异步图片处理 | 下载远程图→上传飞书→替换 img_key；同步 strip + 异步上传 |
 | `unavailable_guard.py` | 144 | 消息不可用保护 | 删除/撤回检测；30分钟 TTL 缓存 |
-| `plugin.py` | 200 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml；默认配置含 `streaming_panel_expanded: true` + `print_strategy: "delay"`；`_get_hermes_config_path()` 动态路径（多 Profile 支持）；插件只写 `streaming.footer.show_label`，不迁移用户配置 |
+| `plugin.py` | 226 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml；默认配置含 `streaming_panel_expanded: true` + `print_strategy: "delay"`；`_get_hermes_config_path()` 动态路径（多 Profile 支持）；插件只写 `streaming.footer.show_label`，不迁移用户配置；启动配置诊断日志 |
 | `__init__.py`(子包) | 23 | 版本号导出 | 从 `plugin.yaml` 动态读取，失败 → warning + "unknown" |
 | `__init__.py`(根) | 39 | 桥接模块 | `spec_from_file_location` 桥接到子包，解决 Hermes 加载方式兼容 |
 | `setup.py` | 19 | 构建时版本 | 从 `plugin.yaml` 读版本，失败 raise |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.17.0")
+plugin.yaml (唯一版本号: "0.18.0")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -399,6 +399,7 @@ hermes gateway restart
 
 | 版本 | 日期 | 核心变更 |
 |------|------|----------|
+| v0.18.0 | 2026-06-07 | 插件更新命令修正 + 启动配置诊断日志 + 网关卡片路径决策点日志 + FeishuClient 初始化诊断日志 |
 | v0.17.0 | 2026-06-07 | 图片 Card 2.0 升级 + 完成态图片独立渲染 + 页脚去💾 + 时间感知模式重命名 |
 | v0.8.5 | 2026-05-26 | 初始 fork，修复桥接导入、回调重复、contextvars 跨线程 |
 | v0.8.6 | 2026-05-26 | Config 读取修复、配置序列化修复、卸载清理 |
@@ -453,4 +454,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-07 | Version: 0.17.0*
+*Last updated: 2026-06-07 | Version: 0.18.0*
