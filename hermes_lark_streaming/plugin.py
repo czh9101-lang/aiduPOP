@@ -54,6 +54,8 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "enabled": True,
     "linear": True,
     "panel_expanded": False,
+    "streaming_panel_expanded": True,
+    "print_strategy": "delay",
     "card_ttl_sec": 600,
     "inject_time": False,
     "footer": {
@@ -203,6 +205,30 @@ def register(ctx: "PluginContext") -> None:
     Feishu conversations — no source file modification required.
     """
     _ensure_streaming_config()
+
+    # ── Diagnostic: log key config for troubleshooting ──
+    try:
+        from .config import Config
+        _diag_cfg = Config()
+        _logger.info(
+            "hermes-lark-streaming v%s: config diagnostic — "
+            "enabled=%s linear=%s gateway_cards=%s inject_time=%s "
+            "panel_expanded=%s streaming_panel_expanded=%s print_strategy=%s "
+            "card_ttl=%ss footer_fields=%s show_label=%s",
+            __version__,
+            _diag_cfg.enabled,
+            _diag_cfg.linear,
+            _diag_cfg.gateway_cards,
+            _diag_cfg.inject_time,
+            _diag_cfg.panel_expanded,
+            _diag_cfg.streaming_panel_expanded,
+            _diag_cfg.print_strategy,
+            _diag_cfg.card_duration_sec,
+            _diag_cfg.footer_fields,
+            _diag_cfg.footer_show_label,
+        )
+    except Exception:
+        _logger.debug("config diagnostic log failed", exc_info=True)
 
     _logger.info("hermes-lark-streaming v%s: applying runtime patches...", __version__)
     try:

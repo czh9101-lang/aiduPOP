@@ -279,6 +279,38 @@ class TestPanelExpanded:
         assert cfg.panel_expanded is False
 
 
+class TestStreamingPanelExpanded:
+    def test_streaming_panel_expanded_true(self) -> None:
+        cfg = _make_config({"streaming": {"streaming_panel_expanded": True}})
+        assert cfg.streaming_panel_expanded is True
+
+    def test_streaming_panel_expanded_false(self) -> None:
+        cfg = _make_config({"streaming": {"streaming_panel_expanded": False}})
+        assert cfg.streaming_panel_expanded is False
+
+    def test_streaming_panel_expanded_missing_defaults_true(self) -> None:
+        cfg = _make_config({"streaming": {}})
+        assert cfg.streaming_panel_expanded is True
+
+
+class TestPrintStrategy:
+    def test_print_strategy_fast(self) -> None:
+        cfg = _make_config({"streaming": {"print_strategy": "fast"}})
+        assert cfg.print_strategy == "fast"
+
+    def test_print_strategy_delay(self) -> None:
+        cfg = _make_config({"streaming": {"print_strategy": "delay"}})
+        assert cfg.print_strategy == "delay"
+
+    def test_print_strategy_missing_defaults_delay(self) -> None:
+        cfg = _make_config({"streaming": {}})
+        assert cfg.print_strategy == "delay"
+
+    def test_print_strategy_invalid_defaults_delay(self) -> None:
+        cfg = _make_config({"streaming": {"print_strategy": "invalid"}})
+        assert cfg.print_strategy == "delay"
+
+
 class TestReloadCached:
     """_reload_cached() TTL 缓存行为测试."""
 

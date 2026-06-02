@@ -12,6 +12,7 @@ from hermes_lark_streaming.cardkit import (
     _build_tool_panel,
     _compact,
     _escape_md,
+    _extract_images_from_markdown,
     _format_elapsed,
     _longest_backtick_run,
     _render_footer_field,
@@ -460,6 +461,19 @@ class TestBuildStreamingCardV2:
         panel = next(e for e in card["body"]["elements"] if e.get("element_id") == REASONING_ELEMENT_ID)
         assert panel["expanded"] is True
 
+    def test_reasoning_panel_collapsed_in_streaming(self) -> None:
+        card = build_streaming_card_v2(show_reasoning=True, streaming_panel_expanded=False)
+        panel = next(e for e in card["body"]["elements"] if e.get("element_id") == REASONING_ELEMENT_ID)
+        assert panel["expanded"] is False
+
+    def test_print_strategy_delay(self) -> None:
+        card = build_streaming_card_v2(show_reasoning=True)
+        assert card["config"]["streaming_config"]["print_strategy"] == "delay"
+
+    def test_print_strategy_fast(self) -> None:
+        card = build_streaming_card_v2(show_reasoning=True, print_strategy="fast")
+        assert card["config"]["streaming_config"]["print_strategy"] == "fast"
+
 
 class TestBuildStreamingCard:
     def test_basic(self) -> None:
@@ -745,7 +759,7 @@ class TestCacheFooterField:
     """_render_footer_field("cache", ...) 缓存命中率字段渲染测试."""
 
     def test_cache_with_both_tokens(self) -> None:
-        """cache_read_tokens + input_tokens 均存在时渲染💾格式."""
+        """cache_read_tokens + input_tokens 均存在时渲染缓存格式."""
         en, zh = _render_footer_field(
             "cache",
             {"cache_read_tokens": 136300, "input_tokens": 137400},
@@ -755,7 +769,6 @@ class TestCacheFooterField:
         )
         assert en is not None
         assert zh is not None
-        assert "💾" in en
         assert "136.3K" in en
         assert "137.4K" in en
         assert "99%" in en
@@ -824,7 +837,7 @@ class TestCacheFooterField:
         assert en3 is None
 
     def test_cache_show_label_true_english(self) -> None:
-        """show_label=True 时英文前缀为 'Cache 💾 ...'."""
+        """show_label=True 时英文前缀为 'Cache ...'."""
         en, zh = _render_footer_field(
             "cache",
             {"cache_read_tokens": 1500, "input_tokens": 2000},
@@ -833,11 +846,11 @@ class TestCacheFooterField:
             show_label=True,
         )
         assert en is not None
-        assert en.startswith("Cache 💾")
+        assert en.startswith("Cache ")
         assert "75%" in en
 
     def test_cache_show_label_true_chinese(self) -> None:
-        """show_label=True 时中文前缀为 '缓存 💾 ...'."""
+        """show_label=True 时中文前缀为 '缓存 ...'."""
         en, zh = _render_footer_field(
             "cache",
             {"cache_read_tokens": 1500, "input_tokens": 2000},
@@ -846,11 +859,11 @@ class TestCacheFooterField:
             show_label=True,
         )
         assert zh is not None
-        assert zh.startswith("缓存 💾")
+        assert zh.startswith("缓存 ")
         assert "75%" in zh
 
     def test_cache_show_label_false_no_prefix(self) -> None:
-        """show_label=False 时无标签前缀，直接💾开头."""
+        """show_label=False 时无标签前缀，直接数字开头."""
         en, zh = _render_footer_field(
             "cache",
             {"cache_read_tokens": 1500, "input_tokens": 2000},
@@ -859,8 +872,8 @@ class TestCacheFooterField:
             show_label=False,
         )
         assert en is not None
-        assert en.startswith("💾")
         assert not en.startswith("Cache")
+        assert "75%" in en
 
     def test_cache_in_build_footer_elements(self) -> None:
         """cache 字段在 _build_footer_elements 中正常渲染."""
@@ -869,7 +882,6 @@ class TestCacheFooterField:
             fields=[["cache"]],
         )
         assert len(result) >= 2
-        assert "💾" in result[1]["content"]
         assert "99%" in result[1]["content"]
 
     def test_cache_100_percent(self) -> None:
@@ -883,3 +895,141 @@ class TestCacheFooterField:
         )
         assert en is not None
         assert "100%" in en
+
+
+# --- 图片提取 ---
+
+
+class TestExtractImagesFromMarkdown:
+    """_extract_images_from_markdown() 图片提取测试."""
+
+    def test_no_images(self) -> None:
+        """无图片时返回原文本和空列表."""
+        text = "Hello world, no images here."
+        cleaned, images = _extract_images_from_markdown(text)
+        assert cleaned == text
+        assert images == []
+
+    def test_single_img_key(self) -> None:
+        """提取单个飞书 img_key 图片."""
+        text = "Here is an image:\n![alt text](img_v3_0238_abc123)\nMore text."
+        cleaned, images = _extract_images_from_markdown(text)
+        assert "img_v3_0238_abc123" not in cleaned
+        assert "More text" in cleaned
+        assert len(images) == 1
+        assert images[0]["tag"] == "img"
+        assert images[0]["img_key"] == "img_v3_0238_abc123"
+        assert images[0]["scale_type"] == "fit_horizontal"
+        assert images[0]["alt"]["content"] == "alt text"
+        assert images[0]["preview"] is True
+        assert images[0]["corner_radius"] == "8px"
+
+    def test_multiple_images(self) -> None:
+        """提取多个飞书图片."""
+        text = "![a](img_v3_001) text ![b](img_v3_002)"
+        cleaned, images = _extract_images_from_markdown(text)
+        assert len(images) == 2
+        assert images[0]["img_key"] == "img_v3_001"
+        assert images[1]["img_key"] == "img_v3_002"
+        assert "img_v3" not in cleaned
+
+    def test_non_img_key_preserved(self) -> None:
+        """非 img_ 前缀的 URL 不被提取（由 _strip_invalid_image_keys 处理）."""
+        text = "![alt](https://example.com/image.png)"
+        cleaned, images = _extract_images_from_markdown(text)
+        assert len(images) == 0
+        # 非img_key的保留原样（后续由 _strip_invalid_image_keys 移除）
+        assert "https://example.com/image.png" in cleaned
+
+    def test_mixed_images(self) -> None:
+        """混合 img_key 和外部 URL：只提取 img_key."""
+        text = "![good](img_v3_abc) ![bad](https://example.com/img.png)"
+        cleaned, images = _extract_images_from_markdown(text)
+        assert len(images) == 1
+        assert images[0]["img_key"] == "img_v3_abc"
+        assert "https://example.com/img.png" in cleaned
+
+    def test_empty_alt(self) -> None:
+        """空 alt 文本的图片也能提取."""
+        text = "![](img_v3_empty_alt)"
+        cleaned, images = _extract_images_from_markdown(text)
+        assert len(images) == 1
+        assert images[0]["alt"]["content"] == ""
+
+    def test_cleans_extra_newlines(self) -> None:
+        """图片移除后清理多余空行."""
+        text = "Before\n\n![img](img_v3_xxx)\n\nAfter"
+        cleaned, images = _extract_images_from_markdown(text)
+        assert len(images) == 1
+        # 不应出现3个以上连续换行
+        assert "\n\n\n" not in cleaned
+        assert "Before" in cleaned
+        assert "After" in cleaned
+
+
+class TestCompleteCardImageExtraction:
+    """完成态卡片中图片独立渲染测试."""
+
+    def test_complete_card_extracts_images(self) -> None:
+        """build_complete_card (cardkit模式) 提取图片为独立img元素."""
+        text = "Result:\n![chart](img_v3_chart_001)\nDone."
+        card = build_complete_card(
+            text=text,
+            has_cardkit=True,
+            footer_fields=[],
+        )
+        elements = card["body"]["elements"]
+        # 应该包含一个 img 元素
+        img_elements = [e for e in elements if e.get("tag") == "img"]
+        assert len(img_elements) == 1
+        assert img_elements[0]["img_key"] == "img_v3_chart_001"
+        assert img_elements[0]["scale_type"] == "fit_horizontal"
+        # 图片应从 markdown 文本中移除
+        md_elements = [e for e in elements if e.get("tag") == "markdown"]
+        combined = " ".join(e.get("content", "") for e in md_elements)
+        assert "img_v3_chart_001" not in combined
+        assert "Done" in combined
+
+    def test_complete_card_no_cardkit_keeps_markdown(self) -> None:
+        """非 cardkit 模式不提取图片（保持 markdown 内嵌）."""
+        text = "Result:\n![chart](img_v3_chart_001)\nDone."
+        card = build_complete_card(
+            text=text,
+            has_cardkit=False,
+            footer_fields=[],
+        )
+        elements = card["elements"]
+        # 不应有独立的 img 元素
+        img_elements = [e for e in elements if e.get("tag") == "img"]
+        assert len(img_elements) == 0
+        # 图片仍以 markdown 格式存在
+        md_elements = [e for e in elements if e.get("tag") == "markdown"]
+        combined = " ".join(e.get("content", "") for e in md_elements)
+        assert "img_v3_chart_001" in combined
+
+    def test_linear_complete_card_extracts_images(self) -> None:
+        """build_linear_complete_card 提取图片为独立img元素."""
+        seg = Segment("answer", "answer_0")
+        seg.text = "See chart:\n![chart](img_v3_chart_002)\nEnd."
+        segments = [seg]
+        card = build_linear_complete_card(
+            segments=segments,
+            all_tool_steps=[],
+            footer_fields=[],
+        )
+        elements = card["body"]["elements"]
+        img_elements = [e for e in elements if e.get("tag") == "img"]
+        assert len(img_elements) == 1
+        assert img_elements[0]["img_key"] == "img_v3_chart_002"
+
+    def test_multiple_images_in_answer(self) -> None:
+        """多张图片都被提取为独立元素."""
+        text = "![a](img_v3_1) text ![b](img_v3_2) more ![c](img_v3_3)"
+        card = build_complete_card(
+            text=text,
+            has_cardkit=True,
+            footer_fields=[],
+        )
+        elements = card["body"]["elements"]
+        img_elements = [e for e in elements if e.get("tag") == "img"]
+        assert len(img_elements) == 3

@@ -57,6 +57,29 @@ class Config:
         return bool(sec.get("panel_expanded", False))
 
     @property
+    def streaming_panel_expanded(self) -> bool:
+        """流式态卡片中面板（工具、推理）是否保持展开.
+
+        默认 True（保持现有行为：流式态面板展开）。
+        与 panel_expanded（完成态面板）独立配置。
+        """
+        sec = self._streaming_sec()
+        return bool(sec.get("streaming_panel_expanded", True))
+
+    @property
+    def print_strategy(self) -> str:
+        """流式卡片上屏策略: "fast" 或 "delay".
+
+        - fast: 新内容到达时，未上屏的旧内容立即全部上屏，然后开始新内容上屏（默认）
+        - delay: 未上屏的旧内容继续按打字机效果输出，全部完成后才开始新内容上屏（更丝滑）
+
+        默认 "delay"（更丝滑的阅读体验）。
+        """
+        sec = self._streaming_sec()
+        strategy = sec.get("print_strategy", "delay")
+        return strategy if strategy in ("fast", "delay") else "delay"
+
+    @property
     def show_reasoning(self) -> bool:
         """是否展示推理过程（display.platforms.feishu.show_reasoning → display.show_reasoning）.
 

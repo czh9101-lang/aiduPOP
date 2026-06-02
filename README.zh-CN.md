@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.15.5-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.18.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -50,6 +50,13 @@ hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
 提示时输入 `Y` 启用插件，然后重启网关：
 
 ```bash
+hermes gateway restart
+```
+
+### 更新
+
+```bash
+hermes plugins update hermes-lark-streaming
 hermes gateway restart
 ```
 
@@ -126,10 +133,13 @@ streaming:
   enabled: true              # 启用流式卡片
   linear: true               # 线性模式：单卡片原地更新，支持自动拆卡
   panel_expanded: false      # 完成态卡片中面板（工具、推理）是否保持展开
+  streaming_panel_expanded: true  # 流式态卡片面板是否保持展开（默认: true）
+  print_strategy: delay      # 卡片上屏策略："fast"（即时）或 "delay"（更丝滑的打字机效果，默认）
   card_ttl_sec: 600         # 卡片存活检测超时（秒）
-  inject_time: false         # 在用户消息前注入当前时间（详见下方"时间注入"说明）
+  inject_time: false         # 时间感知模式：在用户消息前注入当前时间（详见下方说明）
 
   footer:
+    show_label: false        # 是否显示字段标签（true/false）
     fields:
       - [status, elapsed, model, compression_exhausted]
       # 可用字段说明：
@@ -138,16 +148,15 @@ streaming:
       #   model       — 使用的模型名称
       #   compression_exhausted — 上下文已满（⚠ 上下文已满）
       # 以下字段默认不显示 — 在 fields 列表中添加即可启用：
-      #   cache       — 缓存命中率（💾 缓存命中/总输入 命中率%）
+      #   cache       — 缓存命中率（缓存命中/总输入 命中率%）
       #   tokens      — Token 用量（↑ 输入 ↓ 输出）
       #   context     — 上下文窗口用量（已用/总量 百分比）
       #   api_calls   — 本轮对话的 API 调用次数
       #   history_offset — 对话历史偏移量；值越大对话越长，值突然变小说明发生了上下文压缩
       # 每个内层列表为页脚的一行，字段仅在有值时显示
-    show_label: false        # 是否显示字段标签（true/false）
 ```
 
-### 时间注入（`inject_time`）
+### 时间感知模式（`inject_time`）
 
 开启 `streaming.inject_time: true` 后，插件会在每条用户消息前添加当前时间，让 AI 模型无需调用 `date` 工具即可感知当前时间。
 
