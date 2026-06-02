@@ -141,7 +141,7 @@ class TestBuildGatewayCardMedia:
     """Test Phase 4: media elements in build_gateway_card()."""
 
     def test_image_media_element(self):
-        """Image media parts are rendered as img elements in the card."""
+        """Image media parts are rendered as Card 2.0 img elements in the card."""
         card = build_gateway_card(
             "Here is an image",
             media_parts=[{"type": "image", "key": "img_v3_test123"}],
@@ -153,6 +153,14 @@ class TestBuildGatewayCardMedia:
         img_elements = [e for e in elements if e.get("tag") == "img"]
         assert len(img_elements) == 1
         assert img_elements[0]["img_key"] == "img_v3_test123"
+        # Card 2.0 fields
+        assert img_elements[0]["scale_type"] == "fit_horizontal"
+        assert img_elements[0]["preview"] is True
+        assert img_elements[0]["corner_radius"] == "8px"
+        assert "alt" in img_elements[0]
+        # Legacy fields should NOT be present
+        assert "mode" not in img_elements[0]
+        assert "compact_width" not in img_elements[0]
 
     def test_file_media_element(self):
         """File media parts are rendered as text links in the card (wrapped in div.text)."""

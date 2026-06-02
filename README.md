@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.16.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.17.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -55,6 +55,15 @@ Enter `Y` when prompted to enable the plugin, then restart the gateway:
 ```bash
 hermes gateway restart
 ```
+
+### Update
+
+```bash
+hermes plugins install hermes-lark-streaming
+hermes gateway restart
+```
+
+> `hermes plugins install` supports reinstall/overwrite, so the same command is used for updating.
 
 ### Uninstallation
 
@@ -132,9 +141,10 @@ streaming:
   streaming_panel_expanded: true  # Keep panels expanded during streaming (default: true)
   print_strategy: delay      # Card streaming strategy: "fast" (instant) or "delay" (smoother typewriter, default)
   card_ttl_sec: 600         # Card alive detection timeout (seconds)
-  inject_time: false         # Inject current time before user messages (see Time Injection below)
+  inject_time: false         # Time awareness mode: inject current time before user messages (see below)
 
   footer:
+    show_label: false        # Show field labels (true/false)
     fields:
       - [status, elapsed, model, compression_exhausted]
       # Available fields:
@@ -143,16 +153,15 @@ streaming:
       #   model       — Model name used
       #   compression_exhausted — Context window is full (⚠ Context Full)
       # Fields below are not shown by default — add them to the fields list to enable:
-      #   cache       — Cache hit rate (💾 cache_read/total_input hit%)
+      #   cache       — Cache hit rate (cache_read/total_input hit%)
       #   tokens      — Token usage (↑ input ↓ output)
       #   context     — Context window usage (used/total percentage)
       #   api_calls   — Number of API calls in this session
       #   history_offset — Conversation history offset; larger = longer history, sudden decrease = context compression
       # Each inner list is one row in the footer; fields only shown when they have values
-    show_label: false        # Show field labels (true/false)
 ```
 
-### Time Injection (`inject_time`)
+### Time Awareness Mode (`inject_time`)
 
 When `streaming.inject_time: true`, the plugin prepends the current time to each user message so the AI model can perceive the current time without calling the `date` tool.
 

@@ -12,6 +12,38 @@ from .cardkit_md import (
     optimize_markdown_style,
 )
 
+# 匹配 markdown 图片语法: ![alt](url)
+_IMG_MD_PATTERN = re.compile(r"!\[([^\]]*)\]\((img_[^)\s]+)\)")
+
+
+def _extract_images_from_markdown(text: str) -> tuple[str, list[dict]]:
+    """从 markdown 文本中提取已解析的飞书图片，返回 (清理后的文本, img元素列表).
+
+    将 ``![alt](img_v3_xxx)`` 格式的图片从文本中提取为独立的
+    Card 2.0 ``tag: "img"`` 元素，图片从文本中移除以避免重复显示。
+
+    仅处理 ``img_`` 前缀的 URL（已上传到飞书的图片 key）。
+    """
+    images: list[dict] = []
+
+    def _replace(m: re.Match) -> str:
+        alt = m.group(1)
+        img_key = m.group(2)
+        images.append({
+            "tag": "img",
+            "img_key": img_key,
+            "scale_type": "fit_horizontal",
+            "alt": {"tag": "plain_text", "content": alt},
+            "corner_radius": "8px",
+            "preview": True,
+        })
+        return ""
+
+    cleaned = _IMG_MD_PATTERN.sub(_replace, text)
+    # 清理图片移除后可能留下的空行
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned, images
+
 if TYPE_CHECKING:
     from .linear import Segment
 
@@ -413,7 +445,7 @@ def _render_footer_field(
         input_total = data.get("input_tokens", 0) or 0
         if cache_read and input_total:
             hit_pct = int(cache_read / input_total * 100)
-            v = f"💾 {_compact(cache_read)}/{_compact(input_total)} ({hit_pct}%)"
+            v = f"{_compact(cache_read)}/{_compact(input_total)} ({hit_pct}%)"
             if show_label:
                 return _T["cache"][0].format(v), _T["cache"][1].format(v)
             return v, v
@@ -583,8 +615,13 @@ def build_complete_card(
         ))
 
     content = _downgrade_tables(optimize_markdown_style(text or _T["done"][0]))
+    # ── 提取已解析图片为独立 img 元素（Card 2.0 独立渲染，更清晰） ──
+    if has_cardkit:
+        content, img_elements = _extract_images_from_markdown(content)
+        elements.extend(img_elements)
     for chunk in _split_long_text(content):
-        elements.append({"tag": "markdown", "content": chunk})
+        if chunk.strip():
+            elements.append({"tag": "markdown", "content": chunk})
 
     elements.extend(
         _build_footer_elements(
@@ -656,8 +693,12 @@ def build_linear_complete_card(
         elif seg.type == "answer" and seg.text:
             has_answer = True
             content = _downgrade_tables(optimize_markdown_style(seg.text))
+            # ── 提取已解析图片为独立 img 元素 ──
+            content, img_elements = _extract_images_from_markdown(content)
+            elements.extend(img_elements)
             for chunk in _split_long_text(content):
-                elements.append({"tag": "markdown", "content": chunk})
+                if chunk.strip():
+                    elements.append({"tag": "markdown", "content": chunk})
 
     if not has_answer:
         elements.append({"tag": "markdown", "content": _T["done"][0]})
@@ -761,8 +802,10 @@ def build_gateway_card(
                 elements.append({
                     "tag": "img",
                     "img_key": media_key,
-                    "mode": "fit_horizontal",
-                    "compact_width": False,
+                    "scale_type": "fit_horizontal",
+                    "alt": {"tag": "plain_text", "content": ""},
+                    "corner_radius": "8px",
+                    "preview": True,
                 })
             elif media_type == "file" and media_key:
                 file_name = part.get("name", "File")
