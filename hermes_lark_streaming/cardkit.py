@@ -457,18 +457,20 @@ def build_streaming_card_v2(
     show_tool_use: bool = True,
     show_reasoning: bool = False,
     show_streaming_element: bool = True,
+    streaming_panel_expanded: bool = True,
+    print_strategy: str = "delay",
 ) -> dict[str, Any]:
     """CardKit 2.0 流式占位卡片 — 含工具面板 + streaming + loading 元素."""
     elements: list[dict] = []
 
     if show_reasoning:
         elements.append(
-            _build_reasoning_panel(" ", expanded=True, element_id=REASONING_ELEMENT_ID)
+            _build_reasoning_panel(" ", expanded=streaming_panel_expanded, element_id=REASONING_ELEMENT_ID)
         )
 
     if show_tool_use:
         if tool_steps:
-            elements.append(_build_tool_panel(tool_steps, elapsed_ms))
+            elements.append(_build_tool_panel(tool_steps, elapsed_ms, expanded=streaming_panel_expanded))
         else:
             elements.append(build_streaming_tool_use_pending_panel())
 
@@ -483,7 +485,7 @@ def build_streaming_card_v2(
             "streaming_config": {
                 "print_frequency_ms": {"default": 15},
                 "print_step": {"default": 1},
-                "print_strategy": "fast",
+                "print_strategy": print_strategy,
             },
             "locales": _LOCALES,
             "summary": {
@@ -709,15 +711,6 @@ def build_cron_card(content: str) -> dict[str, Any]:
     return card
 
 
-_CATEGORY_ICONS: dict[str, str] = {
-    "system": "🔔",
-    "error": "❌",
-    "auth": "🔐",
-    "session": "🔄",
-    "slash": "⌨️",
-}
-
-
 def build_gateway_card(
     content: str,
     *,
@@ -732,39 +725,22 @@ def build_gateway_card(
     notifications, error messages, and all non-AI, non-interactive text
     that Hermes sends to the Feishu user.
 
-    Unlike ``build_cron_card``, this adds a subtle header icon to
-    differentiate gateway messages from AI replies.
+    Displays the Hermes native message content in a clean card without
+    any extra emoji or icon prefix.
 
     Args:
         content: The text content to display in the card.
-        category: Optional category hint for the header icon:
-            - "system": system/notification messages (default)
-            - "error": error messages
-            - "auth": auth/pairing messages
-            - "session": session lifecycle messages
-            - "slash": slash command replies
+        category: Retained for reaction interception routing; no longer
+            affects card visual appearance.
         status_label: Optional status indicator text (e.g. "Reading",
-            "Processing"). When set, replaces the category icon header
-            with a status line showing the emoji + label.
-        status_emoji: Optional emoji for the status indicator (e.g. "👀",
-            "⏳"). Used together with status_label.
+            "Processing"). When set, shows a status line with emoji + label.
+        status_emoji: Optional emoji for the status indicator.
         media_parts: Optional list of media dicts extracted from Hermes's
-            MEDIA tags (Phase 4). Each dict should have at least a "type"
-            ("image" or "file") and a "key" (Feishu image_key or file_key).
+            MEDIA tags.
     """
-    cat = category or "system"
-    icon = _CATEGORY_ICONS.get(cat, _CATEGORY_ICONS["system"])
-
     elements: list[dict] = []
 
-    # ── Status indicator (Phase 3: from reaction interception) ──
-    # When active, shows "👀 Reading..." or "⏳ Processing..." instead
-    # of the static category icon.
-    #
-    # IMPORTANT: In CardKit 2.0 schema (body.elements), "plain_text" is
-    # NOT a valid direct child — it must be wrapped inside a "div.text".
-    # Using plain_text directly triggers Feishu API error 230099/
-    # 200621: "type of element is not supported tag: plain_text".
+    # ── Status indicator (from reaction interception) ──
     if status_label and status_emoji:
         elements.append({
             "tag": "div",
@@ -775,21 +751,8 @@ def build_gateway_card(
                 "text_size": "notation",
             },
         })
-    else:
-        # Subtle header line with category icon
-        elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "plain_text",
-                "content": icon,
-                "text_color": "grey",
-                "text_size": "notation",
-            },
-        })
 
-    # ── Media elements (Phase 4: media message card wrapping) ──
-    # Hermes wraps images/files in <MEDIA> tags. When we extract them,
-    # we include the media elements in the card before the text content.
+    # ── Media elements ──
     if media_parts:
         for part in media_parts:
             media_type = part.get("type", "")
@@ -802,8 +765,6 @@ def build_gateway_card(
                     "compact_width": False,
                 })
             elif media_type == "file" and media_key:
-                # Files show as a link element
-                # Wrap in div.text to avoid Feishu API 230099/200621 error
                 file_name = part.get("name", "File")
                 elements.append({
                     "tag": "div",

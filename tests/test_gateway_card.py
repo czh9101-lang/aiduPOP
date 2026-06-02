@@ -16,53 +16,53 @@ class TestBuildGatewayCard:
         assert "elements" not in card  # schema 2.0 uses body
         assert "body" in card
         elements = card["body"]["elements"]
-        # First element should be the icon header wrapped in div.text
-        # (plain_text is NOT valid as a direct child of body.elements in
-        # CardKit 2.0 — must be wrapped in div.text to avoid API error 230099)
-        assert elements[0]["tag"] == "div"
-        assert elements[0]["text"]["tag"] == "plain_text"
-        assert elements[0]["text"]["content"] == "🔔"
-        # Second element should be the content markdown
-        assert elements[1]["tag"] == "markdown"
-        assert "System notification" in elements[1]["content"]
+        # No emoji header — first element is the content markdown
+        assert elements[0]["tag"] == "markdown"
+        assert "System notification" in elements[0]["content"]
 
     def test_error_category(self):
         card = build_gateway_card("Something failed", category="error")
         elements = card["body"]["elements"]
-        assert elements[0]["text"]["content"] == "❌"
+        # No emoji header — category does not affect visual
+        assert elements[0]["tag"] == "markdown"
+        assert "Something failed" in elements[0]["content"]
 
     def test_auth_category(self):
         card = build_gateway_card("Pairing code: 1234", category="auth")
         elements = card["body"]["elements"]
-        assert elements[0]["text"]["content"] == "🔐"
+        # No emoji header
+        assert elements[0]["tag"] == "markdown"
 
     def test_session_category(self):
         card = build_gateway_card("Session reset", category="session")
         elements = card["body"]["elements"]
-        assert elements[0]["text"]["content"] == "🔄"
+        # No emoji header
+        assert elements[0]["tag"] == "markdown"
 
     def test_slash_category(self):
         card = build_gateway_card("/help output", category="slash")
         elements = card["body"]["elements"]
-        assert elements[0]["text"]["content"] == "⌨️"
+        # No emoji header
+        assert elements[0]["tag"] == "markdown"
 
     def test_default_category_is_system(self):
         card = build_gateway_card("Hello", category="")
         elements = card["body"]["elements"]
-        assert elements[0]["text"]["content"] == "🔔"
+        # No emoji header — category does not affect visual
+        assert elements[0]["tag"] == "markdown"
 
     def test_unknown_category_defaults_to_system(self):
         card = build_gateway_card("Hello", category="unknown_category")
         elements = card["body"]["elements"]
-        assert elements[0]["text"]["content"] == "🔔"
+        # No emoji header
+        assert elements[0]["tag"] == "markdown"
 
     def test_empty_content_produces_card(self):
         card = build_gateway_card("")
         assert card["schema"] == "2.0"
         elements = card["body"]["elements"]
-        # Still has icon header (wrapped in div.text)
-        assert elements[0]["tag"] == "div"
-        assert elements[0]["text"]["tag"] == "plain_text"
+        # No emoji header, no content — elements list is empty
+        assert len(elements) == 0
 
     def test_summary_generated(self):
         card = build_gateway_card("This is a long message that should have a summary")
@@ -78,8 +78,23 @@ class TestBuildGatewayCard:
         content = "| A | B |\n|---|---|\n| 1 | 2 |"
         card = build_gateway_card(content)
         elements = card["body"]["elements"]
-        # Should have icon + at least one markdown element
-        assert len(elements) >= 2
+        # No emoji header — just markdown elements
+        assert len(elements) >= 1
+
+
+    def test_no_category_icon_header(self) -> None:
+        """Gateway card should NOT have a category icon header element."""
+        card = build_gateway_card("Hello world", category="system")
+        # First element should be markdown content, not a div with emoji
+        first = card["body"]["elements"][0]
+        assert first["tag"] == "markdown"
+
+    def test_status_indicator_still_works(self) -> None:
+        """Status indicator from reaction interception should still work."""
+        card = build_gateway_card("Hello", status_label="Reading", status_emoji="👀")
+        first = card["body"]["elements"][0]
+        assert first["tag"] == "div"
+        assert "👀 Reading" in first["text"]["content"]
 
 
 class TestBuildGatewayCardStatusIndicator:
@@ -100,19 +115,21 @@ class TestBuildGatewayCardStatusIndicator:
         assert elements[0]["text"]["content"] == "👀 Reading"
         assert elements[0]["text"]["text_color"] == "turquoise"
 
-    def test_no_status_shows_category_icon(self):
-        """When no status is set, the category icon is shown (default behavior)."""
+    def test_no_status_shows_no_icon(self):
+        """When no status is set, no category icon is shown (emoji removed)."""
         card = build_gateway_card("Hello", category="error")
         elements = card["body"]["elements"]
-        assert elements[0]["text"]["content"] == "❌"
-        assert elements[0]["text"]["text_color"] == "grey"
+        # No emoji header — first element is markdown content
+        assert elements[0]["tag"] == "markdown"
+        assert "Hello" in elements[0]["content"]
 
-    def test_empty_status_shows_category_icon(self):
-        """When status_label is empty, the category icon is shown."""
+    def test_empty_status_shows_no_icon(self):
+        """When status_label is empty, no category icon is shown (emoji removed)."""
         card = build_gateway_card("Hello", status_label="", status_emoji="👀")
         elements = card["body"]["elements"]
-        # No status → show category icon (default system)
-        assert elements[0]["text"]["content"] == "🔔"
+        # No status and no emoji header — first element is markdown
+        assert elements[0]["tag"] == "markdown"
+        assert "Hello" in elements[0]["content"]
 
     def test_processing_status(self):
         card = build_gateway_card("Working...", status_label="Processing", status_emoji="⏳")
@@ -130,8 +147,8 @@ class TestBuildGatewayCardMedia:
             media_parts=[{"type": "image", "key": "img_v3_test123"}],
         )
         elements = card["body"]["elements"]
-        # Should have: icon div + img + markdown
-        assert len(elements) >= 3
+        # Should have: img + markdown
+        assert len(elements) >= 2
         # Find the img element
         img_elements = [e for e in elements if e.get("tag") == "img"]
         assert len(img_elements) == 1

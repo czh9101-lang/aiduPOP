@@ -54,6 +54,8 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "enabled": True,
     "linear": True,
     "panel_expanded": False,
+    "streaming_panel_expanded": True,
+    "print_strategy": "delay",
     "card_ttl_sec": 600,
     "inject_time": False,
     "footer": {

@@ -1,5 +1,14 @@
 # 更新日志 / Changelog
 
+## v0.16.0 (2026-06-03)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | 流式态卡片面板展开/折叠可配置 | `panel_expanded` 只控制完成态卡片的面板状态，流式态（对话进行中）的面板展开状态写死为 True，无法配置 | 新增 `streaming_panel_expanded` 配置项（默认 `true`，保持现有行为）。设为 `false` 后，流式态的推理面板和工具面板默认折叠，用户可手动点击展开。与 `panel_expanded`（完成态面板）独立配置 |
+| 2 | Feature | 流式卡片上屏策略可配置 | 飞书 CardKit 2.0 支持两种上屏策略：`fast`（新内容到达时，未上屏的旧内容立即全部上屏）和 `delay`（旧内容继续按打字机效果输出，全部完成后再开始新内容上屏，更丝滑）。之前写死为 `fast` | 新增 `print_strategy` 配置项，可选 `"fast"` 或 `"delay"`（默认 `"delay"`，更丝滑的阅读体验）。无效值自动回退为 `"delay"` |
+| 3 | Change | 网关卡片头部去掉分类 emoji | 网关卡片（slash 命令回复、错误、通知等）顶部会显示分类 emoji（🔔系统、❌错误、🔐授权、🔄会话、⌨️命令），但这不是 Hermes 原生消息内容，属于插件额外添加的视觉修饰 | 移除 `_CATEGORY_ICONS` 字典和 `build_gateway_card()` 中的 emoji 头部元素。网关卡片现在只显示 Hermes 原生消息内容，无额外修饰。状态指示器（Reaction 拦截产生的 "👀 Reading" 等）仍然保留 |
+| 4 | Test | 新增配置和卡片测试 | 新功能需测试覆盖 | 新增 `TestStreamingPanelExpanded`（3 个测试）、`TestPrintStrategy`（4 个测试）；新增 `test_reasoning_panel_collapsed_in_streaming`、`test_print_strategy_delay`、`test_print_strategy_fast`、`test_no_category_icon_header`、`test_status_indicator_still_works`；更新 12 个网关卡片测试（移除 emoji 头部断言） |
+
 ## v0.15.5 (2026-06-06)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

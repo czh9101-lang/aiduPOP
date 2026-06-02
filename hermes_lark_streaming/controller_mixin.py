@@ -80,7 +80,9 @@ class ControllerMixin:
             try:
                 reply_to_message_id = session.anchor_id or session.message_id
                 card = build_streaming_card_v2(
-                    show_tool_use=False, show_reasoning=self._cfg.show_reasoning
+                    show_tool_use=False, show_reasoning=self._cfg.show_reasoning,
+                    streaming_panel_expanded=self._cfg.streaming_panel_expanded,
+                    print_strategy=self._cfg.print_strategy,
                 )
                 card_id = await self._client.cardkit_create(card)
                 card_msg_id = await self._client.reply_card_by_id(
@@ -210,6 +212,7 @@ class ControllerMixin:
             panel = _build_tool_panel(
                 tool_steps,
                 session.tool_use.elapsed_ms,
+                expanded=self._cfg.streaming_panel_expanded,
             )
             if not session.tool_panel_added:
                 actions = [

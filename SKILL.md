@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.15.5 (master 分支) |
+| 版本 | 0.16.0 (master 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -75,10 +75,10 @@ monkey_patch.py (运行时拦截)
 | `controller.py` | 681 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记；footer 新增 `cache_read_tokens`/`cache_write_tokens` |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
 | `controller_linear_mixin.py` | 800 | 线性模式编排 | 拆卡阈值 180 元素；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算 |
-| `cardkit.py` | 712 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%） |
+| `cardkit.py` | 712 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%）；无 emoji 头部（已移除 `_CATEGORY_ICONS`） |
 | `cardkit_i18n.py` | 45 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数；新增 `cache` 条目 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤20)、图片 key 剥离、长文本分块(2400 chars) |
-| `config.py` | 190 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer `[status, elapsed, model, compression_exhausted]`（`cache` 需手动添加）；`_get_hermes_config_path()` 动态路径（多 Profile 支持） |
+| `config.py` | 190 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer `[status, elapsed, model, compression_exhausted]`（`cache` 需手动添加）；`streaming_panel_expanded` + `print_strategy` 配置；`_get_hermes_config_path()` 动态路径（多 Profile 支持） |
 | `feishu.py` | 342 | 飞书 API 客户端 | CardKit v1/v2 + IM API；错误码分类；token 脱敏；`upload_local_image()` 本地文件上传 |
 | `flush.py` | 156 | 节流调度器 | CardKit 100ms / IM PATCH 1.5s；互斥锁 + re-flush |
 | `linear.py` | 180 | 线性 segment 状态 | `Segment` 数据类；`LinearState` 扁平管理；`split_tool_segment` / `split_answer_segment` 拆分 |
@@ -86,7 +86,7 @@ monkey_patch.py (运行时拦截)
 | `tooluse.py` | 299 | 工具调用追踪 | `ToolStep` / `ToolSession`；敏感信息脱敏 |
 | `image.py` | 129 | 异步图片处理 | 下载远程图→上传飞书→替换 img_key；同步 strip + 异步上传 |
 | `unavailable_guard.py` | 144 | 消息不可用保护 | 删除/撤回检测；30分钟 TTL 缓存 |
-| `plugin.py` | 200 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml；`_get_hermes_config_path()` 动态路径（多 Profile 支持）；插件只写 `streaming.footer.show_label`，不迁移用户配置 |
+| `plugin.py` | 200 | 插件注册入口 | `register()` 注入配置 + 打补丁；`unregister()` 清理配置；自动备份 config.yaml；默认配置含 `streaming_panel_expanded: true` + `print_strategy: "delay"`；`_get_hermes_config_path()` 动态路径（多 Profile 支持）；插件只写 `streaming.footer.show_label`，不迁移用户配置 |
 | `__init__.py`(子包) | 23 | 版本号导出 | 从 `plugin.yaml` 动态读取，失败 → warning + "unknown" |
 | `__init__.py`(根) | 39 | 桥接模块 | `spec_from_file_location` 桥接到子包，解决 Hermes 加载方式兼容 |
 | `setup.py` | 19 | 构建时版本 | 从 `plugin.yaml` 读版本，失败 raise |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.15.5")
+plugin.yaml (唯一版本号: "0.16.0")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -243,6 +243,8 @@ streaming:
   enabled: true
   linear: true
   panel_expanded: false
+  streaming_panel_expanded: true   # NEW
+  print_strategy: delay            # NEW
   card_ttl_sec: 600
   inject_time: false
   footer:
@@ -395,6 +397,7 @@ hermes gateway restart
 
 | 版本 | 日期 | 核心变更 |
 |------|------|----------|
+| v0.16.0 | 2026-06-03 | `streaming_panel_expanded` 配置 + `print_strategy` 配置 + 网关卡片去 emoji |
 | v0.8.5 | 2026-05-26 | 初始 fork，修复桥接导入、回调重复、contextvars 跨线程 |
 | v0.8.6 | 2026-05-26 | Config 读取修复、配置序列化修复、卸载清理 |
 | v0.9.0 | 2026-05-27 | 内容重复修复、页脚耗时修复、CLI 路径修复、表格限制放宽、api_calls/history_offset |
@@ -448,4 +451,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-06 | Version: 0.15.5*
+*Last updated: 2026-06-03 | Version: 0.16.0*

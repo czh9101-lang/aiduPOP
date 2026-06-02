@@ -460,6 +460,19 @@ class TestBuildStreamingCardV2:
         panel = next(e for e in card["body"]["elements"] if e.get("element_id") == REASONING_ELEMENT_ID)
         assert panel["expanded"] is True
 
+    def test_reasoning_panel_collapsed_in_streaming(self) -> None:
+        card = build_streaming_card_v2(show_reasoning=True, streaming_panel_expanded=False)
+        panel = next(e for e in card["body"]["elements"] if e.get("element_id") == REASONING_ELEMENT_ID)
+        assert panel["expanded"] is False
+
+    def test_print_strategy_delay(self) -> None:
+        card = build_streaming_card_v2(show_reasoning=True)
+        assert card["config"]["streaming_config"]["print_strategy"] == "delay"
+
+    def test_print_strategy_fast(self) -> None:
+        card = build_streaming_card_v2(show_reasoning=True, print_strategy="fast")
+        assert card["config"]["streaming_config"]["print_strategy"] == "fast"
+
 
 class TestBuildStreamingCard:
     def test_basic(self) -> None:
