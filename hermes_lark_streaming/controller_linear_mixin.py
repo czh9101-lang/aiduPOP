@@ -7,6 +7,8 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
+import re
+
 from .cardkit import (
     _LOADING_ELEMENT_ID,
     _build_reasoning_panel,
@@ -17,6 +19,9 @@ from .cardkit import (
     build_linear_complete_card,
     build_streaming_card_v2,
 )
+
+# 匹配 markdown 图片语法: ![alt](img_xxx) — 与 cardkit._IMG_MD_PATTERN 对齐
+_IMG_MD_PATTERN = re.compile(r"!\[([^\]]*)\]\((img_[^)\s]+)\)")
 from .cardkit_i18n import _T, _i18n
 from .cardkit_md import (
     _downgrade_tables,
@@ -53,8 +58,13 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
-_ELEMENT_THRESHOLD = 180  # 拆卡阈值（飞书硬上限 200，预留 20 给 footer + 波动）
+_ELEMENT_THRESHOLD = 150  # 拆卡阈值（飞书硬上限 200 总元素含嵌套，预留 50 给 footer + 图片 + 波动）
 _FOOTER_RESERVE = 2  # footer 元素预留（hr + markdown）
+
+
+def _count_images_in_text(text: str) -> int:
+    """统计 markdown 文本中 img_ 前缀的图片数量（与 cardkit._extract_images_from_markdown 对齐）."""
+    return len(_IMG_MD_PATTERN.findall(text))
 
 
 def _estimate_segment_elements(seg: Segment, all_steps: list[dict[str, Any]]) -> int:
@@ -70,7 +80,9 @@ def _estimate_segment_elements(seg: Segment, all_steps: list[dict[str, Any]]) ->
     elif seg.type == "answer":
         if seg.text:
             content = _downgrade_tables(optimize_markdown_style(seg.text))
-            return max(len(_split_long_text(content)), 1)
+            # 图片提取后变成独立 img 元素，需计入
+            img_count = _count_images_in_text(content)
+            return max(len(_split_long_text(content)), 1) + img_count
         return 1
     elif seg.type == "tool":
         return _estimate_tool_elements(

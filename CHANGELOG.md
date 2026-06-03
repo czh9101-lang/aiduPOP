@@ -1,17 +1,12 @@
 # 更新日志 / Changelog
 
-## v0.18.1 (2026-06-08)
+## v0.18.2 (2026-06-10)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
-| 1 | Bug | GatewayRunner 补丁失败导致流式卡片完全无效 | 插件 `register()` 在 Hermes 加载 `gateway.run` 模块之前运行，`from gateway.run import GatewayRunner` 失败后直接报错放弃，导致三个关键补丁（`_handle_message`、`_handle_message_with_agent`、`_run_agent`）从未被应用。Termux 等环境下此问题100%复现——网关卡片能创建但无流式效果、无打字机、无工具面板 | 新增延迟补丁机制：当 `gateway.run` 不可用时启动后台线程，每 2 秒轮询一次，60 秒超时。一旦 `gateway.run` 可导入立即应用 GatewayRunner 补丁。补丁摘要日志从 `GatewayRunner=✗` 改为 `GatewayRunner=pending (delayed poll)`，成功后记录 `GatewayRunner patched (delayed) ✓` |
-| 2 | Bug | `edit_message()` 拦截器每次调用都报 TypeError | `_intercepted_edit` 签名缺少 `chat_id` 参数，Hermes 关键字传参时 `chat_id` 掉入 `**kwargs`，fallback 调用原始函数时参数错位。异常被 `except Exception` 默默吃掉，功能不受影响但每次都刷错误日志 | `_intercepted_edit` 新增 `chat_id` 显式参数；fallback 调用 `orig_edit(self_feishu, chat_id, message_id, content, ...)` 参数对齐；网关卡片更新路径 `card_info.get("chat_id", chat_id)` 兼容旧注册数据 |
-| 3 | Bug | 拆卡后封存的卡片跑马灯不停 | `build_linear_complete_card` 和 `build_complete_card` 生成的完成态卡片未设置 `streaming_mode: False`。当 `cardkit_close_streaming` API 调用失败时（被 `except Exception` 吞掉），卡片流式模式未关闭，跑马灯一直转 | 完成态卡片（schema 2.0）显式设置 `"streaming_mode": False`，即使 `close_streaming` 失败也能通过 `cardkit_update` 停止跑马灯 |
-| 4 | Change | 线性模式中断面板显示在内容最前面 | `build_linear_complete_card` 中中断/错误面板添加在 segment 循环之前，占据卡片最顶部。在线性模式下，中断只是状态通知（"已停止"），不应抢占已生成内容的位置 | 线性模式中断面板移到内容之后、页脚之前；非线性格式 `build_complete_card` 保持不变（面板在顶部，默认折叠不影响阅读） |
-| 5 | Change | 中断/错误面板不受 `panel_expanded` 配置控制 | `_build_error_panel` 硬编码 `expanded=True`，无论用户配置 `panel_expanded` 为 `true` 还是 `false`，中断面板始终展开 | 中断/错误面板改为 `expanded=panel_expanded`，与推理面板、工具面板行为一致，受配置控制 |
-| 6 | Test | 新增 v0.18.1 修复测试 | 新功能需测试覆盖 | 新增 `test_complete_card_has_streaming_mode_false`、`test_linear_complete_card_has_streaming_mode_false`、`test_error_panel_respects_panel_expanded`、`test_linear_error_panel_respects_panel_expanded`、`test_apply_gateway_runner_patches_function_exists`、`test_intercepted_edit_has_chat_id_param`；更新 `test_error_message_before_segments` → `test_error_message_after_segments_in_linear_mode`（断言反转） |
+| 1 | Bug | 拆卡封存时"元素超限"导致封卡失败，旧卡跑马灯不停 | 拆卡阈值 `_ELEMENT_THRESHOLD=180` 是按"飞书上限 200 顶级元素"理解的，但飞书 Card 2.0 的 200 限制是**所有元素含嵌套**的总和（collapsible_panel 内部的 title、icon、children 都算），实际一张卡片远到不了 180 个顶级元素就已经超限；另外 `_estimate_segment_elements` 对 answer 的图片提取（`_extract_images_from_markdown` 产生的独立 `img` 元素）未计入估算，导致流式阶段判断"不超限"但封卡时实际超限 | ① 拆卡阈值从 180 降至 150（预留 50 给 footer + 图片 + 波动）；② `_estimate_segment_elements` 对 answer 新增图片元素计数（`_count_images_in_text`），与 `build_linear_complete_card` 中 `_extract_images_from_markdown` 的行为对齐；③ 更新所有相关测试用例 |
 
-## v0.18.0 (2026-06-07)
+## v0.18.1 (2026-06-08)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|

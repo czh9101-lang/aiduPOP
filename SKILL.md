@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.18.1 (master 分支) |
+| 版本 | 0.18.2 (master 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -74,7 +74,7 @@ monkey_patch.py (运行时拦截)
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async；`on_message_completed` 传递 cache tokens |
 | `controller.py` | 681 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记；footer 新增 `cache_read_tokens`/`cache_write_tokens` |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
-| `controller_linear_mixin.py` | 800 | 线性模式编排 | 拆卡阈值 180 元素；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算 |
+| `controller_linear_mixin.py` | 810 | 线性模式编排 | 拆卡阈值 150 元素（飞书 200 含嵌套，预留 50）；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数（含 `_count_images_in_text` 图片计数）；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算 |
 | `cardkit.py` | 712 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%）；无 emoji 头部（已移除 `_CATEGORY_ICONS`） |
 | `cardkit_i18n.py` | 45 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数；新增 `cache` 条目 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤20)、图片 key 剥离、长文本分块(2400 chars) |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.18.1")
+plugin.yaml (唯一版本号: "0.18.0")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -227,7 +227,7 @@ Hermes 默认纯文本回复 (最终降级)
 
 - 每个内容段是一个 `Segment`（type: reasoning/answer/tool）
 - 扁平排列，无需推断轮次边界
-- 当元素数接近 200 上限时自动拆卡（阈值 180）
+- 当元素数接近 200 上限时自动拆卡（阈值 150，飞书 200 含嵌套）
 - 拆卡后首卡片标记 `partial` 状态
 - Tool segment 按 step 边界拆分，Answer segment 按文本块边界拆分
 - 超了就拆，拆完还超继续拆
@@ -305,9 +305,10 @@ streaming:
 **原因**: `call_soon` 只把回调加入 `_ready` 队列，但不调 `_write_to_self()` 唤醒事件循环。LLM 流式回调在 worker 线程中执行 → `schedule_update` → `call_soon` → 回调入队但事件循环不醒 → flush 永远不执行 → "跑马灯无文字"
 
 ### 10.7 Feishu CardKit 元素限制
-飞书硬限制 200 元素/卡片。线性模式阈值设为 180（预留 20 给 footer + 波动）。
-v0.11.0 起，超限时自动触发拆卡（而非仅打日志），设置 `element_limit_hit` 标志后跳过新增段，拆卡成功后重置标志和元素计数。
-v0.12.2 起，answer 估算对齐封卡实际元素数（按 `_split_long_text` 分块数），answer 具备内部拆分能力（`split_answer_segment`），拆卡判断不再因估算偏低而失效。
+飞书硬限制 200 元素/卡片（**含嵌套元素**，如 collapsible_panel 内的 title/icon/children 都计入）。线性模式阈值设为 150（预留 50 给 footer + 图片提取 + 波动）。
+v0.11.0 起，超限时自动触发拆卡，设置 `element_limit_hit` 标志后跳过新增段，拆卡成功后重置标志和元素计数。
+v0.12.2 起，answer 估算对齐封卡实际元素数（按 `_split_long_text` 分块数），answer 具备内部拆分能力（`split_answer_segment`）。
+v0.18.2 起，answer 估算新增图片元素计数（`_count_images_in_text`），阈值从 180 降至 150。
 
 ### 10.7.1 Answer 估算偏差（v0.12.2 修复）
 **问题**: 流式阶段 answer 只占 1 个 streaming markdown element，但封卡时 `_split_long_text` 会将长文本拆成 N 个 markdown 元素。旧代码 `_estimate_segment_elements` 对 answer 恒返回 1，导致流式阶段判断"不超限"，封卡时实际超限——拆卡后依旧超元素。
@@ -399,6 +400,7 @@ hermes gateway restart
 
 | 版本 | 日期 | 核心变更 |
 |------|------|----------|
+| v0.18.2 | 2026-06-10 | 拆卡阈值修正（180→150，含图片估算）+ answer 图片元素计数 |
 | v0.18.1 | 2026-06-08 | GatewayRunner 延迟补丁 + edit_message chat_id 参数修复 + 拆卡跑马灯修复 + 线性模式中断面板位置优化 + 面板展开配置控制 |
 | v0.18.0 | 2026-06-07 | 插件更新命令修正 + 启动配置诊断日志 + 网关卡片路径决策点日志 + FeishuClient 初始化诊断日志 |
 | v0.17.0 | 2026-06-07 | 图片 Card 2.0 升级 + 完成态图片独立渲染 + 页脚去💾 + 时间感知模式重命名 |
@@ -455,4 +457,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-08 | Version: 0.18.1*
+*Last updated: 2026-06-10 | Version: 0.18.2*
