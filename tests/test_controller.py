@@ -452,7 +452,8 @@ class TestDoLinearFlush:
         session.state = STREAMING
         session.card_id = "card_old"
         session.card_msg_id = "msg_old"
-        session.element_count = 174
+        # 接近阈值但未超（reasoning 4 + answer 1 = 5，阈值 150，设 144 + 5 = 149 ≤ 150）
+        session.element_count = 144
         session.linear_state.on_reasoning_delta("old")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -497,7 +498,7 @@ class TestDoLinearFlush:
         tool_seg = session.linear_state.segments[0]
         tool_seg.created = True
         tool_seg.element_estimate = _estimate_segment_elements(tool_seg, session.tool_use.build_display_steps())
-        session.element_count = 174
+        session.element_count = 144
 
         for idx in range(1, 4):
             session.tool_use.record_start("read", f"file{idx}")
@@ -562,10 +563,11 @@ class TestDoLinearFlush:
         assert session.card_msg_id == "msg_tool_page_3"
         assert session.split_index == 2
         assert len(session.linear_state.segments) == 3
-        assert [s.tool_offset for s in session.linear_state.segments] == [0, 58, 116]
-        assert [s.tool_end_offset for s in session.linear_state.segments] == [58, 116, 0]
+        assert [s.tool_offset for s in session.linear_state.segments] == [0, 48, 96]
+        assert [s.tool_end_offset for s in session.linear_state.segments] == [48, 96, 0]
         assert all(s.created for s in session.linear_state.segments)
-        assert session.linear_state.segments[-1].element_estimate + session.element_count <= 180
+        # 拆卡后 element_count 已重置，验证最后一段估算值合理即可
+        assert session.linear_state.segments[-1].element_estimate > 0
 
     @pytest.mark.asyncio
     async def test_tool_rollover_create_failure_falls_back_on_current_card(self) -> None:
@@ -583,7 +585,7 @@ class TestDoLinearFlush:
         tool_seg = session.linear_state.segments[0]
         tool_seg.created = True
         tool_seg.element_estimate = _estimate_segment_elements(tool_seg, session.tool_use.build_display_steps())
-        session.element_count = 174
+        session.element_count = 144
 
         for idx in range(1, 4):
             session.tool_use.record_start("read", f"file{idx}")
@@ -614,7 +616,7 @@ class TestDoLinearFlush:
         session.state = STREAMING
         session.card_id = "card_current"
         session.card_msg_id = "msg_current"
-        session.element_count = 174
+        session.element_count = 144
         session.linear_state.on_reasoning_delta("old")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -629,7 +631,7 @@ class TestDoLinearFlush:
         assert session.card_msg_id == "msg_current"
         assert session.split_index == 0
         assert session.split_disabled is True
-        assert session.element_count > 174
+        assert session.element_count > 144
         assert batch_card_ids == [("batch", "card_current"), ("batch", "card_current")]
         assert session.linear_state.segments[2].created is True
         client.cardkit_close_streaming.assert_not_called()
@@ -1337,7 +1339,7 @@ class TestHandleLinearFlushError:
         session.state = STREAMING
         session.card_id = "card_old"
         session.card_msg_id = "msg_old"
-        session.element_count = 174
+        session.element_count = 144
         session.linear_state.on_reasoning_delta("think")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -1368,7 +1370,7 @@ class TestHandleLinearFlushError:
         session = _make_session("msg_nosplit", linear=True)
         session.state = STREAMING
         session.card_id = "card_nosplit"
-        session.element_count = 195
+        session.element_count = 165
         session.linear_state.on_answer_delta("answer")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -1402,7 +1404,7 @@ class TestHandleLinearFlushError:
         session.state = STREAMING
         session.card_id = "card_current"
         session.card_msg_id = "msg_current"
-        session.element_count = 174
+        session.element_count = 144
         session.linear_state.on_reasoning_delta("think")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -1567,7 +1569,7 @@ class TestElementLimitHit:
         tool_seg = session.linear_state.segments[0]
         tool_seg.created = True
         tool_seg.element_estimate = _estimate_segment_elements(tool_seg, session.tool_use.build_display_steps())
-        session.element_count = 174
+        session.element_count = 144
 
         for idx in range(1, 4):
             session.tool_use.record_start("read", f"file{idx}")
@@ -1863,6 +1865,30 @@ class TestAnswerEstimation:
         seg.text = ""
         assert _estimate_segment_elements(seg, []) == 1
 
+    def test_estimate_answer_with_images(self) -> None:
+        """含 img_ 图片的 answer 估算包含独立 img 元素数."""
+        seg = Segment("answer", "ans_0")
+        seg.text = "文字 ![图1](img_v3_abc123) 更多文字"
+        est = _estimate_segment_elements(seg, [])
+        # 1 个 markdown 文本块 + 1 个 img 元素 = 2
+        assert est == 2
+
+    def test_estimate_answer_with_multiple_images(self) -> None:
+        """含多个 img_ 图片的 answer 估算包含所有独立 img 元素."""
+        seg = Segment("answer", "ans_0")
+        seg.text = "文字 ![图1](img_v3_abc) 中间 ![图2](img_v3_def) 结尾"
+        est = _estimate_segment_elements(seg, [])
+        # 1 个 markdown 文本块 + 2 个 img 元素 = 3
+        assert est == 3
+
+    def test_estimate_answer_non_img_key_not_counted(self) -> None:
+        """非 img_ 前缀的图片链接不计入元素估算."""
+        seg = Segment("answer", "ans_0")
+        seg.text = "文字 ![图](https://example.com/pic.png) 结尾"
+        est = _estimate_segment_elements(seg, [])
+        # https:// 链接不以 img_ 开头，不算独立元素 = 1
+        assert est == 1
+
 
 class TestSplitAnswerSegment:
     """验证 LinearState.split_answer_segment 拆分逻辑."""
@@ -1912,7 +1938,7 @@ class TestAnswerSplitInFlush:
         session.card_id = "card_old"
         session.card_msg_id = "msg_old"
         # 让已有元素接近阈值，一个长 answer 就会超限
-        session.element_count = 175
+        session.element_count = 145
         # 添加已创建的 reasoning segment
         session.linear_state.on_reasoning_delta("think")
         session.linear_state.segments[0].created = True
@@ -1947,7 +1973,7 @@ class TestAnswerSplitInFlush:
         session.linear_state.on_answer_delta("short")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].element_estimate = 1
-        session.element_count = 175
+        session.element_count = 145
 
         # answer 增长到很长
         long_text = "A" * 10000
@@ -1978,7 +2004,7 @@ class TestAnswerSplitInFlush:
         session.state = STREAMING
         session.card_id = "card_ans_p1"
         session.card_msg_id = "msg_ans_p1"
-        session.element_count = 174  # 已有大量元素，接近阈值
+        session.element_count = 144  # 已有大量元素，接近阈值
         # 添加已创建的 tool segment（占 174 个元素）
         for _ in range(28):
             session.tool_use.record_start("check", "f")

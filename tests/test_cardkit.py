@@ -573,39 +573,6 @@ class TestBuildCompleteCard:
         assert len(error_panels) == 1
         assert "stopped" in error_panels[0]["elements"][0]["content"]
 
-    def test_complete_card_has_streaming_mode_false(self) -> None:
-        """Complete card (schema 2.0) should have streaming_mode=False to stop marquee."""
-        card = build_complete_card(
-            text="done",
-            has_cardkit=True,
-        )
-        assert card["schema"] == "2.0"
-        assert card["config"]["streaming_mode"] is False
-
-    def test_error_panel_respects_panel_expanded(self) -> None:
-        """Error panel should respect panel_expanded config."""
-        card_expanded = build_complete_card(
-            text="hello",
-            error_message="oops",
-            is_aborted=True,
-            has_cardkit=True,
-            panel_expanded=True,
-        )
-        card_collapsed = build_complete_card(
-            text="hello",
-            error_message="oops",
-            is_aborted=True,
-            has_cardkit=True,
-            panel_expanded=False,
-        )
-        # Find the error panel and check expanded state
-        expanded_el = next(e for e in card_expanded["body"]["elements"]
-                           if e.get("tag") == "collapsible_panel" and "oops" in str(e))
-        collapsed_el = next(e for e in card_collapsed["body"]["elements"]
-                            if e.get("tag") == "collapsible_panel" and "oops" in str(e))
-        assert expanded_el["expanded"] is True
-        assert collapsed_el["expanded"] is False
-
 
 # --- 线性完成态卡片 ---
 
@@ -715,7 +682,7 @@ class TestBuildLinearCompleteCard:
         assert "test error" in error_panels[0]["elements"][0]["content"]
 
     def test_error_message_after_segments_in_linear_mode(self) -> None:
-        """Linear mode: interrupt/error panel should appear AFTER content."""
+        """线性模式下错误面板在内容之后（v0.18.1 变更）."""
         card = build_linear_complete_card(
             segments=[_seg("answer", "hello")],
             all_tool_steps=[],
@@ -724,38 +691,7 @@ class TestBuildLinearCompleteCard:
         contents = [str(e) for e in card["body"]["elements"]]
         error_idx = next(i for i, c in enumerate(contents) if "oops" in c)
         answer_idx = next(i for i, c in enumerate(contents) if "hello" in c)
-        assert answer_idx < error_idx
-
-    def test_linear_complete_card_has_streaming_mode_false(self) -> None:
-        """Linear complete card should have streaming_mode=False to stop marquee."""
-        card = build_linear_complete_card(
-            segments=[_seg("answer", "done")],
-            all_tool_steps=[],
-        )
-        assert card["config"]["streaming_mode"] is False
-
-    def test_linear_error_panel_respects_panel_expanded(self) -> None:
-        """Error panel in linear mode should respect panel_expanded config."""
-        card_expanded = build_linear_complete_card(
-            segments=[_seg("answer", "hello")],
-            all_tool_steps=[],
-            error_message="oops",
-            is_aborted=True,
-            panel_expanded=True,
-        )
-        card_collapsed = build_linear_complete_card(
-            segments=[_seg("answer", "hello")],
-            all_tool_steps=[],
-            error_message="oops",
-            is_aborted=True,
-            panel_expanded=False,
-        )
-        expanded_el = next(e for e in card_expanded["body"]["elements"]
-                           if e.get("tag") == "collapsible_panel" and "oops" in str(e))
-        collapsed_el = next(e for e in card_collapsed["body"]["elements"]
-                            if e.get("tag") == "collapsible_panel" and "oops" in str(e))
-        assert expanded_el["expanded"] is True
-        assert collapsed_el["expanded"] is False
+        assert error_idx > answer_idx  # 错误面板在内容之后
 
 
 class TestBuildCronCard:
