@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.18.0 (master 分支) |
+| 版本 | 0.18.1 (master 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.18.0")
+plugin.yaml (唯一版本号: "0.18.1")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -399,6 +399,7 @@ hermes gateway restart
 
 | 版本 | 日期 | 核心变更 |
 |------|------|----------|
+| v0.18.1 | 2026-06-08 | GatewayRunner 延迟补丁 + edit_message chat_id 参数修复 + 拆卡跑马灯修复 + 线性模式中断面板位置优化 + 面板展开配置控制 |
 | v0.18.0 | 2026-06-07 | 插件更新命令修正 + 启动配置诊断日志 + 网关卡片路径决策点日志 + FeishuClient 初始化诊断日志 |
 | v0.17.0 | 2026-06-07 | 图片 Card 2.0 升级 + 完成态图片独立渲染 + 页脚去💾 + 时间感知模式重命名 |
 | v0.8.5 | 2026-05-26 | 初始 fork，修复桥接导入、回调重复、contextvars 跨线程 |
@@ -454,4 +455,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-07 | Version: 0.18.0*
+*Last updated: 2026-06-08 | Version: 0.18.1*

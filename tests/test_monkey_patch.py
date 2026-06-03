@@ -761,3 +761,35 @@ class TestStartupDelay:
         source = inspect.getsource(_schedule_direct_patch)
         assert "2s delay" in source, \
             "Log message should mention '2s delay'"
+
+
+# ── v0.18.1: GatewayRunner delayed patch + edit chat_id fix ──
+
+
+class TestApplyGatewayRunnerPatches:
+    """v0.18.1: _apply_gateway_runner_patches helper for delayed GatewayRunner patching."""
+
+    def test_apply_gateway_runner_patches_function_exists(self) -> None:
+        """_apply_gateway_runner_patches should exist as a callable."""
+        from hermes_lark_streaming.monkey_patch import _apply_gateway_runner_patches
+        assert callable(_apply_gateway_runner_patches)
+
+
+class TestInterceptedEditChatId:
+    """v0.18.1: _intercepted_edit should accept chat_id as explicit parameter."""
+
+    def test_intercepted_edit_has_chat_id_param(self) -> None:
+        """_intercepted_edit should accept chat_id as explicit parameter."""
+        import inspect
+        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_edit
+
+        # Create a dummy orig_edit and wrap it
+        async def dummy_edit(self, chat_id, message_id, content, **kwargs):
+            pass
+
+        wrapped = _wrap_feishu_adapter_edit(dummy_edit)
+        sig = inspect.signature(wrapped)
+        params = list(sig.parameters.keys())
+        assert "chat_id" in params, f"chat_id not in params: {params}"
+        assert "message_id" in params
+        assert "content" in params

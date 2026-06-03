@@ -611,7 +611,7 @@ def build_complete_card(
     # 可折叠面板，与推理面板、工具面板视觉风格一致
     if error_message:
         elements.append(_build_error_panel(
-            error_message, is_aborted=is_aborted, expanded=True,
+            error_message, is_aborted=is_aborted, expanded=panel_expanded,
         ))
 
     content = _downgrade_tables(optimize_markdown_style(text or _T["done"][0]))
@@ -648,6 +648,7 @@ def build_complete_card(
 
     if has_cardkit:
         card["schema"] = "2.0"
+        card["config"]["streaming_mode"] = False
         card["body"] = {"elements": elements}
     else:
         card["elements"] = elements
@@ -670,12 +671,6 @@ def build_linear_complete_card(
     """线性模式完成态卡片 — 按 segments 顺序渲染."""
     elements: list[dict] = []
     has_answer = False
-
-    # ── 错误/中断面板 ──
-    if error_message:
-        elements.append(_build_error_panel(
-            error_message, is_aborted=is_aborted, expanded=True,
-        ))
 
     for seg in segments:
         if seg.type == "reasoning":
@@ -703,6 +698,12 @@ def build_linear_complete_card(
     if not has_answer:
         elements.append({"tag": "markdown", "content": _T["done"][0]})
 
+    # ── 错误/中断面板（线性模式下放在内容之后） ──
+    if error_message:
+        elements.append(_build_error_panel(
+            error_message, is_aborted=is_aborted, expanded=panel_expanded,
+        ))
+
     elements.extend(
         _build_footer_elements(
             footer_data,
@@ -725,6 +726,7 @@ def build_linear_complete_card(
         "config": {
             "wide_screen_mode": True,
             "update_multi": True,
+            "streaming_mode": False,
             "locales": _LOCALES,
         },
     }

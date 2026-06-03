@@ -83,6 +83,11 @@ _started_msg_ids_lock = threading.Lock()
 _gateway_cards: dict[str, dict[str, Any]] = {}
 _gateway_cards_lock = threading.Lock()
 
+# ── GatewayRunner delayed-patch guard ────────────────────────────────
+# Set to True once _apply_gateway_runner_patches() succeeds (either
+# immediately or from the delayed-poll thread).  Prevents double-patching.
+_gw_runner_patched: bool = False
+
 
 def _get_event_message_id() -> str | None:
     ctx = _msg_ctx.get()
@@ -1476,7 +1481,7 @@ def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
     message that was never converted to a card), we pass through to the
     original ``edit_message()``.
     """
-    async def _intercepted_edit(self_feishu, message_id, content, metadata=None, **kwargs):
+    async def _intercepted_edit(self_feishu, chat_id, message_id, content, metadata=None, **kwargs):
         # ── Check if this message_id is a gateway card ──
         with _gateway_cards_lock:
             card_info = _gateway_cards.get(message_id)
@@ -1506,7 +1511,7 @@ def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
 
                         category = _classify_gateway_message(cleaned)
                         updated = await ctrl._do_gateway_card_update(
-                            chat_id=card_info["chat_id"],
+                            chat_id=card_info.get("chat_id", chat_id),
                             card_msg_id=message_id,
                             card_id=card_info.get("card_id"),
                             content=cleaned.strip(),
@@ -1539,10 +1544,10 @@ def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
         # This prevents: "edit_message() got an unexpected keyword argument 'metadata'"
         _fallback_kwargs = {k: v for k, v in kwargs.items() if k != "metadata"}
         try:
-            return await orig_edit(self_feishu, message_id, content, **_fallback_kwargs)
+            return await orig_edit(self_feishu, chat_id, message_id, content, **_fallback_kwargs)
         except TypeError:
             # If the original still rejects kwargs, try with no extra kwargs
-            return await orig_edit(self_feishu, message_id, content)
+            return await orig_edit(self_feishu, chat_id, message_id, content)
 
     return _intercepted_edit
 
@@ -2014,6 +2019,60 @@ def _detect_hermes_layout() -> dict[str, bool]:
     return layout
 
 
+def _apply_gateway_runner_patches() -> bool:
+    """Apply the three critical GatewayRunner method patches.
+
+    Patches:
+      - ``_handle_message``           → NORMALIZE hook
+      - ``_handle_message_with_agent`` → START + ABORT/INTERRUPT hooks
+      - ``_run_agent``                → event_message_id injection + COMPLETE hook
+      - ``_run_background_task``       → START/COMPLETE for background tasks (optional)
+
+    Returns ``True`` if the patches were applied successfully,
+    ``False`` if gateway.run could not be imported or was incompatible.
+
+    Thread-safe: guarded by ``_gw_runner_patched`` flag so the delayed
+    thread won't double-patch if the immediate path already succeeded.
+    """
+    global _gw_runner_patched
+
+    if _gw_runner_patched:
+        return True  # Already patched (e.g. immediate path succeeded)
+
+    try:
+        from gateway.run import GatewayRunner
+    except (ImportError, AttributeError):
+        return False  # Not available yet
+
+    try:
+        GatewayRunner._handle_message = _wrap_handle_message(GatewayRunner._handle_message)
+        GatewayRunner._handle_message_with_agent = _wrap_handle_message_with_agent(
+            GatewayRunner._handle_message_with_agent
+        )
+        GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
+
+        # ── Background task patch ──
+        # Wraps _run_background_task to inject START/COMPLETE hooks
+        # so /background tasks also get streaming cards.
+        try:
+            GatewayRunner._run_background_task = _wrap_run_background_task(
+                GatewayRunner._run_background_task
+            )
+            _logger.info("hermes-lark-streaming: GatewayRunner._run_background_task patched ✓")
+        except AttributeError:
+            _logger.debug("hermes-lark-streaming: _run_background_task not found, background cards disabled")
+
+        _gw_runner_patched = True
+        return True
+    except (ImportError, AttributeError) as e:
+        _logger.error(
+            "hermes-lark-streaming: GatewayRunner patch FAILED — "
+            "gateway.run found but incompatible. "
+            "Streaming cards will NOT work. Error: %s", e,
+        )
+        return False
+
+
 def apply_patches() -> None:
     """Apply all runtime monkey patches to ``GatewayRunner`` and ``AIAgent``.
 
@@ -2050,44 +2109,47 @@ def apply_patches() -> None:
     # ── Patch GatewayRunner ──
     # This is the core patch — without it, streaming cards cannot work.
     gw_patched = False
+    gw_delayed = False
     if layout["has_gateway_run"]:
-        try:
-            from gateway.run import GatewayRunner
-
-            GatewayRunner._handle_message = _wrap_handle_message(GatewayRunner._handle_message)
-            GatewayRunner._handle_message_with_agent = _wrap_handle_message_with_agent(
-                GatewayRunner._handle_message_with_agent
-            )
-            GatewayRunner._run_agent = _wrap_run_agent(GatewayRunner._run_agent)
-
-            # ── Background task patch ──
-            # Wraps _run_background_task to inject START/COMPLETE hooks
-            # so /background tasks also get streaming cards.
-            try:
-                GatewayRunner._run_background_task = _wrap_run_background_task(
-                    GatewayRunner._run_background_task
-                )
-                _logger.info("hermes-lark-streaming: GatewayRunner._run_background_task patched ✓")
-            except AttributeError:
-                _logger.debug("hermes-lark-streaming: _run_background_task not found, background cards disabled")
-
+        # gateway.run already loaded — patch immediately
+        if _apply_gateway_runner_patches():
             gw_patched = True
             _logger.info("hermes-lark-streaming: GatewayRunner patched ✓")
-        except (ImportError, AttributeError) as e:
-            _logger.error(
-                "hermes-lark-streaming: GatewayRunner patch FAILED — "
-                "gateway.run found but incompatible. "
-                "Streaming cards will NOT work. Error: %s", e,
-            )
     else:
-        _logger.error(
-            "hermes-lark-streaming: gateway.run NOT FOUND — "
-            "this Hermes version may be too old or installed incorrectly. "
-            "Streaming cards will NOT work. "
-            "Please check: 1) Hermes is running via gateway mode, "
-            "2) Hermes version >= v0.5.0, "
-            "3) Re-run: hermes setup && hermes gateway start",
+        # gateway.run not yet loaded — start delayed-patch poll thread
+        _logger.info(
+            "hermes-lark-streaming: gateway.run not loaded yet — "
+            "starting delayed patch poll (2s interval, 60s timeout)",
         )
+        gw_delayed = True
+
+        def _delayed_gw_patch():
+            """Poll for gateway.run and apply GatewayRunner patches once available."""
+            deadline = time.monotonic() + 60.0  # 60-second timeout
+            while time.monotonic() < deadline:
+                time.sleep(2.0)  # Poll every 2 seconds
+                if _apply_gateway_runner_patches():
+                    _logger.info(
+                        "hermes-lark-streaming: GatewayRunner patched (delayed) ✓"
+                    )
+                    return
+                _logger.debug(
+                    "hermes-lark-streaming: delayed patch — gateway.run still not available, "
+                    "retrying (%.0fs remaining)",
+                    deadline - time.monotonic(),
+                )
+            # Timeout — gateway.run never became available
+            _logger.error(
+                "hermes-lark-streaming: gateway.run NOT FOUND after 60s — "
+                "this Hermes version may be too old or installed incorrectly. "
+                "Streaming cards will NOT work. "
+                "Please check: 1) Hermes is running via gateway mode, "
+                "2) Hermes version >= v0.5.0, "
+                "3) Re-run: hermes setup && hermes gateway start",
+            )
+
+        _delayed_thread = threading.Thread(target=_delayed_gw_patch, daemon=True)
+        _delayed_thread.start()
 
     # ── Patch run_conversation (strategy depends on Hermes layout) ──
     # Both strategies are functionally equivalent — they both call
@@ -2190,10 +2252,10 @@ def apply_patches() -> None:
         "GatewayRunner=%s, conversation_loop=%s, AIAgent=applied, cron=%s, "
         "background=%s, FeishuAdapter=%s",
         __version__,
-        "✓" if gw_patched else "✗",
+        "✓" if gw_patched else ("pending (delayed poll)" if gw_delayed else "✗"),
         "✓" if _module_patch_applied else "n/a (direct AIAgent used)",
         "✓" if cron_patched else "n/a",
-        "✓" if gw_patched else "n/a",  # background task patch is part of GatewayRunner
+        "✓" if gw_patched else ("pending" if gw_delayed else "n/a"),  # background task patch is part of GatewayRunner
         "✓" if feishu_patched else "✗",
     )
 
