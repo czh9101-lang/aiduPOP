@@ -110,7 +110,7 @@ class ControllerMixin:
             session._card_ready.set()
             _logger.info(
                 "card created: msg=%s cardkit=%s card_id=%s",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 session.use_cardkit,
                 (session.card_id or "")[:12],
             )
@@ -132,7 +132,7 @@ class ControllerMixin:
         if not session.text.is_dirty(display) and not session.reasoning_dirty:
             _logger.info(
                 "update_card skipped (not dirty): msg=%s len=%d",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 len(display),
             )
             return
@@ -142,7 +142,7 @@ class ControllerMixin:
 
         _logger.info(
             "update_card: msg=%s seq=%d len=%d cardkit=%s",
-            session.message_id[:12],
+            (session.message_id or "?")[:12],
             session.sequence + 1,
             len(display),
             session.use_cardkit,
@@ -190,7 +190,7 @@ class ControllerMixin:
                 return
 
             if e.code == CARDKIT_STREAMING_CLOSED:
-                _logger.info("streaming mode closed, skipping update: msg=%s", session.message_id[:12])
+                _logger.info("streaming mode closed, skipping update: msg=%s", (session.message_id or "?")[:12])
                 return
 
             if e.code == CARDKIT_CONTENT_FAILED:
@@ -238,7 +238,7 @@ class ControllerMixin:
             session.sequence += 1
             _logger.info(
                 "tool_update: msg=%s seq=%d action=%s steps=%d",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 session.sequence,
                 "add" if not session.tool_panel_added else "update",
                 len(tool_steps),
@@ -264,7 +264,7 @@ class ControllerMixin:
             session.sequence += 1
             _logger.info(
                 "reasoning_update: msg=%s seq=%d len=%d",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 session.sequence,
                 len(session.reasoning_text),
             )
@@ -301,7 +301,7 @@ class ControllerMixin:
         except asyncio.TimeoutError:
             _logger.warning(
                 "complete: card creation timed out, msg=%s",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
             )
 
         # If card creation failed, we cannot render a completion card.
@@ -309,7 +309,7 @@ class ControllerMixin:
         if not session.card_id and not session.card_msg_id:
             _logger.info(
                 "complete: no card to complete, msg=%s state=%s",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 session.state,
             )
             session.state = FAILED
@@ -318,7 +318,7 @@ class ControllerMixin:
         display = session.text.display_text
         _logger.info(
             "do_complete: msg=%s state=%s display_len=%d cardkit=%s seq=%d",
-            session.message_id[:12],
+            (session.message_id or "?")[:12],
             session.state,
             len(display),
             session.use_cardkit,

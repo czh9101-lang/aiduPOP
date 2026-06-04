@@ -24,7 +24,7 @@ def _safe_hook(
 
     def decorator(func: Callable) -> Callable:
         @wraps(func)
-        def wrapper(*, message_id: str, **kwargs: Any) -> Any:
+        def wrapper(*, message_id: str | None = None, **kwargs: Any) -> Any:
             try:
                 ctrl = get_controller()
                 if not ctrl.enabled:

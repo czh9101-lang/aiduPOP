@@ -1,5 +1,14 @@
 # 更新日志 / Changelog
 
+## v0.18.3 (2026-06-11)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Bug | `message_id=None` 时 `message_id[:12]` 触发 `TypeError: 'NoneType' object is not subscriptable` | Hermes 自动恢复会话（`resume_pending`）产生 `message_id=None` 的合成事件，代码中 `message_id[:12]` 对 `None` 切片崩溃 | 将所有未防护的 `message_id[:12]` / `session.message_id[:12]` 替换为 `(message_id or "?")[:12]` / `(session.message_id or "?")[:12]`，共 36 处（controller_linear_mixin.py 14处、controller.py 13处、controller_mixin.py 9处） |
+| 2 | Bug | 封卡 300305 元素超限时直接降级为"仅 answer 文本"，丢失所有推理面板和工具面板 | `_do_linear_split` 封存旧卡时，如果封卡内容超 200 元素限制触发 300305，旧代码直接构建"仅 answer 文本"的极简封卡，丢弃所有推理和工具面板；`_do_linear_complete_inner` 完成阶段同样直接移除 reasoning segment | ① 新增 `build_linear_compact_seal_card()` 构建紧凑封卡：保留所有面板类型（推理≤2000字、answer≤4000字、工具步骤仅保留标题），大幅减少元素数同时保留信息；② `_do_linear_split` 改为渐进降级：全量封卡 → compact seal → minimal seal；③ `_simplify_segments_for_complete` 改为两级降级：Level 1 截断保留面板、Level 2 移除推理面板；④ `_do_linear_complete_inner` 完成阶段同样支持两级降级 |
+| 3 | Docs | SKILL.md 路线图精简 | — | 移除 3 个过时/不适用条目；新增 10.11 message_id NoneType 下标崩溃、10.12 封卡 300305 元素超限丢失面板两个陷阱条目；新增 v0.18.3 版本历史条目 |
+| 4 | Chore | README 版本徽章未随版本号更新 | 版本号更新时遗漏了中英文 README 中的 shields.io badge 版本号 | 中英文 README 版本徽章统一更新至 0.18.3 |
+
 ## v0.18.2 (2026-06-10)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
