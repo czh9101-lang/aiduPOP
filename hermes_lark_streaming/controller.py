@@ -237,14 +237,14 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         loop = self._get_loop()
         if loop is None:
-            _logger.warning("no event loop available, skipping: msg=%s", message_id[:12])
+            _logger.warning("no event loop available, skipping: msg=%s", (message_id or "?")[:12])
             return
         session = CardSession(message_id, chat_id, loop)
         self._sessions[message_id] = session
         if anchor_id and anchor_id != message_id:
             session.anchor_id = anchor_id
             self._sessions[anchor_id] = session
-        _logger.info("session created: msg=%s chat=%s anchor=%s", message_id[:12], chat_id[:12], (anchor_id or "")[:12])
+        _logger.info("session created: msg=%s chat=%s anchor=%s", (message_id or "?")[:12], chat_id[:12], (anchor_id or "")[:12])
 
         if self._cfg.linear:
             self._fire_and_forget(self._do_create_linear_card(session), loop)
@@ -305,7 +305,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         if not session.reasoning_start:
             session.reasoning_start = time.time()
-            _logger.info("reasoning started: msg=%s", message_id[:12])
+            _logger.info("reasoning started: msg=%s", (message_id or "?")[:12])
 
         session.reasoning_text += text
         session.reasoning_dirty = True
@@ -388,7 +388,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         session.state = ABORTED
         session.flush.mark_completed()
-        _logger.info("on_aborted: msg=%s state=ABORTED", message_id[:12])
+        _logger.info("on_aborted: msg=%s state=ABORTED", (message_id or "?")[:12])
 
         self._complete_session(session)
 
@@ -444,7 +444,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
     def on_completed(
         self,
         *,
-        message_id: str,
+        message_id: str | None,
         answer: str = "",
         duration: float = 0.0,
         model: str = "",
@@ -466,6 +466,13 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         if not self.enabled:
             return False
 
+        # ── message_id 空值守卫 ──
+        # 部分飞书事件（如系统消息、reaction 等）可能不携带 message_id，
+        # 导致 message_id=None，后续 message_id[:12] 会触发 TypeError。
+        if not message_id:
+            _logger.warning("on_completed: missing message_id, skipping")
+            return False
+
         # ── 状态机幂等守卫 ──
         # 先做直接查找（绕过 _TERMINAL 过滤），检查是否已在完成中/已完成。
         # COMPLETING: 完成流程已启动，另一条路径的 on_completed 正在执行
@@ -474,7 +481,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         if direct_session is not None and direct_session.state in (COMPLETING, COMPLETED):
             _logger.info(
                 "on_completed: idempotent, msg=%s state=%s",
-                message_id[:12],
+                (message_id or "?")[:12],
                 direct_session.state,
             )
             return True
@@ -488,7 +495,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 if redir_session is not None and redir_session.state in (COMPLETING, COMPLETED):
                     _logger.info(
                         "on_completed: idempotent (redirected), msg=%s -> %s state=%s",
-                        message_id[:12],
+                        (message_id or "?")[:12],
                         redirected_id[:12],
                         redir_session.state,
                     )
@@ -496,7 +503,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 session = self._get_active_session(redirected_id)
                 _logger.info(
                     "on_completed: redirect msg=%s -> msg=%s",
-                    message_id[:12],
+                    (message_id or "?")[:12],
                     redirected_id[:12],
                 )
             if session is None:
@@ -505,13 +512,13 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         # 卡片创建失败 → 交回 gateway 正常回复
         if session.state == FAILED:
-            _logger.info("on_completed: msg=%s state=FAILED, yielding to gateway", message_id[:12])
+            _logger.info("on_completed: msg=%s state=FAILED, yielding to gateway", (message_id or "?")[:12])
             self._cleanup(message_id)
             return False
 
         _logger.info(
             "on_completed: msg=%s has_card=%s state=%s use_cardkit=%s",
-            message_id[:12],
+            (message_id or "?")[:12],
             bool(session.card_msg_id),
             session.state,
             session.use_cardkit,
@@ -688,7 +695,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         except Exception:
             _logger.warning(
                 "linear complete with fallback failed: msg=%s",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 exc_info=True,
             )
             await self._send_text_fallback(session)
@@ -702,7 +709,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         except Exception:
             _logger.warning(
                 "complete with fallback failed: msg=%s",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 exc_info=True,
             )
             await self._send_text_fallback(session)
@@ -729,13 +736,13 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             await self._client.reply_text(reply_id, content)
             _logger.info(
                 "text fallback sent: msg=%s len=%d",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 len(content),
             )
         except Exception:
             _logger.debug(
                 "text fallback failed: msg=%s",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 exc_info=True,
             )
 

@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.18.2 (master 分支) |
+| 版本 | 0.18.3 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -74,8 +74,8 @@ monkey_patch.py (运行时拦截)
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async；`on_message_completed` 传递 cache tokens |
 | `controller.py` | 681 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记；footer 新增 `cache_read_tokens`/`cache_write_tokens` |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
-| `controller_linear_mixin.py` | 810 | 线性模式编排 | 拆卡阈值 150 元素（飞书 200 含嵌套，预留 50）；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数（含 `_count_images_in_text` 图片计数）；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算 |
-| `cardkit.py` | 712 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%）；无 emoji 头部（已移除 `_CATEGORY_ICONS`） |
+| `controller_linear_mixin.py` | 1130 | 线性模式编排 | 拆卡阈值 150 元素（飞书 200 含嵌套，预留 50）；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数（含 `_count_images_in_text` 图片计数）；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算；封卡 300305 渐进降级（compact seal → minimal seal）；`message_id` NoneType 防护；`_simplify_segments_for_complete` 两级降级 |
+| `cardkit.py` | 810 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；`build_linear_compact_seal_card()` 封卡渐进降级（保留面板+截断内容）；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%）；无 emoji 头部（已移除 `_CATEGORY_ICONS`） |
 | `cardkit_i18n.py` | 45 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数；新增 `cache` 条目 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤20)、图片 key 剥离、长文本分块(2400 chars) |
 | `config.py` | 190 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer `[status, elapsed, model, compression_exhausted]`（`cache` 需手动添加）；`streaming_panel_expanded` + `print_strategy` 配置；`_get_hermes_config_path()` 动态路径（多 Profile 支持） |
@@ -99,7 +99,7 @@ monkey_patch.py (运行时拦截)
 ### 4.1 版本号：plugin.yaml 为唯一真值源
 
 ```
-plugin.yaml (唯一版本号: "0.18.0")
+plugin.yaml (唯一版本号: "0.18.3")
     ├── __init__.py  运行时读取 → 失败: warning + "unknown"
     └── setup.py     构建时读取 → 失败: FileNotFoundError / ValueError
 pyproject.toml: dynamic = ["version"] (不存版本号)
@@ -344,6 +344,16 @@ v0.18.2 起，answer 估算新增图片元素计数（`_count_images_in_text`）
 
 **关键**: 无重复消息——卡片替换纯文本，不是追加；`card_sent=True` 时抑制 Hermes 原始纯文本回复。
 
+### 10.11 message_id NoneType 下标崩溃（v0.18.3 修复）
+**问题**: Hermes 自动恢复会话（`resume_pending`）产生 `message_id=None` 的合成事件，代码中 `message_id[:12]` 对 `None` 切片触发 `TypeError: 'NoneType' object is not subscriptable`。
+**解决**: 将所有未防护的 `message_id[:12]` / `session.message_id[:12]` 替换为 `(message_id or "?")[:12]` / `(session.message_id or "?")[:12]`，共 36 处。
+**模式**: 凡是从外部传入的字符串参数做切片/下标操作时，必须防御 `None` 值——`dict.get("key")` 返回 `None` 不会触发默认值。
+
+### 10.12 封卡 300305 元素超限丢失面板（v0.18.3 修复）
+**问题**: 拆卡封存旧卡时，封卡内容超过飞书 200 元素限制触发 300305，旧代码直接降级为"仅 answer 文本"的极简封卡，丢弃所有推理面板和工具面板。完成阶段同样存在此问题——`_simplify_segments_for_complete` 直接移除所有 reasoning segment。
+**解决**: 渐进降级策略——封卡时依次尝试：① 全量封卡 → ② compact seal（保留所有面板类型但截断内容：推理≤2000字、answer≤4000字、工具步骤仅保留标题）→ ③ minimal seal（仅 answer 文本）。完成阶段同样改为两级降级：Level 1 截断保留面板、Level 2 移除推理面板。
+**模式**: 降级不应一步到位跳到最简方案——中间档位往往能兼顾"可用"和"信息保留"。
+
 ---
 
 ## 11. 测试结构
@@ -400,6 +410,7 @@ hermes gateway restart
 
 | 版本 | 日期 | 核心变更 |
 |------|------|----------|
+| v0.18.3 | 2026-06-11 | Bug C-1 修复：`message_id=None` 时 `message_id[:12]` 崩溃（36处防护）+ Bug C-2 修复：封卡 300305 渐进降级（compact seal 保留面板 → minimal seal）+ SKILL.md 路线图精简 |
 | v0.18.2 | 2026-06-10 | 拆卡阈值修正（180→150，含图片估算）+ answer 图片元素计数 |
 | v0.18.1 | 2026-06-08 | GatewayRunner 延迟补丁 + edit_message chat_id 参数修复 + 拆卡跑马灯修复 + 线性模式中断面板位置优化 + 面板展开配置控制 |
 | v0.18.0 | 2026-06-07 | 插件更新命令修正 + 启动配置诊断日志 + 网关卡片路径决策点日志 + FeishuClient 初始化诊断日志 |
@@ -430,12 +441,11 @@ hermes gateway restart
 - [ ] 拆卡首卡片 `partial` 状态显示
 - [x] ~~`/background` 后台任务卡片~~（v0.12.0 已实现：流式卡片 + 话题回复 + 抑制纯文本）
 - [ ] `background_review` 进度消息放入卡片
-- [ ] DEV → master 兼容性回归测试
-- [ ] 考虑更多 Hermes 版本的兼容性探测
-- [ ] `inject_time` 时区配置化（当前硬编码 CST/UTC+8）
 - [x] ~~`_handle_linear_flush_error` 对 `CARDKIT_ELEMENT_LIMIT` 增加超限拆卡~~（v0.11.0 已实现：超限自动触发拆卡 + `element_limit_hit` 标志）
 - [x] ~~`on_completed` 被 hermes 双调触发 300317~~（v0.11.0 已实现：COMPLETING 状态机守卫 + 300317 幂等成功 + `_was_aborted` 中断标记）
 - [x] ~~拆卡后依旧超元素（answer 估算偏差 + 缺少内部拆分）~~（v0.12.2 已实现：answer 估算对齐封卡实际 + `split_answer_segment` + 动态重新估算 + 相邻 answer 拆卡触发）
+- [x] ~~`message_id=None` 时 `message_id[:12]` 崩溃~~（v0.18.3 已修复：36处 `(message_id or "?")[:12]` 防护）
+- [x] ~~封卡 300305 元素超限丢失推理/工具面板~~（v0.18.3 已修复：渐进降级 compact seal → minimal seal）
 
 ---
 
@@ -457,4 +467,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-10 | Version: 0.18.2*
+*Last updated: 2026-06-11 | Version: 0.18.3*
