@@ -50,6 +50,8 @@ class CardSession:
 
     __slots__ = (
         "_card_ready",
+        "_first_answer_time",
+        "_first_flush_done",
         "_loop",
         "_was_aborted",
         "anchor_id",
@@ -130,6 +132,8 @@ class CardSession:
         self.split_index: int = 0
         self._was_aborted: bool = False
         self.error_message: str = ""
+        self._first_flush_done: bool = False
+        self._first_answer_time: float = 0.0
         self._card_ready: asyncio.Event = asyncio.Event()
 
 
@@ -357,6 +361,15 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         session = self._get_active_session(message_id)
         if session is None or session.guard.should_skip("on_answer"):
             return
+
+        # ── TTFB: 首字到达时间 ──
+        if session._first_answer_time == 0.0:
+            session._first_answer_time = time.monotonic()
+            _logger.debug(
+                "perf: first_answer msg=%s ttfb=%.0fms",
+                (message_id or "?")[:12],
+                (session._first_answer_time - session.created_at) * 1000,
+            )
 
         if session.linear and session.linear_state:
             answer_text = strip_reasoning_tags(text)
@@ -685,6 +698,24 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         session.flush.mark_completed()
         if session.image_resolver:
             session.image_resolver.cancel_pending()
+
+    def _release_session_data(self, session: CardSession) -> None:
+        """完成后释放重数据，仅保留最小元数据供 TTL 追踪.
+
+        在 complete 流程完成后调用，释放 segments、text、tool_use、
+        image_resolver 等占用的内存。session 仍保留 message_id、
+        state、created_at 等元数据直到 _cleanup 清除。
+        """
+        session.linear_state = None
+        if session.text is not None:
+            session.text = TextState()  # type: ignore[assignment]
+        session.tool_use = ToolUseTracker()  # type: ignore[assignment]
+        if session.image_resolver is not None:
+            session.image_resolver.cancel_pending()
+            session.image_resolver = None
+        session.reasoning_text = ""
+        session.reasoning_dirty = False
+        session.footer = {}
 
     def _complete_session(self, session: CardSession) -> None:
         """根据 session 线性/非线性选择完成路径."""

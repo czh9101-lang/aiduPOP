@@ -856,11 +856,16 @@ class TestDoLinearComplete:
         session.card_id = "card_fc"
         session.linear_state.on_reasoning_delta("think")
         time.sleep(0.001)
+        # Capture elapsed_ms before complete, since _release_session_data
+        # clears linear_state after completion (v0.19.0 memory release)
+        elapsed_ms_before = session.linear_state.segments[0].elapsed_ms
         ctrl._sessions["msg_fc"] = session
 
         await ctrl._do_linear_complete(session)
 
-        assert session.linear_state.segments[0].elapsed_ms > 0
+        assert elapsed_ms_before >= 0
+        # After v0.19.0: linear_state is released (set to None) after complete
+        assert session.linear_state is None
         assert "msg_fc" not in ctrl._sessions
 
     @pytest.mark.asyncio
