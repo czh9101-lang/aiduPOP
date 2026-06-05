@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.18.3 (DEV 分支) |
+| 版本 | 0.18.4 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -245,6 +245,7 @@ streaming:
   panel_expanded: false
   streaming_panel_expanded: true   # 流式态面板展开（默认 true）
   print_strategy: delay            # 上屏策略："fast" 或 "delay"（默认）
+  flush_interval_ms: 500           # 流式卡片刷新间隔（毫秒，默认 500，范围 100~2000）
   card_ttl_sec: 600
   inject_time: false
   footer:
@@ -349,6 +350,12 @@ v0.18.2 起，answer 估算新增图片元素计数（`_count_images_in_text`）
 **解决**: 将所有未防护的 `message_id[:12]` / `session.message_id[:12]` 替换为 `(message_id or "?")[:12]` / `(session.message_id or "?")[:12]`，共 36 处。
 **模式**: 凡是从外部传入的字符串参数做切片/下标操作时，必须防御 `None` 值——`dict.get("key")` 返回 `None` 不会触发默认值。
 
+### 10.13 流式刷新间隔过高导致客户端崩溃（v0.18.4 优化）
+
+**问题**: `CARDKIT_MS` 硬编码为 100ms，AI 回复 30 秒 = 300 次卡片重渲染，双智能体同时活跃 = 600 次。飞书手机端频繁解析 JSON + 重渲染 = 卡顿→卡死→闪退。
+**解决**: 默认值改为 500ms（API 调用量降至 1/5）；新增 `streaming.flush_interval_ms` 配置项（100~2000ms），用户可根据设备性能调整。打字机效果不受影响（飞书客户端 15ms 逐字渲染独立于服务端推送频率）。
+**模式**: 性能敏感参数应可配置，不应硬编码——不同网络/设备/负载的最优值不同。
+
 ### 10.12 封卡 300305 元素超限丢失面板（v0.18.3 修复）
 **问题**: 拆卡封存旧卡时，封卡内容超过飞书 200 元素限制触发 300305，旧代码直接降级为"仅 answer 文本"的极简封卡，丢弃所有推理面板和工具面板。完成阶段同样存在此问题——`_simplify_segments_for_complete` 直接移除所有 reasoning segment。
 **解决**: 渐进降级策略——封卡时依次尝试：① 全量封卡 → ② compact seal（保留所有面板类型但截断内容：推理≤2000字、answer≤4000字、工具步骤仅保留标题）→ ③ minimal seal（仅 answer 文本）。完成阶段同样改为两级降级：Level 1 截断保留面板、Level 2 移除推理面板。
@@ -438,9 +445,9 @@ hermes gateway restart
 
 ## 14. 待做事项 (Roadmap)
 
-- [ ] 拆卡首卡片 `partial` 状态显示
+- [x] ~~拆卡封卡 `partial` 状态显示~~（v0.18.4 已实现：每次封卡底部显示"内容未完，继续在下一条消息"）
 - [x] ~~`/background` 后台任务卡片~~（v0.12.0 已实现：流式卡片 + 话题回复 + 抑制纯文本）
-- [ ] `background_review` 进度消息放入卡片
+- [x] ~~`background_review` 进度消息放入卡片~~（v0.18.4 已实现：实时推入可折叠审查面板 + 抑制纯文本）
 - [x] ~~`_handle_linear_flush_error` 对 `CARDKIT_ELEMENT_LIMIT` 增加超限拆卡~~（v0.11.0 已实现：超限自动触发拆卡 + `element_limit_hit` 标志）
 - [x] ~~`on_completed` 被 hermes 双调触发 300317~~（v0.11.0 已实现：COMPLETING 状态机守卫 + 300317 幂等成功 + `_was_aborted` 中断标记）
 - [x] ~~拆卡后依旧超元素（answer 估算偏差 + 缺少内部拆分）~~（v0.12.2 已实现：answer 估算对齐封卡实际 + `split_answer_segment` + 动态重新估算 + 相邻 answer 拆卡触发）
@@ -467,4 +474,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-11 | Version: 0.18.3*
+*Last updated: 2026-06-12 | Version: 0.18.4*

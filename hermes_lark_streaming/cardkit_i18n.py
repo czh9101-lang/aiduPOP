@@ -33,6 +33,9 @@ _T: dict[str, tuple[str, str]] = {
     "interrupt_panel": ("Interrupted", "中断信息"),
     "compression_exhausted": ("⚠ Context Full", "⚠ 上下文已满"),
     "cache": ("Cache {}", "缓存 {}"),
+    "background_review": ("Background Review", "后台审查"),
+    "bg_review_panel": ("Review", "审查"),
+    "partial_continues": ("Continues in next message", "内容未完，继续在下一条消息"),
 }
 
 

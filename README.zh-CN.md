@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.18.3-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.18.4-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -135,6 +135,7 @@ streaming:
   panel_expanded: false      # 完成态卡片中面板（工具、推理）是否保持展开
   streaming_panel_expanded: true  # 流式态卡片面板是否保持展开（默认: true）
   print_strategy: delay      # 卡片上屏策略："fast"（即时）或 "delay"（更丝滑的打字机效果，默认）
+  flush_interval_ms: 500     # 流式卡片刷新间隔（毫秒，默认: 500，范围: 100~2000）
   card_ttl_sec: 600         # 卡片存活检测超时（秒）
   inject_time: false         # 时间感知模式：在用户消息前注入当前时间（详见下方说明）
 

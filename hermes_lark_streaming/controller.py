@@ -613,12 +613,20 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         text: str,
         sender: Callable[[str], Any],
     ) -> bool:
-        """暂存 Hermes background review 通知，等卡片收尾后再发送."""
+        """将后台审查消息推入卡片面板（如果在线性模式），否则暂存等卡片收尾后发送."""
         if not self.enabled or not text or not callable(sender):
             return False
         session = self._get_active_session(message_id)
         if session is None:
             return False
+
+        # Try to push into linear state for real-time card display
+        if session.linear and session.linear_state:
+            session.linear_state.on_background_review(text)
+            self._schedule_linear_flush(session)
+            return True  # Consumed by card, suppress plain text
+
+        # Non-linear mode: defer as before
         with session.deferred_background_review_lock:
             if session.deferred_background_review_closed:
                 return False

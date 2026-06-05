@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.18.3-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.18.4-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -138,6 +138,7 @@ streaming:
   panel_expanded: false      # Keep panels (tools, reasoning) expanded in completed cards
   streaming_panel_expanded: true  # Keep panels expanded during streaming (default: true)
   print_strategy: delay      # Card streaming strategy: "fast" (instant) or "delay" (smoother typewriter, default)
+  flush_interval_ms: 500     # Streaming card refresh interval in ms (default: 500, range: 100-2000)
   card_ttl_sec: 600         # Card alive detection timeout (seconds)
   inject_time: false         # Time awareness mode: inject current time before user messages (see below)
 

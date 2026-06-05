@@ -11,6 +11,7 @@ import re
 
 from .cardkit import (
     _LOADING_ELEMENT_ID,
+    _build_background_review_panel,
     _build_reasoning_panel,
     _build_tool_panel,
     _format_elapsed,
@@ -186,7 +187,7 @@ class LinearControllerMixin:
                 session.card_msg_id = card_msg_id
                 session.use_cardkit = True
                 session.element_count = 1  # loading element
-                session.flush.set_throttle(CARDKIT_MS)
+                session.flush.set_throttle(self._cfg.flush_interval_sec)
             except FeishuAPIError:
                 _logger.info("linear CardKit create failed, falling back to non-linear")
                 card = build_im_fallback_card()
@@ -476,6 +477,40 @@ class LinearControllerMixin:
                 updated_tool_segs.append(seg)
                 new_el_estimates[seg.el_id] = estimate
 
+        # ── Background review panel ──
+        if linear_state.bg_review_messages and not linear_state.bg_review_panel_added:
+            panel = _build_background_review_panel(
+                linear_state.bg_review_messages,
+                expanded=self._cfg.streaming_panel_expanded,
+                element_id=linear_state.bg_review_panel_id,
+            )
+            actions.append({
+                "action": "add_elements",
+                "params": {
+                    "type": "insert_before",
+                    "target_element_id": _LOADING_ELEMENT_ID,
+                    "elements": [panel],
+                },
+            })
+            new_el_ids.add(linear_state.bg_review_panel_id)
+            new_el_estimates[linear_state.bg_review_panel_id] = 4  # panel + header + icon + markdown
+            linear_state.bg_review_panel_added = True
+        elif linear_state.bg_review_panel_added and linear_state.bg_review_messages:
+            # Update existing panel
+            panel = _build_background_review_panel(
+                linear_state.bg_review_messages,
+                expanded=self._cfg.streaming_panel_expanded,
+            )
+            actions.append({
+                "action": "partial_update_element",
+                "params": {
+                    "element_id": linear_state.bg_review_panel_id,
+                    "partial_element": {
+                        "elements": panel["elements"],
+                    },
+                },
+            })
+
         if actions and not await self._do_linear_batch_update(
             session, segments, actions, new_el_ids, new_el_estimates, updated_tool_segs,
         ):
@@ -723,6 +758,8 @@ class LinearControllerMixin:
             footer_fields=[],
             footer_show_label=False,
             panel_expanded=self._cfg.panel_expanded,
+            partial=True,
+            bg_review_messages=linear_state.bg_review_messages if linear_state else None,
         )
 
         try:
@@ -765,6 +802,7 @@ class LinearControllerMixin:
                         segments=seal_segments,
                         all_tool_steps=all_steps,
                         panel_expanded=self._cfg.panel_expanded,
+                        partial=True,
                     )
                     session.sequence += 1
                     await self._client.cardkit_update(old_card_id, compact_seal, sequence=session.sequence)
@@ -781,6 +819,8 @@ class LinearControllerMixin:
                             footer_fields=[],
                             footer_show_label=False,
                             panel_expanded=False,
+                            partial=True,
+                            bg_review_messages=linear_state.bg_review_messages if linear_state else None,
                         )
                         session.sequence += 1
                         await self._client.cardkit_update(old_card_id, minimal_seal, sequence=session.sequence)
@@ -957,6 +997,7 @@ class LinearControllerMixin:
             footer_fields=self._cfg.footer_fields,
             footer_show_label=self._cfg.footer_show_label,
             panel_expanded=self._cfg.panel_expanded,
+            bg_review_messages=linear_state.bg_review_messages if linear_state else None,
         )
 
         streaming_closed = False
@@ -1025,6 +1066,7 @@ class LinearControllerMixin:
                         footer_fields=self._cfg.footer_fields,
                         footer_show_label=self._cfg.footer_show_label,
                         panel_expanded=self._cfg.panel_expanded,
+                        bg_review_messages=linear_state.bg_review_messages if linear_state else None,
                     )
                     continue  # 立即用简化卡片重试，不等待
 

@@ -47,12 +47,18 @@ class LinearState:
 
     __slots__ = (
         "_counter",
+        "bg_review_messages",
+        "bg_review_panel_added",
+        "bg_review_panel_id",
         "segments",
     )
 
     def __init__(self) -> None:
         self._counter = 0
         self.segments: list[Segment] = []
+        self.bg_review_messages: list[str] = []
+        self.bg_review_panel_id: str = "bg_review_panel"
+        self.bg_review_panel_added: bool = False
 
     def _new_reasoning(self, text: str) -> Segment:
         c = self._counter
@@ -106,6 +112,10 @@ class LinearState:
             self.segments[-1].dirty = True
         else:
             self._new_answer(text)
+
+    def on_background_review(self, message: str) -> None:
+        """处理后台审查消息."""
+        self.bg_review_messages.append(message)
 
     def on_tool_event(self, tool_step_count: int) -> None:
         """处理工具调用事件，同类型标记 dirty 否则新建 segment 并终结前序 tool segment."""
@@ -178,5 +188,5 @@ class LinearState:
 
     @property
     def has_dirty(self) -> bool:
-        """是否有需要 flush 的脏段."""
-        return any(seg.dirty for seg in self.segments)
+        """是否有需要 flush 的脏段或未渲染的后台审查消息."""
+        return any(seg.dirty for seg in self.segments) or bool(self.bg_review_messages and not self.bg_review_panel_added)

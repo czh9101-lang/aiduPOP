@@ -92,7 +92,7 @@ class ControllerMixin:
                 session.card_id = card_id
                 session.card_msg_id = card_msg_id
                 session.use_cardkit = True
-                session.flush.set_throttle(CARDKIT_MS)
+                session.flush.set_throttle(self._cfg.flush_interval_sec)
             except FeishuAPIError:
                 card = build_im_fallback_card()
                 card_msg_id = await self._client.reply_card(

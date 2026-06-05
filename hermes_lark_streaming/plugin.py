@@ -56,6 +56,7 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "panel_expanded": False,
     "streaming_panel_expanded": True,
     "print_strategy": "delay",
+    "flush_interval_ms": 500,
     "card_ttl_sec": 600,
     "inject_time": False,
     "footer": {
@@ -214,7 +215,7 @@ def register(ctx: "PluginContext") -> None:
             "hermes-lark-streaming v%s: config diagnostic — "
             "enabled=%s linear=%s gateway_cards=%s inject_time=%s "
             "panel_expanded=%s streaming_panel_expanded=%s print_strategy=%s "
-            "card_ttl=%ss footer_fields=%s show_label=%s",
+            "flush_interval=%sms card_ttl=%ss footer_fields=%s show_label=%s",
             __version__,
             _diag_cfg.enabled,
             _diag_cfg.linear,
@@ -223,6 +224,7 @@ def register(ctx: "PluginContext") -> None:
             _diag_cfg.panel_expanded,
             _diag_cfg.streaming_panel_expanded,
             _diag_cfg.print_strategy,
+            _diag_cfg.flush_interval_ms,
             _diag_cfg.card_duration_sec,
             _diag_cfg.footer_fields,
             _diag_cfg.footer_show_label,

@@ -1,4 +1,11 @@
-# 更新日志 / Changelog
+## v0.18.4 (2026-06-12)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | CardKit 流式刷新间隔可配置 | `CARDKIT_MS` 硬编码为 100ms，无法根据实际场景调整。100ms 的高频刷新在手机端可能导致飞书客户端卡顿甚至闪退（300~600 次重渲染） | ① `CARDKIT_MS` 默认值从 0.100 改为 0.500（500ms）；② 新增 `streaming.flush_interval_ms` 配置项（默认 500，范围 100~2000ms）；③ `controller_linear_mixin.py` 和 `controller_mixin.py` 改为从配置读取刷新间隔；④ `plugin.py` 默认配置和诊断日志同步更新 |
+| 2 | Feature | 拆卡封卡"内容未完"状态显示 | 拆卡后封存的旧卡片无任何提示告诉用户"下面还有内容"，用户可能以为回复被截断 | ① 新增 `partial_continues` i18n 条目；② `build_linear_complete_card` 和 `build_linear_compact_seal_card` 新增 `partial` 参数；③ 拆卡封存时传入 `partial=True`，卡片底部显示 `▸ 内容未完，继续在下一条消息 ↩`；④ 最终完成卡片不传 `partial`，无额外提示 |
+| 3 | Feature | 后台审查进度消息放入卡片 | `background_review` 消息（如"检查回复质量"、"更新记忆"）以纯文本发送到聊天，与卡片内容割裂，视觉不统一 | ① 新增 `_build_background_review_panel()` 构建可折叠审查面板；② `LinearState` 新增 `bg_review_messages` / `bg_review_panel_id` / `bg_review_panel_added` 属性；③ 线性模式下审查消息实时推入卡片面板（`defer_background_review` 返回 True 抑制纯文本）；④ 非线性模式仍走原暂存逻辑；⑤ 完成态卡片包含审查面板 |
+| 4 | Test | 新增配置、面板测试 | 新功能需测试覆盖 | ① 新增 `test_flush_interval_ms_default`、`test_flush_interval_sec_default`、`test_flush_interval_ms_custom`、`test_flush_interval_ms_clamped`；② 新增 `TestPartialStatusIndicator`（3 个测试）；③ 新增 `TestBackgroundReviewPanel`（3 个测试）；④ 修复 `test_first_call_schedules_delayed_flush` 和 `test_enables_flushing` 适配 500ms 默认值 |
 
 ## v0.18.3 (2026-06-11)
 
