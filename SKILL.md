@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.18.4 (DEV 分支) |
+| 版本 | 0.19.0 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -80,7 +80,7 @@ monkey_patch.py (运行时拦截)
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤20)、图片 key 剥离、长文本分块(2400 chars) |
 | `config.py` | 190 | 配置读取 | 惰性加载 + 运行时 `_reload_cached()`（5秒TTL缓存）；默认 footer `[status, elapsed, model, compression_exhausted]`（`cache` 需手动添加）；`streaming_panel_expanded` + `print_strategy` 配置；`_get_hermes_config_path()` 动态路径（多 Profile 支持） |
 | `feishu.py` | 342 | 飞书 API 客户端 | CardKit v1/v2 + IM API；错误码分类；token 脱敏；`upload_local_image()` 本地文件上传 |
-| `flush.py` | 156 | 节流调度器 | CardKit 100ms / IM PATCH 1.5s；互斥锁 + re-flush |
+| `flush.py` | 185 | 节流调度器 | CardKit 500ms（可配置）/ IM PATCH 1.5s；互斥锁 + re-flush；`flush_now` 即时刷新支持 |
 | `linear.py` | 180 | 线性 segment 状态 | `Segment` 数据类；`LinearState` 扁平管理；`split_tool_segment` / `split_answer_segment` 拆分 |
 | `text.py` | 111 | 文本增量追踪 | `<think|thinking|thought>` 标签拆分；`TextState` 累积器 |
 | `tooluse.py` | 299 | 工具调用追踪 | `ToolStep` / `ToolSession`；敏感信息脱敏 |
@@ -453,10 +453,10 @@ hermes gateway restart
 - [x] ~~拆卡后依旧超元素（answer 估算偏差 + 缺少内部拆分）~~（v0.12.2 已实现：answer 估算对齐封卡实际 + `split_answer_segment` + 动态重新估算 + 相邻 answer 拆卡触发）
 - [x] ~~`message_id=None` 时 `message_id[:12]` 崩溃~~（v0.18.3 已修复：36处 `(message_id or "?")[:12]` 防护）
 - [x] ~~封卡 300305 元素超限丢失推理/工具面板~~（v0.18.3 已修复：渐进降级 compact seal → minimal seal）
-- [ ] 流式态推理面板完成后自动折叠（思考完→折叠面板→回答文字自然紧跟，类 ChatGPT 体验）
-- [ ] 拆卡封存时卡片 footer 显示已用/总计段数（如 "1/3 · 已完成" 方便用户定位内容）
-- [ ] 支持用户在飞书点击"继续"按钮恢复被中断/截断的长回复
-- [ ] 完成态卡片支持一键复制代码块（飞书 CardKit 2.0 button 交互）
+- [x] ~~首字即显（First-Token Immediate Flush）~~（v0.19.0 已实现：首次内容跳过节流立即刷新，减少首字可见延迟 0~500ms）
+- [x] ~~完成后释放重数据（Post-Completion Memory Release）~~（v0.19.0 已实现：`_release_session_data()` 清空 segments/text/tool_use/image_resolver，仅保留 TTL 元数据）
+- [x] ~~性能指标采集（Performance Telemetry）~~（v0.19.0 已实现：关键路径 `time.monotonic()` 计时 + debug 日志 + TTFB 首字延迟）
+- [x] ~~stream_element 异步优化~~（v0.19.0 已实现：探测 `acontent` 原生异步方法，回退 `asyncio.to_thread`）
 
 ---
 
@@ -478,4 +478,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-12 | Version: 0.18.4*
+*Last updated: 2026-06-12 | Version: 0.19.0*

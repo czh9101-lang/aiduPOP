@@ -284,6 +284,7 @@ class ControllerMixin:
             return await self._do_complete_inner(session)
         finally:
             self._flush_deferred_background_reviews(session)
+            self._release_session_data(session)
             self._cleanup(session.message_id)
 
     async def _do_complete_inner(self, session: CardSession) -> bool:

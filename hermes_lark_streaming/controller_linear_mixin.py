@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
@@ -127,6 +128,22 @@ class LinearControllerMixin:
             return
         if session.guard.should_skip("_schedule_linear_flush"):
             return
+        # ── First-Token Immediate Flush (首字即显) ──
+        # When this is the first content for the session (no elements created yet
+        # and there are dirty segments), skip the throttle interval and flush
+        # immediately. This reduces first-visible-text latency by 0~500ms.
+        if (
+            not session._first_flush_done
+            and session.element_count <= 1
+            and session.linear_state is not None
+            and session.linear_state.has_dirty
+        ):
+            session._first_flush_done = True
+            import asyncio
+            asyncio.create_task(
+                session.flush.flush_now(lambda: self._do_linear_flush(session))
+            )
+            return
         session.flush.schedule_update(lambda: self._do_linear_flush(session))
 
     def _linear_on_thinking(self, session: CardSession, text: str) -> None:
@@ -165,6 +182,7 @@ class LinearControllerMixin:
         session.linear = True
         session.linear_state = LinearState()
 
+        t0 = _time.monotonic()
         try:
             await self._ensure_init()
             assert self._client is not None
@@ -233,6 +251,7 @@ class LinearControllerMixin:
             session.state = FAILED
             # Signal readiness even on failure so awaiters don't deadlock
             session._card_ready.set()
+            _logger.debug("perf: card_create msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
 
     async def _do_linear_flush(self, session: CardSession) -> None:
         """线性模式幂等 flush：按 segment 顺序处理结构性变更，超阈值时拆卡."""
@@ -242,6 +261,7 @@ class LinearControllerMixin:
         if linear_state is None:
             return
 
+        t0 = _time.monotonic()
         assert self._client is not None
         segments = linear_state.segments
         all_steps = session.tool_use.build_display_steps()
@@ -530,12 +550,14 @@ class LinearControllerMixin:
                         session.sequence,
                         len(content),
                     )
+                    t_se = _time.monotonic()
                     await self._client.cardkit_stream_element(
                         session.card_id,
                         seg.text_el_id,
                         content,
                         sequence=session.sequence,
                     )
+                    _logger.debug("perf: stream_element msg=%s type=%s elapsed=%.0fms", (session.message_id or "?")[:12], seg.type, (_time.monotonic()-t_se)*1000)
                     seg.dirty = False
                 elif seg.type == "answer":
                     content = seg.text
@@ -549,15 +571,19 @@ class LinearControllerMixin:
                         session.sequence,
                         len(content),
                     )
+                    t_se = _time.monotonic()
                     await self._client.cardkit_stream_element(
                         session.card_id,
                         seg.el_id,
                         content,
                         sequence=session.sequence,
                     )
+                    _logger.debug("perf: stream_element msg=%s type=%s elapsed=%.0fms", (session.message_id or "?")[:12], seg.type, (_time.monotonic()-t_se)*1000)
                     seg.dirty = False
             except Exception as e:
                 _logger.debug("linear stream failed: %s el=%s", e, seg.el_id, exc_info=True)
+
+        _logger.debug("perf: linear_flush msg=%s elapsed=%.0fms actions=%d", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000, len(actions))
 
     async def _do_linear_batch_update(
         self,
@@ -932,9 +958,11 @@ class LinearControllerMixin:
             return await self._do_linear_complete_inner(session)
         finally:
             self._flush_deferred_background_reviews(session)
+            self._release_session_data(session)
             self._cleanup(session.message_id)
 
     async def _do_linear_complete_inner(self, session: CardSession) -> bool:
+        t0 = _time.monotonic()
         if session.guard.should_skip("_do_linear_complete"):
             return False
 
@@ -1020,6 +1048,7 @@ class LinearControllerMixin:
                         sequence=session.sequence,
                     )
                 session.state = COMPLETED
+                _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
                 return True
             except FeishuAPIError as e:
                 # 300317 sequence 冲突 → 幂等成功
@@ -1033,6 +1062,7 @@ class LinearControllerMixin:
                         session.sequence,
                     )
                     session.state = COMPLETED
+                    _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
                     return True
 
                 # ── 300305 元素超限 → 渐进降级重试 ──
@@ -1104,6 +1134,7 @@ class LinearControllerMixin:
             session.sequence,
         )
         session.state = FAILED
+        _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
         return False
 
     def _simplify_segments_for_complete(
