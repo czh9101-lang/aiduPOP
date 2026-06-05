@@ -453,6 +453,10 @@ hermes gateway restart
 - [x] ~~拆卡后依旧超元素（answer 估算偏差 + 缺少内部拆分）~~（v0.12.2 已实现：answer 估算对齐封卡实际 + `split_answer_segment` + 动态重新估算 + 相邻 answer 拆卡触发）
 - [x] ~~`message_id=None` 时 `message_id[:12]` 崩溃~~（v0.18.3 已修复：36处 `(message_id or "?")[:12]` 防护）
 - [x] ~~封卡 300305 元素超限丢失推理/工具面板~~（v0.18.3 已修复：渐进降级 compact seal → minimal seal）
+- [ ] 流式态推理面板完成后自动折叠（思考完→折叠面板→回答文字自然紧跟，类 ChatGPT 体验）
+- [ ] 拆卡封存时卡片 footer 显示已用/总计段数（如 "1/3 · 已完成" 方便用户定位内容）
+- [ ] 支持用户在飞书点击"继续"按钮恢复被中断/截断的长回复
+- [ ] 完成态卡片支持一键复制代码块（飞书 CardKit 2.0 button 交互）
 
 ---
 
