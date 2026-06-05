@@ -736,6 +736,78 @@ def build_linear_complete_card(
     return card
 
 
+def build_linear_compact_seal_card(
+    *,
+    segments: list[Segment],
+    all_tool_steps: list[dict],
+    panel_expanded: bool = False,
+) -> dict[str, Any]:
+    """Compact seal card — preserves all panel types but truncates content to reduce elements.
+
+    Used when the full seal_card exceeds the 200-element limit (300305).
+    Keeps reasoning/tool/answer panels but with truncated content to reduce elements.
+
+    Progressive degradation level 1: full seal → compact seal → minimal seal.
+    """
+    elements: list[dict] = []
+    has_answer = False
+
+    _MAX_REASONING_CHARS = 2000
+    _MAX_ANSWER_CHARS = 4000
+
+    for seg in segments:
+        if seg.type == "reasoning":
+            if seg.text:
+                truncated_text = seg.text[:_MAX_REASONING_CHARS]
+                if len(seg.text) > _MAX_REASONING_CHARS:
+                    truncated_text += "\n\n... (truncated)"
+                elements.append(_build_reasoning_panel(
+                    truncated_text, seg.elapsed_ms, expanded=panel_expanded,
+                    element_id=None, text_element_id=None,
+                ))
+        elif seg.type == "tool":
+            start = seg.tool_offset
+            end = seg.tool_end_offset if seg.tool_end_offset else len(all_tool_steps)
+            steps = all_tool_steps[start:end]
+            if steps:
+                # Compact: only keep step titles, remove detail and result_block
+                compact_steps = []
+                for s in steps:
+                    compact_steps.append({
+                        "name": s.get("name", "tool"),
+                        "title": s.get("title", s.get("name", "tool")),
+                        "status": s.get("status", "success"),
+                        "icon": s.get("icon", "tool_02"),
+                    })
+                elements.append(_build_tool_panel(compact_steps, expanded=panel_expanded, element_id=None))
+        elif seg.type == "answer" and seg.text:
+            has_answer = True
+            content = _downgrade_tables(optimize_markdown_style(seg.text))
+            content, img_elements = _extract_images_from_markdown(content)
+            # Don't add img elements in compact mode to save element count
+            truncated = content[:_MAX_ANSWER_CHARS]
+            if len(content) > _MAX_ANSWER_CHARS:
+                truncated += "\n\n... (truncated)"
+            for chunk in _split_long_text(truncated):
+                if chunk.strip():
+                    elements.append({"tag": "markdown", "content": chunk})
+
+    if not has_answer:
+        elements.append({"tag": "markdown", "content": _T["done"][0]})
+
+    card: dict[str, Any] = {
+        "schema": "2.0",
+        "config": {
+            "wide_screen_mode": True,
+            "update_multi": True,
+            "streaming_mode": False,
+            "locales": _LOCALES,
+        },
+    }
+    card["body"] = {"elements": elements}
+    return card
+
+
 def build_cron_card(content: str) -> dict[str, Any]:
     """Cron 推送用的极简静态卡片 — schema 2.0，仅 markdown 内容."""
     card: dict[str, Any] = {

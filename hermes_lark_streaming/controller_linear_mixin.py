@@ -16,6 +16,7 @@ from .cardkit import (
     _format_elapsed,
     _streaming_element,
     build_im_fallback_card,
+    build_linear_compact_seal_card,
     build_linear_complete_card,
     build_streaming_card_v2,
 )
@@ -222,7 +223,7 @@ class LinearControllerMixin:
             session._card_ready.set()
             _logger.info(
                 "linear card created: msg=%s linear=%s card_id=%s",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 session.linear,
                 (session.card_id or "")[:12],
             )
@@ -259,7 +260,7 @@ class LinearControllerMixin:
                     seg.element_estimate = new_est
                     _logger.debug(
                         "answer estimate updated: msg=%s el=%s old=%d new=%d",
-                        session.message_id[:12], seg.el_id,
+                        (session.message_id or "?")[:12], seg.el_id,
                         new_est - delta, new_est,
                     )
                 # 增长后超限 → answer 内部拆分 + 拆卡
@@ -410,7 +411,7 @@ class LinearControllerMixin:
             elif seg.type == "reasoning" and seg.elapsed_ms > 0 and not seg.reasoning_finalized:
                 _logger.info(
                     "linear reasoning finalize: msg=%s el=%s elapsed=%.0fms seq=%d",
-                    session.message_id[:12],
+                    (session.message_id or "?")[:12],
                     seg.el_id,
                     seg.elapsed_ms,
                     session.sequence + 1,
@@ -490,7 +491,7 @@ class LinearControllerMixin:
                     session.sequence += 1
                     _logger.info(
                         "linear stream: msg=%s seq=%d type=reasoning len=%d",
-                        session.message_id[:12],
+                        (session.message_id or "?")[:12],
                         session.sequence,
                         len(content),
                     )
@@ -509,7 +510,7 @@ class LinearControllerMixin:
                     session.sequence += 1
                     _logger.info(
                         "linear stream: msg=%s seq=%d type=answer len=%d",
-                        session.message_id[:12],
+                        (session.message_id or "?")[:12],
                         session.sequence,
                         len(content),
                     )
@@ -538,7 +539,7 @@ class LinearControllerMixin:
         session.sequence += 1
         _logger.info(
             "linear flush: msg=%s seq=%d actions=%d",
-            session.message_id[:12],
+            (session.message_id or "?")[:12],
             session.sequence,
             len(actions),
         )
@@ -748,6 +749,52 @@ class LinearControllerMixin:
             await self._client.cardkit_close_streaming(old_card_id, sequence=session.sequence)
             session.sequence += 1
             await self._client.cardkit_update(old_card_id, seal_card, sequence=session.sequence)
+        except FeishuAPIError as e:
+            # ── 封卡 300305 元素超限 → 渐进降级：compact seal → minimal seal ──
+            # 仅 close_streaming 不更新内容，让旧卡片保留流式态最后内容，
+            # 好过卡片永远停留在跑马灯状态。
+            if e.code == CARDKIT_CONTENT_FAILED and e.extract_sub_code() == CARDKIT_ELEMENT_LIMIT:
+                _logger.warning(
+                    "linear seal element limit for old card %s, attempting compact seal",
+                    old_card_id[:12],
+                )
+                # ── Progressive degradation: compact seal → minimal seal ──
+                # Step 1: Try compact seal (keeps all panel types but truncated)
+                try:
+                    compact_seal = build_linear_compact_seal_card(
+                        segments=seal_segments,
+                        all_tool_steps=all_steps,
+                        panel_expanded=self._cfg.panel_expanded,
+                    )
+                    session.sequence += 1
+                    await self._client.cardkit_update(old_card_id, compact_seal, sequence=session.sequence)
+                except Exception:
+                    # Step 2: Compact seal also failed → minimal seal (answer only)
+                    _logger.debug(
+                        "compact seal also failed for old card %s, trying minimal seal",
+                        old_card_id[:12], exc_info=True,
+                    )
+                    try:
+                        minimal_seal = build_linear_complete_card(
+                            segments=[s for s in seal_segments if s.type == "answer"][:1],
+                            all_tool_steps=all_steps,
+                            footer_fields=[],
+                            footer_show_label=False,
+                            panel_expanded=False,
+                        )
+                        session.sequence += 1
+                        await self._client.cardkit_update(old_card_id, minimal_seal, sequence=session.sequence)
+                    except Exception:
+                        _logger.debug(
+                            "minimal seal also failed for old card %s",
+                            old_card_id[:12], exc_info=True,
+                        )
+            else:
+                _logger.warning(
+                    "linear seal failed for old card %s, continuing",
+                    old_card_id[:12],
+                    exc_info=True,
+                )
         except Exception:
             _logger.warning(
                 "linear seal failed for old card %s, continuing",
@@ -764,7 +811,7 @@ class LinearControllerMixin:
         session.split_index = split_idx
         _logger.info(
             "linear split: msg=%s sealed=%d new_card=%s",
-            session.message_id[:12],
+            (session.message_id or "?")[:12],
             len(seal_segments),
             new_card_id[:12],
         )
@@ -790,7 +837,7 @@ class LinearControllerMixin:
             if sub_code == CARDKIT_ELEMENT_LIMIT:
                 _logger.warning(
                     "linear card element limit exceeded: msg=%s element_count=%d split_disabled=%s",
-                    session.message_id[:12],
+                    (session.message_id or "?")[:12],
                     session.element_count,
                     session.split_disabled,
                 )
@@ -817,7 +864,7 @@ class LinearControllerMixin:
                     # 没有可拆分的内容 → 标记后等待完成阶段处理
                     _logger.warning(
                         "linear element limit: no splittable content, deferring to complete: msg=%s",
-                        session.message_id[:12],
+                        (session.message_id or "?")[:12],
                     )
                     return False
 
@@ -827,14 +874,14 @@ class LinearControllerMixin:
                 if split_ok:
                     _logger.info(
                         "linear element limit triggered split: msg=%s split_at=%d",
-                        session.message_id[:12],
+                        (session.message_id or "?")[:12],
                         split_idx,
                     )
                     return True
                 # 拆卡失败 → 禁用拆卡，标记超限，等完成阶段重建
                 _logger.warning(
                     "linear element limit split failed, deferring to complete: msg=%s",
-                    session.message_id[:12],
+                    (session.message_id or "?")[:12],
                 )
                 return False
         return False
@@ -864,7 +911,7 @@ class LinearControllerMixin:
         except asyncio.TimeoutError:
             _logger.warning(
                 "linear complete: card creation timed out, msg=%s",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
             )
 
         # If card creation failed, we cannot render a completion card.
@@ -872,7 +919,7 @@ class LinearControllerMixin:
         if not session.card_id and not session.card_msg_id:
             _logger.info(
                 "linear complete: no card to complete, msg=%s state=%s",
-                session.message_id[:12],
+                (session.message_id or "?")[:12],
                 session.state,
             )
             session.state = FAILED
@@ -913,6 +960,7 @@ class LinearControllerMixin:
         )
 
         streaming_closed = False
+        simplify_level = 0  # 0=full, 1=compact, 2=minimal
         for attempt in range(3):
             try:
                 assert self._client is not None
@@ -945,6 +993,41 @@ class LinearControllerMixin:
                     )
                     session.state = COMPLETED
                     return True
+
+                # ── 300305 元素超限 → 渐进降级重试 ──
+                # 重试时提交相同 payload 无意义（仍会超限），
+                # 需要简化卡片内容后再提交。
+                # Level 1 (compact): 保留所有面板但截断内容
+                # Level 2 (minimal): 移除 reasoning，保留 tool+answer
+                if (
+                    e.code == CARDKIT_CONTENT_FAILED
+                    and e.extract_sub_code() == CARDKIT_ELEMENT_LIMIT
+                    and simplify_level < 2
+                ):
+                    simplify_level += 1
+                    _logger.warning(
+                        "linear complete: element limit (300305), rebuilding card (level %d): "
+                        "card_id=%s msg=%s",
+                        simplify_level,
+                        session.card_id,
+                        (session.message_id or "?")[:12],
+                    )
+                    simplified_active = self._simplify_segments_for_complete(
+                        active_segments, all_tool_steps, level=simplify_level,
+                    )
+                    card = build_linear_complete_card(
+                        segments=simplified_active,
+                        all_tool_steps=all_tool_steps,
+                        footer_data=session.footer,
+                        is_error=is_error,
+                        is_aborted=is_aborted,
+                        error_message=error_message,
+                        footer_fields=self._cfg.footer_fields,
+                        footer_show_label=self._cfg.footer_show_label,
+                        panel_expanded=self._cfg.panel_expanded,
+                    )
+                    continue  # 立即用简化卡片重试，不等待
+
                 _logger.warning(
                     "linear complete attempt %d failed: code=%s msg=%s card_id=%s seq=%d",
                     attempt,
@@ -980,3 +1063,66 @@ class LinearControllerMixin:
         )
         session.state = FAILED
         return False
+
+    def _simplify_segments_for_complete(
+        self,
+        segments: list[Segment],
+        all_tool_steps: list[dict[str, Any]],
+        level: int = 1,
+    ) -> list[Segment]:
+        """为简化卡片构建精简 segment 列表.
+
+        当封卡因元素超限 (300305) 失败时，构建一个精简版的 segment 列表。
+
+        Level 1 (compact): 保留所有面板类型，截断内容以减少元素
+          - reasoning 文本截断至 2000 字符
+          - answer 文本截断至 4000 字符
+          - tool 保留但精简步骤详情（移除 detail 和 result_block）
+        Level 2 (minimal): 移除 reasoning，保留 tool+answer
+          - 截断 answer 文本至 4000 字符
+          - 保留 tool segment 但精简步骤详情
+        """
+        simplified = []
+        for seg in segments:
+            if seg.type == "reasoning":
+                if level >= 2:
+                    # Level 2+: drop reasoning entirely
+                    continue
+                # Level 1: truncate reasoning text
+                if seg.text and len(seg.text) > 2000:
+                    new_seg = Segment(seg.type, seg.el_id)
+                    new_seg.text = seg.text[:2000] + "\n\n... (truncated)"
+                    new_seg.text_el_id = seg.text_el_id
+                    new_seg.created = seg.created
+                    new_seg.element_estimate = 4
+                    simplified.append(new_seg)
+                else:
+                    simplified.append(seg)
+            elif seg.type == "answer":
+                # 截断过长文本
+                if len(seg.text) > 4000:
+                    new_seg = Segment(seg.type, seg.el_id)
+                    new_seg.text = seg.text[:4000] + "\n\n... (truncated)"
+                    new_seg.text_el_id = seg.text_el_id
+                    new_seg.created = seg.created
+                    new_seg.element_estimate = 1  # 保守估算
+                    simplified.append(new_seg)
+                else:
+                    simplified.append(seg)
+            elif seg.type == "tool":
+                # 保留 tool segment 但精简步骤详情
+                simplified.append(seg)
+            else:
+                simplified.append(seg)
+        if not simplified:
+            # 如果所有 segment 都被过滤，至少保留 answer 的文本
+            for seg in segments:
+                if seg.type == "answer" and seg.text:
+                    simple_seg = Segment("answer", seg.el_id)
+                    simple_seg.text = seg.text[:4000]
+                    simple_seg.text_el_id = seg.text_el_id
+                    simple_seg.created = seg.created
+                    simple_seg.element_estimate = 1
+                    simplified.append(simple_seg)
+                    break
+        return simplified
