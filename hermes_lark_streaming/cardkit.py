@@ -323,6 +323,38 @@ def _build_error_panel(
     return panel
 
 
+def _build_background_review_panel(
+    messages: list[str],
+    *,
+    expanded: bool = True,
+    element_id: str | None = None,
+) -> dict[str, Any]:
+    """构建后台审查进度面板（可折叠）."""
+    en_title, zh_title = _T["bg_review_panel"]
+    children: list[dict] = []
+    for msg in messages:
+        children.append({
+            "tag": "markdown",
+            "content": msg,
+        })
+    if not messages:
+        children.append({"tag": "markdown", "content": " "})
+    panel = _collapsible_panel(
+        expanded=expanded,
+        title_el={
+            "tag": "plain_text",
+            "content": f"🔄 {en_title}",
+            "i18n_content": _i18n(f"🔄 {en_title}", f"🔄 {zh_title}"),
+            "text_color": "grey",
+            "text_size": "notation",
+        },
+        elements=children,
+    )
+    if element_id:
+        panel["element_id"] = element_id
+    return panel
+
+
 def _build_footer_elements(
     footer_data: dict | None,
     is_error: bool = False,
@@ -667,8 +699,13 @@ def build_linear_complete_card(
     footer_fields: list[list[str]] | None = None,
     footer_show_label: bool = True,
     panel_expanded: bool = False,
+    partial: bool = False,
+    bg_review_messages: list[str] | None = None,
 ) -> dict[str, Any]:
-    """线性模式完成态卡片 — 按 segments 顺序渲染."""
+    """线性模式完成态卡片 — 按 segments 顺序渲染.
+
+    partial=True 时，在卡片底部添加"内容未完"提示（用于拆卡封存的非末尾卡片）。
+    """
     elements: list[dict] = []
     has_answer = False
 
@@ -703,6 +740,23 @@ def build_linear_complete_card(
         elements.append(_build_error_panel(
             error_message, is_aborted=is_aborted, expanded=panel_expanded,
         ))
+
+    # ── Background review panel (completed card) ──
+    if bg_review_messages:
+        elements.append(_build_background_review_panel(
+            bg_review_messages,
+            expanded=panel_expanded,
+        ))
+
+    # ── Partial indicator (split card: content continues) ──
+    if partial:
+        elements.append({"tag": "hr"})
+        en_text, zh_text = _T["partial_continues"]
+        elements.append({
+            "tag": "markdown",
+            "content": f"▸ {en_text} ↩",
+            "i18n_content": _i18n(f"▸ {en_text} ↩", f"▸ {zh_text} ↩"),
+        })
 
     elements.extend(
         _build_footer_elements(
@@ -741,6 +795,7 @@ def build_linear_compact_seal_card(
     segments: list[Segment],
     all_tool_steps: list[dict],
     panel_expanded: bool = False,
+    partial: bool = False,
 ) -> dict[str, Any]:
     """Compact seal card — preserves all panel types but truncates content to reduce elements.
 
@@ -794,6 +849,16 @@ def build_linear_compact_seal_card(
 
     if not has_answer:
         elements.append({"tag": "markdown", "content": _T["done"][0]})
+
+    # ── Partial indicator (split card: content continues) ──
+    if partial:
+        elements.append({"tag": "hr"})
+        en_text, zh_text = _T["partial_continues"]
+        elements.append({
+            "tag": "markdown",
+            "content": f"▸ {en_text} ↩",
+            "i18n_content": _i18n(f"▸ {en_text} ↩", f"▸ {zh_text} ↩"),
+        })
 
     card: dict[str, Any] = {
         "schema": "2.0",

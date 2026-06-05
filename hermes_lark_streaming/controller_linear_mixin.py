@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
@@ -11,6 +12,7 @@ import re
 
 from .cardkit import (
     _LOADING_ELEMENT_ID,
+    _build_background_review_panel,
     _build_reasoning_panel,
     _build_tool_panel,
     _format_elapsed,
@@ -126,6 +128,22 @@ class LinearControllerMixin:
             return
         if session.guard.should_skip("_schedule_linear_flush"):
             return
+        # ── First-Token Immediate Flush (首字即显) ──
+        # When this is the first content for the session (no elements created yet
+        # and there are dirty segments), skip the throttle interval and flush
+        # immediately. This reduces first-visible-text latency by 0~500ms.
+        if (
+            not session._first_flush_done
+            and session.element_count <= 1
+            and session.linear_state is not None
+            and session.linear_state.has_dirty
+        ):
+            session._first_flush_done = True
+            import asyncio
+            asyncio.create_task(
+                session.flush.flush_now(lambda: self._do_linear_flush(session))
+            )
+            return
         session.flush.schedule_update(lambda: self._do_linear_flush(session))
 
     def _linear_on_thinking(self, session: CardSession, text: str) -> None:
@@ -164,6 +182,7 @@ class LinearControllerMixin:
         session.linear = True
         session.linear_state = LinearState()
 
+        t0 = _time.monotonic()
         try:
             await self._ensure_init()
             assert self._client is not None
@@ -186,7 +205,7 @@ class LinearControllerMixin:
                 session.card_msg_id = card_msg_id
                 session.use_cardkit = True
                 session.element_count = 1  # loading element
-                session.flush.set_throttle(CARDKIT_MS)
+                session.flush.set_throttle(self._cfg.flush_interval_sec)
             except FeishuAPIError:
                 _logger.info("linear CardKit create failed, falling back to non-linear")
                 card = build_im_fallback_card()
@@ -232,6 +251,7 @@ class LinearControllerMixin:
             session.state = FAILED
             # Signal readiness even on failure so awaiters don't deadlock
             session._card_ready.set()
+            _logger.debug("perf: card_create msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
 
     async def _do_linear_flush(self, session: CardSession) -> None:
         """线性模式幂等 flush：按 segment 顺序处理结构性变更，超阈值时拆卡."""
@@ -241,6 +261,7 @@ class LinearControllerMixin:
         if linear_state is None:
             return
 
+        t0 = _time.monotonic()
         assert self._client is not None
         segments = linear_state.segments
         all_steps = session.tool_use.build_display_steps()
@@ -476,6 +497,40 @@ class LinearControllerMixin:
                 updated_tool_segs.append(seg)
                 new_el_estimates[seg.el_id] = estimate
 
+        # ── Background review panel ──
+        if linear_state.bg_review_messages and not linear_state.bg_review_panel_added:
+            panel = _build_background_review_panel(
+                linear_state.bg_review_messages,
+                expanded=self._cfg.streaming_panel_expanded,
+                element_id=linear_state.bg_review_panel_id,
+            )
+            actions.append({
+                "action": "add_elements",
+                "params": {
+                    "type": "insert_before",
+                    "target_element_id": _LOADING_ELEMENT_ID,
+                    "elements": [panel],
+                },
+            })
+            new_el_ids.add(linear_state.bg_review_panel_id)
+            new_el_estimates[linear_state.bg_review_panel_id] = 4  # panel + header + icon + markdown
+            linear_state.bg_review_panel_added = True
+        elif linear_state.bg_review_panel_added and linear_state.bg_review_messages:
+            # Update existing panel
+            panel = _build_background_review_panel(
+                linear_state.bg_review_messages,
+                expanded=self._cfg.streaming_panel_expanded,
+            )
+            actions.append({
+                "action": "partial_update_element",
+                "params": {
+                    "element_id": linear_state.bg_review_panel_id,
+                    "partial_element": {
+                        "elements": panel["elements"],
+                    },
+                },
+            })
+
         if actions and not await self._do_linear_batch_update(
             session, segments, actions, new_el_ids, new_el_estimates, updated_tool_segs,
         ):
@@ -495,12 +550,14 @@ class LinearControllerMixin:
                         session.sequence,
                         len(content),
                     )
+                    t_se = _time.monotonic()
                     await self._client.cardkit_stream_element(
                         session.card_id,
                         seg.text_el_id,
                         content,
                         sequence=session.sequence,
                     )
+                    _logger.debug("perf: stream_element msg=%s type=%s elapsed=%.0fms", (session.message_id or "?")[:12], seg.type, (_time.monotonic()-t_se)*1000)
                     seg.dirty = False
                 elif seg.type == "answer":
                     content = seg.text
@@ -514,15 +571,19 @@ class LinearControllerMixin:
                         session.sequence,
                         len(content),
                     )
+                    t_se = _time.monotonic()
                     await self._client.cardkit_stream_element(
                         session.card_id,
                         seg.el_id,
                         content,
                         sequence=session.sequence,
                     )
+                    _logger.debug("perf: stream_element msg=%s type=%s elapsed=%.0fms", (session.message_id or "?")[:12], seg.type, (_time.monotonic()-t_se)*1000)
                     seg.dirty = False
             except Exception as e:
                 _logger.debug("linear stream failed: %s el=%s", e, seg.el_id, exc_info=True)
+
+        _logger.debug("perf: linear_flush msg=%s elapsed=%.0fms actions=%d", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000, len(actions))
 
     async def _do_linear_batch_update(
         self,
@@ -723,6 +784,8 @@ class LinearControllerMixin:
             footer_fields=[],
             footer_show_label=False,
             panel_expanded=self._cfg.panel_expanded,
+            partial=True,
+            bg_review_messages=linear_state.bg_review_messages if linear_state else None,
         )
 
         try:
@@ -765,6 +828,7 @@ class LinearControllerMixin:
                         segments=seal_segments,
                         all_tool_steps=all_steps,
                         panel_expanded=self._cfg.panel_expanded,
+                        partial=True,
                     )
                     session.sequence += 1
                     await self._client.cardkit_update(old_card_id, compact_seal, sequence=session.sequence)
@@ -781,6 +845,8 @@ class LinearControllerMixin:
                             footer_fields=[],
                             footer_show_label=False,
                             panel_expanded=False,
+                            partial=True,
+                            bg_review_messages=linear_state.bg_review_messages if linear_state else None,
                         )
                         session.sequence += 1
                         await self._client.cardkit_update(old_card_id, minimal_seal, sequence=session.sequence)
@@ -892,9 +958,11 @@ class LinearControllerMixin:
             return await self._do_linear_complete_inner(session)
         finally:
             self._flush_deferred_background_reviews(session)
+            self._release_session_data(session)
             self._cleanup(session.message_id)
 
     async def _do_linear_complete_inner(self, session: CardSession) -> bool:
+        t0 = _time.monotonic()
         if session.guard.should_skip("_do_linear_complete"):
             return False
 
@@ -957,6 +1025,7 @@ class LinearControllerMixin:
             footer_fields=self._cfg.footer_fields,
             footer_show_label=self._cfg.footer_show_label,
             panel_expanded=self._cfg.panel_expanded,
+            bg_review_messages=linear_state.bg_review_messages if linear_state else None,
         )
 
         streaming_closed = False
@@ -979,6 +1048,7 @@ class LinearControllerMixin:
                         sequence=session.sequence,
                     )
                 session.state = COMPLETED
+                _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
                 return True
             except FeishuAPIError as e:
                 # 300317 sequence 冲突 → 幂等成功
@@ -992,6 +1062,7 @@ class LinearControllerMixin:
                         session.sequence,
                     )
                     session.state = COMPLETED
+                    _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
                     return True
 
                 # ── 300305 元素超限 → 渐进降级重试 ──
@@ -1025,6 +1096,7 @@ class LinearControllerMixin:
                         footer_fields=self._cfg.footer_fields,
                         footer_show_label=self._cfg.footer_show_label,
                         panel_expanded=self._cfg.panel_expanded,
+                        bg_review_messages=linear_state.bg_review_messages if linear_state else None,
                     )
                     continue  # 立即用简化卡片重试，不等待
 
@@ -1062,6 +1134,7 @@ class LinearControllerMixin:
             session.sequence,
         )
         session.state = FAILED
+        _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
         return False
 
     def _simplify_segments_for_complete(

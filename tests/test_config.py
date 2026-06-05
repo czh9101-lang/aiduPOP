@@ -492,3 +492,49 @@ class TestGetHermesConfigPath:
         assert path_a != path_b
         assert str(path_a).startswith("/path/a")
         assert str(path_b).startswith("/path/b")
+
+
+    def test_flush_interval_ms_default(self) -> None:
+        """flush_interval_ms 默认 500ms."""
+        cfg = Config()
+        assert cfg.flush_interval_ms == 500.0
+
+    def test_flush_interval_sec_default(self) -> None:
+        """flush_interval_sec 默认 0.5 秒."""
+        cfg = Config()
+        assert cfg.flush_interval_sec == 0.5
+
+    def test_flush_interval_ms_custom(self, tmp_path: object) -> None:
+        """flush_interval_ms 可配置."""
+        import yaml
+        from pathlib import Path
+        config_path = Path(str(tmp_path)) / "config.yaml"
+        config_path.write_text(yaml.dump({
+            "streaming": {"enabled": True, "flush_interval_ms": 300},
+        }))
+        # Override config path
+        from unittest.mock import patch
+        with patch("hermes_lark_streaming.config._get_hermes_config_path", return_value=config_path):
+            cfg = Config()
+            assert cfg.flush_interval_ms == 300.0
+            assert cfg.flush_interval_sec == 0.3
+
+    def test_flush_interval_ms_clamped(self, tmp_path: object) -> None:
+        """flush_interval_ms 限制在 100~2000ms."""
+        import yaml
+        from pathlib import Path
+        from unittest.mock import patch
+        config_path = Path(str(tmp_path)) / "config.yaml"
+        config_path.write_text(yaml.dump({
+            "streaming": {"enabled": True, "flush_interval_ms": 50},
+        }))
+        with patch("hermes_lark_streaming.config._get_hermes_config_path", return_value=config_path):
+            cfg = Config()
+            assert cfg.flush_interval_ms == 100.0  # clamped to min
+
+        config_path.write_text(yaml.dump({
+            "streaming": {"enabled": True, "flush_interval_ms": 5000},
+        }))
+        with patch("hermes_lark_streaming.config._get_hermes_config_path", return_value=config_path):
+            cfg2 = Config()
+            assert cfg2.flush_interval_ms == 2000.0  # clamped to max

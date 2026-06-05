@@ -92,7 +92,7 @@ class ControllerMixin:
                 session.card_id = card_id
                 session.card_msg_id = card_msg_id
                 session.use_cardkit = True
-                session.flush.set_throttle(CARDKIT_MS)
+                session.flush.set_throttle(self._cfg.flush_interval_sec)
             except FeishuAPIError:
                 card = build_im_fallback_card()
                 card_msg_id = await self._client.reply_card(
@@ -284,6 +284,7 @@ class ControllerMixin:
             return await self._do_complete_inner(session)
         finally:
             self._flush_deferred_background_reviews(session)
+            self._release_session_data(session)
             self._cleanup(session.message_id)
 
     async def _do_complete_inner(self, session: CardSession) -> bool:

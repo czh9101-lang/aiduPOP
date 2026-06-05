@@ -23,7 +23,7 @@ def _make_async(**kwargs: object) -> FlushController:
 class TestScheduleUpdate:
     @pytest.mark.asyncio
     async def test_first_call_schedules_delayed_flush(self) -> None:
-        ctrl = _make_async()
+        ctrl = _make_async(throttle_ms=0.100)  # 使用显式 100ms 节流，不依赖默认值
         ctrl.set_card_message_ready(True)
         flushed = asyncio.Event()
 
@@ -273,7 +273,7 @@ class TestReflush:
 class TestSetCardMessageReady:
     @pytest.mark.asyncio
     async def test_enables_flushing(self) -> None:
-        ctrl = _make_async()
+        ctrl = _make_async(throttle_ms=0.100)  # 使用显式 100ms 节流
         count = 0
 
         async def do_flush() -> None:

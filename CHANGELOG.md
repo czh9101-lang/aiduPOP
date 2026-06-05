@@ -1,4 +1,20 @@
-# 更新日志 / Changelog
+## v0.19.0 (2026-06-12)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Perf | 首字即显（First-Token Immediate Flush） | 流式回答首字到达时仍需等待 500ms 节流间隔才刷新卡片，用户感知延迟 0~500ms | `_schedule_linear_flush()` 检测首次内容（`element_count <= 1` + dirty segments），跳过节流直接调用 `flush.flush_now()` 立即刷新；CardSession 新增 `_first_flush_done` 标志，首次后恢复正常节流 |
+| 2 | Perf | 完成后释放重数据（Post-Completion Memory Release） | 会话完成后 `linear_state`、`text`、`tool_use`、`image_resolver` 等重数据仍留在内存中，TTL 期间（默认 600s）持续占用；高并发场景下累积可达数百 MB | 新增 `_release_session_data()` 方法：完成后清空 `linear_state`、`text`、`tool_use`、`image_resolver`、`reasoning_text`、`footer` 等重数据，仅保留 `message_id`/`state`/`created_at` 等元数据供 TTL 追踪；在 `_do_linear_complete` 和 `_do_complete` 的 finally 块中调用（`_cleanup` 之前） |
+| 3 | Perf | 性能指标采集（Performance Telemetry） | 关键路径（卡片创建、flush、stream_element、complete）无计时日志，性能瓶颈无法定位 | 在 `controller_linear_mixin.py` 的 `_do_create_linear_card`/`_do_linear_flush`/`stream_element` 调用/`_do_linear_complete_inner` 中添加 `time.monotonic()` 计时 + `debug` 级别日志；在 `feishu.py` 的 `cardkit_create`/`cardkit_stream_element`/`cardkit_batch_update` 中添加 API 调用计时；在 `controller.py` 的 `on_answer()` 中记录首字到达时间 `_first_answer_time` + TTFB 日志 |
+| 4 | Perf | stream_element 异步优化 | `cardkit_stream_element` 使用 `asyncio.to_thread` 包装同步 SDK 调用，增加线程切换开销；lark-oapi 新版已提供 `acontent` 异步方法 | `FeishuClient.__init__` 中探测 `card_element.acontent` 是否存在，缓存为 `_use_async_stream_element`；`cardkit_stream_element` 优先使用原生异步方法，回退到 `asyncio.to_thread` |
+
+## v0.18.4 (2026-06-12)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | CardKit 流式刷新间隔可配置 | `CARDKIT_MS` 硬编码为 100ms，无法根据实际场景调整。100ms 的高频刷新在手机端可能导致飞书客户端卡顿甚至闪退（300~600 次重渲染） | ① `CARDKIT_MS` 默认值从 0.100 改为 0.500（500ms）；② 新增 `streaming.flush_interval_ms` 配置项（默认 500，范围 100~2000ms）；③ `controller_linear_mixin.py` 和 `controller_mixin.py` 改为从配置读取刷新间隔；④ `plugin.py` 默认配置和诊断日志同步更新 |
+| 2 | Feature | 拆卡封卡"内容未完"状态显示 | 拆卡后封存的旧卡片无任何提示告诉用户"下面还有内容"，用户可能以为回复被截断 | ① 新增 `partial_continues` i18n 条目；② `build_linear_complete_card` 和 `build_linear_compact_seal_card` 新增 `partial` 参数；③ 拆卡封存时传入 `partial=True`，卡片底部显示 `▸ 内容未完，继续在下一条消息 ↩`；④ 最终完成卡片不传 `partial`，无额外提示 |
+| 3 | Feature | 后台审查进度消息放入卡片 | `background_review` 消息（如"检查回复质量"、"更新记忆"）以纯文本发送到聊天，与卡片内容割裂，视觉不统一 | ① 新增 `_build_background_review_panel()` 构建可折叠审查面板；② `LinearState` 新增 `bg_review_messages` / `bg_review_panel_id` / `bg_review_panel_added` 属性；③ 线性模式下审查消息实时推入卡片面板（`defer_background_review` 返回 True 抑制纯文本）；④ 非线性模式仍走原暂存逻辑；⑤ 完成态卡片包含审查面板 |
+| 4 | Test | 新增配置、面板测试 | 新功能需测试覆盖 | ① 新增 `test_flush_interval_ms_default`、`test_flush_interval_sec_default`、`test_flush_interval_ms_custom`、`test_flush_interval_ms_clamped`；② 新增 `TestPartialStatusIndicator`（3 个测试）；③ 新增 `TestBackgroundReviewPanel`（3 个测试）；④ 修复 `test_first_call_schedules_delayed_flush` 和 `test_enables_flushing` 适配 500ms 默认值 |
 
 ## v0.18.3 (2026-06-11)
 

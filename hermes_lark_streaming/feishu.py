@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import re
+import time as _time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import URLError
@@ -97,6 +98,10 @@ class FeishuClient:
         self.config = config
         builder = lark.Client.builder().app_id(config.app_id).app_secret(config.app_secret)
         self._client = builder.build()
+        # Probe for async stream_element method (lark-oapi >= 1.x)
+        self._use_async_stream_element = hasattr(
+            self._client.cardkit.v1.card_element, 'acontent'
+        )
 
     @staticmethod
     def _check(response: Any, operation: str) -> None:
@@ -203,7 +208,10 @@ class FeishuClient:
             .request_body(CreateCardRequestBody.builder().type("card_json").data(self._dumps(card)).build())
             .build()
         )
+        t0 = _time.monotonic()
         resp = await self._client.cardkit.v1.card.acreate(request)
+        elapsed_ms = (_time.monotonic() - t0) * 1000
+        _logger.debug("perf: feishu_card_create elapsed=%.0fms", elapsed_ms)
         self._check(resp, "cardkit_create")
         if resp.data and resp.data.card_id:
             return str(resp.data.card_id)
@@ -227,10 +235,16 @@ class FeishuClient:
             .request_body(body_builder.build())
             .build()
         )
-        resp = await asyncio.to_thread(
-            self._client.cardkit.v1.card_element.content,
-            request,
-        )
+        t0 = _time.monotonic()
+        if self._use_async_stream_element:
+            resp = await self._client.cardkit.v1.card_element.acontent(request)
+        else:
+            resp = await asyncio.to_thread(
+                self._client.cardkit.v1.card_element.content,
+                request,
+            )
+        elapsed_ms = (_time.monotonic() - t0) * 1000
+        _logger.debug("perf: feishu_stream_element card=%s el=%s elapsed=%.0fms", card_id[:12], element_id[:12], elapsed_ms)
         self._check(resp, "cardkit_stream_element")
 
     async def cardkit_update(
@@ -258,7 +272,10 @@ class FeishuClient:
         """局部更新 CardKit 卡片（增删改组件）."""
         body_builder = BatchUpdateCardRequestBody.builder().sequence(sequence).actions(self._dumps(actions))
         request = BatchUpdateCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
+        t0 = _time.monotonic()
         resp = await self._client.cardkit.v1.card.abatch_update(request)
+        elapsed_ms = (_time.monotonic() - t0) * 1000
+        _logger.debug("perf: feishu_batch_update card=%s elapsed=%.0fms actions=%d", card_id[:12], elapsed_ms, len(actions))
         self._check(resp, "cardkit_batch_update")
 
     async def cardkit_close_streaming(self, card_id: str, sequence: int = 0) -> None:
