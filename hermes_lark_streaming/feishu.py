@@ -70,9 +70,23 @@ class FeishuAPIError(RuntimeError):
 CARDKIT_RATE_LIMITED = 230020  # 频控
 CARDKIT_CONTENT_FAILED = 230099  # 卡片内容创建失败（通用码，需检查子错误）
 CARDKIT_ELEMENT_LIMIT = 11310  # 子码: 卡片元素数量超限
+CARDKIT_ELEMENT_LIMIT_DIRECT = 300305  # 直报码: 卡片元素数量超限（cardkit_update 返回此码）
 CARDKIT_STREAMING_CLOSED = 300309  # 卡片流式模式已关闭
 CARDKIT_SEQUENCE_CONFLICT = 300317  # sequence 冲突
 MSG_NOT_FOUND = 1000023  # 消息不存在/已删除
+
+
+def is_element_limit_error(e: "FeishuAPIError") -> bool:
+    """判断 FeishuAPIError 是否为元素超限错误。
+
+    飞书 API 返回两种错误格式：
+    - cardkit_update: code=300305 直报
+    - batch_update: code=230099 + ErrCode: 11310 子码
+    """
+    return (
+        e.code == CARDKIT_ELEMENT_LIMIT_DIRECT
+        or (e.code == CARDKIT_CONTENT_FAILED and e.extract_sub_code() == CARDKIT_ELEMENT_LIMIT)
+    )
 
 
 @dataclass(frozen=True)

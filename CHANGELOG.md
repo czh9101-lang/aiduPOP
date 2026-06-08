@@ -14,6 +14,7 @@
 | 10 | Fix | 加载占位提示仅等 answer 才删除，reasoning/tool 期间不删 | 首段是 reasoning 或 tool 时加载提示一直留在卡片上，用户看到"⏳ 加载上下文"与推理内容同时存在，认知冲突 | `controller_linear_mixin.py` 条件从 `seg.type == "answer"` 放宽为 `seg.type in ("reasoning", "tool", "answer")`，任何内容段首次出现即删除加载提示 |
 | 11 | Fix | `monkey_patch.py` 引用已删除的 `build_clarify_resolved_card` | Clarify 三态重构移除了 `build_clarify_resolved_card()`，`_schedule_confirm_card` 仍引用该函数名导致 `ImportError` | `monkey_patch.py` 改为导入 `build_clarify_confirmed_card`，移除不存在的 `choices` 参数 |
 | 12 | Chore | Clarify 交互卡片清理 — emoji 移除 + 图标替换 | Clarify 已确认态残留 `✓` emoji；待选择态使用 `helpdesk_outlined`（耳机图标），语义不匹配提问场景 | ① `build_clarify_confirmed_card` 移除 `✓ emoji`，纯文本显示 Confirmed/已确认；② `build_clarify_card` 待选择态图标 `helpdesk_outlined` → `info_outlined`（蓝色 ℹ️） |
+| 13 | Bug | 拆卡封卡 300305 元素超限渐进降级未触发 — 旧卡 seal 失败 | `cardkit_update` 返回 `code=300305` 直报，代码只检查 `230099 + ErrCode:11310` 格式，条件不匹配，渐进降级永不执行，旧卡永留 loading 动画 | ① 新增 `CARDKIT_ELEMENT_LIMIT_DIRECT = 300305` 常量 + `is_element_limit_error()` 辅助函数，同时匹配两种错误格式；② 更新 `_do_linear_split` / `_do_linear_complete_inner` / `_handle_linear_flush_error_async` / `controller_mixin` 共 4 处元素超限检查，全部改用 `is_element_limit_error()` |
 
 ## v0.19.0 (2026-06-08)
 
