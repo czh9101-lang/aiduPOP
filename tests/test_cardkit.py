@@ -1113,3 +1113,59 @@ class TestBackgroundReviewPanel:
         elements = card["body"]["elements"]
         panels = [e for e in elements if e.get("tag") == "collapsible_panel"]
         assert len(panels) >= 1
+
+
+class TestContextLoadingHint:
+    """上下文加载占位提示测试."""
+
+    def test_context_loading_element_structure(self) -> None:
+        """_context_loading_element 返回正确结构的 div 元素."""
+        from hermes_lark_streaming.cardkit import (
+            _CONTEXT_LOADING_ELEMENT_ID,
+            _context_loading_element,
+        )
+        el = _context_loading_element()
+        assert el["tag"] == "div"
+        assert el["element_id"] == _CONTEXT_LOADING_ELEMENT_ID
+        assert el["icon"]["tag"] == "standard_icon"
+        assert el["icon"]["token"] == "time_outlined"
+        assert el["text"]["tag"] == "lark_md"
+        assert "i18n_content" in el["text"]
+
+    def test_context_loading_i18n_entry(self) -> None:
+        """loading_context i18n 条目存在."""
+        from hermes_lark_streaming.cardkit_i18n import _T
+        assert "loading_context" in _T
+        en, zh = _T["loading_context"]
+        assert "Loading" in en
+        assert "加载" in zh
+
+    def test_preservative_seal_deletes_context_hint(self) -> None:
+        """保留式封卡时删除 context loading hint 元素."""
+        from hermes_lark_streaming.cardkit import (
+            _CONTEXT_LOADING_ELEMENT_ID,
+            build_preservative_seal_actions,
+        )
+        actions = build_preservative_seal_actions(partial=True)
+        delete_actions = [
+            a for a in actions
+            if a["action"] == "delete_element"
+            and a["params"]["element_id"] == _CONTEXT_LOADING_ELEMENT_ID
+        ]
+        assert len(delete_actions) == 1, f"context loading hint delete not found in actions: {actions}"
+
+    def test_preservative_seal_deletes_context_hint_on_complete(self) -> None:
+        """完成封卡(非 partial)时也删除 context loading hint 元素."""
+        from hermes_lark_streaming.cardkit import (
+            _CONTEXT_LOADING_ELEMENT_ID,
+            build_preservative_seal_actions,
+        )
+        actions = build_preservative_seal_actions(
+            partial=False, footer_data={"status": "completed", "elapsed_ms": 1000}
+        )
+        delete_actions = [
+            a for a in actions
+            if a["action"] == "delete_element"
+            and a["params"]["element_id"] == _CONTEXT_LOADING_ELEMENT_ID
+        ]
+        assert len(delete_actions) == 1

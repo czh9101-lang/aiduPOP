@@ -45,6 +45,7 @@ _T: dict[str, tuple[str, str]] = {
     "clarify_retry": ("Retry Submit", "重试提交"),
     "clarify_resolved": ("Selected: {}", "已选择: {}"),
     "clarify_confirmed": ("Confirmed", "已确认"),
+    "loading_context": ("Loading context...", "正在加载上下文..."),
 }
 
 

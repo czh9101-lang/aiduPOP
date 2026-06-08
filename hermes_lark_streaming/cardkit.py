@@ -53,6 +53,7 @@ REASONING_TEXT_ELEMENT_ID = "reasoning_text"
 TOOL_PANEL_ELEMENT_ID = "tool_panel"
 _LOADING_ELEMENT_ID = "loading_icon"
 _LOADING_IMG_KEY = "img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg"
+_CONTEXT_LOADING_ELEMENT_ID = "context_loading_hint"
 
 
 def _collapsible_panel(
@@ -108,6 +109,25 @@ def _loading_element() -> dict:
             "size": "16px 16px",
         },
         "element_id": _LOADING_ELEMENT_ID,
+    }
+
+
+def _context_loading_element() -> dict:
+    """Build the 'loading context' placeholder element with Feishu standard_icon."""
+    en_text, zh_text = _T["loading_context"]
+    return {
+        "tag": "div",
+        "icon": {
+            "tag": "standard_icon",
+            "token": "time_outlined",
+            "size": "16px 16px",
+        },
+        "text": {
+            "tag": "lark_md",
+            "content": en_text,
+            "i18n_content": _i18n(en_text, zh_text),
+        },
+        "element_id": _CONTEXT_LOADING_ELEMENT_ID,
     }
 
 
@@ -475,6 +495,14 @@ def build_preservative_seal_actions(
                     "elements": footer_elements,
                 },
             })
+
+    # ── Delete context loading hint (if present) ──
+    actions.append({
+        "action": "delete_element",
+        "params": {
+            "element_id": _CONTEXT_LOADING_ELEMENT_ID,
+        },
+    })
 
     # ── Delete loading icon ──
     actions.append({

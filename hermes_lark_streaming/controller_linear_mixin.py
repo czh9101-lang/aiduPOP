@@ -12,9 +12,11 @@ import re
 
 from .cardkit import (
     _LOADING_ELEMENT_ID,
+    _CONTEXT_LOADING_ELEMENT_ID,
     _build_background_review_panel,
     _build_reasoning_panel,
     _build_tool_panel,
+    _context_loading_element,
     _format_elapsed,
     _streaming_element,
     build_im_fallback_card,
@@ -207,6 +209,25 @@ class LinearControllerMixin:
                 session.use_cardkit = True
                 session.element_count = 1  # loading element
                 session.flush.set_throttle(self._cfg.flush_interval_sec)
+
+                # ── Insert context loading hint (immediate user feedback) ──
+                try:
+                    session.sequence += 1
+                    await self._client.cardkit_batch_update(
+                        session.card_id,
+                        [{
+                            "action": "add_elements",
+                            "params": {
+                                "type": "insert_before",
+                                "target_element_id": _LOADING_ELEMENT_ID,
+                                "elements": [_context_loading_element()],
+                            },
+                        }],
+                        sequence=session.sequence,
+                    )
+                    session.element_count = 2  # loading + context hint
+                except Exception:
+                    _logger.debug("context loading hint insert failed, continuing", exc_info=True)
             except FeishuAPIError:
                 _logger.info("linear CardKit create failed, falling back to non-linear")
                 card = build_im_fallback_card()
@@ -835,7 +856,11 @@ class LinearControllerMixin:
         new_el_estimates: dict[str, int],
         updated_tool_segs: list[Segment],
     ) -> bool:
-        """拆卡：先 flush pending actions，封旧卡，创建新卡。返回 False 表示失败需中断 flush."""
+        """拆卡：先 flush pending actions，封旧卡，创建新卡。返回 False 表示失败需中断 flush.
+
+        操作顺序：flush → seal old card → create new card
+        封旧卡在创建新卡之前，避免并发 stream_element 导致 sequence 冲突使封卡静默失败。
+        """
         assert self._client is not None
         old_card_id = session.card_id
         assert old_card_id is not None
@@ -844,11 +869,13 @@ class LinearControllerMixin:
         segments = linear_state.segments
         all_steps = session.tool_use.build_display_steps()
 
+        # Step 1: Flush pending actions
         if actions and not await self._do_linear_batch_update(
             session, segments, actions, new_el_ids, new_el_estimates, updated_tool_segs,
         ):
             return False
 
+        # Step 2: Seal old card FIRST (before creating new card, to avoid sequence conflicts)
         seal_segments = [s for s in segments[:split_idx] if s.created]
         if session.image_resolver:
             for seg in seal_segments:
@@ -869,53 +896,22 @@ class LinearControllerMixin:
         )
 
         try:
-            card = build_streaming_card_v2(
-                show_tool_use=False,
-                show_reasoning=False,
-                show_streaming_element=False,
-                streaming_panel_expanded=self._cfg.streaming_panel_expanded,
-                print_strategy=self._cfg.print_strategy,
-            )
-            new_card_id = await self._client.cardkit_create(card)
-            new_msg_id = await self._client.reply_card_by_id(session.anchor_id or session.message_id, new_card_id)
-        except Exception:
-            _logger.warning(
-                "linear split fallback: create next card failed, continue on current card",
-                exc_info=True,
-            )
-            # 拆卡失败时降级为继续写当前卡，并禁用后续拆卡重试以避免反复卡在同一边界。
-            session.split_disabled = True
-            return True
-
-        try:
-            # ── Step 1: Try preservative seal first (no element explosion) ──
-            # 保留式封卡：关闭流式 + 增量更新，不触发 _split_long_text，
-            # 流式阶段的 streaming element 仍为 1 个元素。
             seal_ok = await self._preservative_seal(session, partial=True)
             if not seal_ok:
-                # ── Step 2: Preservative seal failed — fall back to full rebuild ──
-                # Note: streaming may already be closed by preservative seal attempt,
-                # so we catch CARDKIT_STREAMING_CLOSED and skip close_streaming.
                 session.sequence += 1
                 try:
                     await self._client.cardkit_close_streaming(old_card_id, sequence=session.sequence)
                 except FeishuAPIError as close_err:
                     if close_err.code != CARDKIT_STREAMING_CLOSED:
                         raise
-                    # Streaming already closed by preservative seal attempt — that's fine
                 session.sequence += 1
                 await self._client.cardkit_update(old_card_id, seal_card, sequence=session.sequence)
         except FeishuAPIError as e:
-            # ── 封卡 300305 元素超限 → 渐进降级：compact seal → minimal seal ──
-            # 仅 close_streaming 不更新内容，让旧卡片保留流式态最后内容，
-            # 好过卡片永远停留在跑马灯状态。
             if e.code == CARDKIT_CONTENT_FAILED and e.extract_sub_code() == CARDKIT_ELEMENT_LIMIT:
                 _logger.warning(
                     "linear seal element limit for old card %s, attempting compact seal",
                     old_card_id[:12],
                 )
-                # ── Progressive degradation: compact seal → minimal seal ──
-                # Step 1: Try compact seal (keeps all panel types but truncated)
                 try:
                     compact_seal = build_linear_compact_seal_card(
                         segments=seal_segments,
@@ -926,7 +922,6 @@ class LinearControllerMixin:
                     session.sequence += 1
                     await self._client.cardkit_update(old_card_id, compact_seal, sequence=session.sequence)
                 except Exception:
-                    # Step 2: Compact seal also failed → minimal seal (answer only)
                     _logger.debug(
                         "compact seal also failed for old card %s, trying minimal seal",
                         old_card_id[:12], exc_info=True,
@@ -961,12 +956,51 @@ class LinearControllerMixin:
                 exc_info=True,
             )
 
+        # Step 3: Create new card (AFTER sealing old card)
+        try:
+            card = build_streaming_card_v2(
+                show_tool_use=False,
+                show_reasoning=False,
+                show_streaming_element=False,
+                streaming_panel_expanded=self._cfg.streaming_panel_expanded,
+                print_strategy=self._cfg.print_strategy,
+            )
+            new_card_id = await self._client.cardkit_create(card)
+            new_msg_id = await self._client.reply_card_by_id(
+                session.anchor_id or session.message_id, new_card_id,
+            )
+        except Exception:
+            _logger.warning(
+                "linear split fallback: create next card failed, continue on current card",
+                exc_info=True,
+            )
+            session.split_disabled = True
+            return True
+
+        # Insert context loading hint on new card
+        try:
+            await self._client.cardkit_batch_update(
+                new_card_id,
+                [{
+                    "action": "add_elements",
+                    "params": {
+                        "type": "insert_before",
+                        "target_element_id": _LOADING_ELEMENT_ID,
+                        "elements": [_context_loading_element()],
+                    },
+                }],
+                sequence=1,
+            )
+        except Exception:
+            _logger.debug("context loading hint insert on new card failed", exc_info=True)
+
+        # Update session for new card
         session.card_id = new_card_id
         session.card_msg_id = new_msg_id
-        session.element_count = 1  # loading
+        session.element_count = 2  # loading + context hint
         session.sequence = 1
         session.split_disabled = False
-        session.element_limit_hit = False  # 拆卡后重置超限标记
+        session.element_limit_hit = False
         session.split_index = split_idx
         _logger.info(
             "linear split: msg=%s sealed=%d new_card=%s",

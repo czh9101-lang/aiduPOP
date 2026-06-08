@@ -386,6 +386,24 @@ v0.18.2 起，answer 估算新增图片元素计数（`_count_images_in_text`）
 
 **模式**: `plugin.py` 的默认值字典是写入 `config.yaml` 的源头，必须与 `config.py` 的属性默认值保持一致——后者仅在 `config.yaml` 缺少该键时才生效。
 
+### 10.16 上下文加载占位提示（v0.19.1 新增）
+
+**设计决策**: 卡片创建后到首次内容 flush 之间有长达 43 秒空窗期（模型冷启 + 网关路由），卡片仅显示跑马灯转圈，用户以为系统卡死。
+
+**实现**: 卡片创建后立即通过 `batch_update` 插入占位元素 `_context_loading_element()`，显示飞书 `standard_icon` token `time_outlined` + "正在加载上下文..." 文本。封卡时 `build_preservative_seal_actions` 自动删除占位元素。首卡和拆卡新卡均适用。
+
+**关键**: 占位元素使用 `div` + `standard_icon`（而非 emoji），与飞书卡片风格统一。封卡时必须删除占位元素，否则会在完成态卡片中残留。
+
+**模式**: 用户应始终知道系统在做什么——"空白+转圈"等于"卡死了"，"转圈+提示文字"等于"正在处理"。占位文本消除了这个感知差异。
+
+### 10.17 拆卡保留式封卡顺序修正（v0.19.1 修复）
+
+**问题**: `_do_linear_split()` 先创建新卡再封旧卡，两步共享 `session.sequence`。创建新卡后、封旧卡前，并发的 `stream_element` 使 sequence 号超前；`_preservative_seal` 将 sequence conflict（300317）误判为幂等成功，实际 close_streaming 和 batch_update 均未执行 → 第二张卡跑马灯不停 + 无 footer。
+
+**解决**: 调整操作顺序为 **先封旧卡再创建新卡**（flush → seal old → create new）。封旧卡时无并发操作抢 sequence，保证封卡成功。新卡创建后 `session.sequence` 重置为 1。
+
+**模式**: 共享状态的并发操作必须按"先完成旧操作再开始新操作"的顺序编排——先封旧卡（关闭写入），再建新卡（开始新写入），避免操作交叉导致状态错乱。
+
 ---
 
 ## 11. 测试结构
@@ -441,7 +459,7 @@ hermes gateway restart
 
 | 版本 | 日期 | 核心变更 |
 |------|------|----------|
-| v0.19.1 | 2026-06-08 | 保留式封卡 + Clarify 交互卡片 UX 改进（选项展示+即时锁定+飞书官方图标）+ streaming_panel_expanded 默认值修正 |
+| v0.19.1 | 2026-06-08 | 保留式封卡 + Clarify 三态交互卡片 + streaming_panel_expanded 默认值修正 + 上下文加载占位提示 + 拆卡封卡顺序修正 |
 | v0.18.3 | 2026-06-08 | message_id NoneType 下标崩溃修复 + 封卡 300305 渐进降级 |
 | v0.18.2 | 2026-06-08 | 拆卡阈值修正（180→150）+ answer 图片元素计数 |
 | v0.18.1 | 2026-06-08 | 更新命令修正 + 配置/决策点/初始化诊断日志 |
