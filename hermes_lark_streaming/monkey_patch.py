@@ -1873,7 +1873,7 @@ async def _schedule_confirm_card(*, cid: str) -> None:
         return
 
     try:
-        from .cardkit import build_clarify_resolved_card
+        from .cardkit import build_clarify_confirmed_card
         from .controller import get_controller
 
         ctrl = get_controller()
@@ -1884,8 +1884,8 @@ async def _schedule_confirm_card(*, cid: str) -> None:
             )
             return
 
-        card_data = build_clarify_resolved_card(
-            question=question, selected=selected, choices=choices,
+        card_data = build_clarify_confirmed_card(
+            question=question, selected=selected,
         )
         await ctrl._client.update_card(card_msg_id, card_data)
 

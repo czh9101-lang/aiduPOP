@@ -499,17 +499,17 @@ def build_preservative_seal_actions(
     # 占位提示在首字即显时通常已被删除，但如果卡片在 answer
     # 到来前就被封（如超限拆卡），占位提示可能仍在，需要兜底删除。
     actions.append({
-        "action": "delete_element",
+        "action": "delete_elements",
         "params": {
-            "element_id": _LOADING_HINT_ELEMENT_ID,
+            "element_ids": [_LOADING_HINT_ELEMENT_ID],
         },
     })
 
     # ── Delete loading icon ──
     actions.append({
-        "action": "delete_element",
+        "action": "delete_elements",
         "params": {
-            "element_id": _LOADING_ELEMENT_ID,
+            "element_ids": [_LOADING_ELEMENT_ID],
         },
     })
 
@@ -1118,7 +1118,7 @@ def build_clarify_card(
         "tag": "div",
         "icon": {
             "tag": "standard_icon",
-            "token": "helpdesk_outlined",
+            "token": "info_outlined",
             "size": "20px 20px",
             "color": "blue",
         },
@@ -1353,8 +1353,8 @@ def build_clarify_confirmed_card(
             "tag": "div",
             "text": {
                 "tag": "lark_md",
-                "content": f"✓ {en_confirmed}",
-                "i18n_content": _i18n(f"✓ {en_confirmed}", f"✓ {zh_confirmed}"),
+                "content": en_confirmed,
+                "i18n_content": _i18n(en_confirmed, zh_confirmed),
             },
         },
     ]

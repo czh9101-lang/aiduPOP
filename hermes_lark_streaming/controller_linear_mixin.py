@@ -437,13 +437,13 @@ class LinearControllerMixin:
                 })
 
                 # ── 首字即显时删除上下文加载占位提示 ──
-                # 当第一个 answer segment 被创建（即首个文字到来时），
+                # 当第一个内容段被创建（不论类型：reasoning/tool/answer），
                 # 在同一批 batch_update 操作中删除占位提示，无需额外 API 调用。
-                if seg.type == "answer" and not session._loading_hint_removed:
+                if not session._loading_hint_removed and seg.type in ("reasoning", "tool", "answer"):
                     actions.append({
-                        "action": "delete_element",
+                        "action": "delete_elements",
                         "params": {
-                            "element_id": _LOADING_HINT_ELEMENT_ID,
+                            "element_ids": [_LOADING_HINT_ELEMENT_ID],
                         },
                     })
                     session._loading_hint_removed = True

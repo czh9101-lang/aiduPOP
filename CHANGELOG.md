@@ -10,6 +10,10 @@
 | 6 | Bug | 拆卡封卡失败——第二张卡跑马灯不停、无 footer | `_do_linear_split` 先建新卡再封旧卡，并发操作导致 sequence conflict（300317）被误判为幂等成功（`return True`），`close_streaming` + `batch_update` 静默失败 | ① 调整 `_do_linear_split()` 执行顺序：**先封旧卡再建新卡**，消除并发冲突；② 修复 `_preservative_seal()` 的 sequence conflict 处理：不再直接 `return True`，改为重试（最多 2 次，每次递增 sequence），重试全部失败才降级为全量重建 |
 | 7 | Bug | Clarify 卡片回调无事件循环时 `resolve_gateway_clarify` 不调用 | `_handle_clarify_card_action` 的 retry/select/input/button 路径在 `adapter._loop is None` 时跳过 resolve 调用，导致 Clarify 回调在无事件循环环境下无法完成 resolve | 为所有四个回调路径（retry_submit、select、input_submit、button_submit）新增 `else` 分支：当 `loop is None` 时同步调用 `resolve_gateway_clarify`，确保无事件循环时 Clarify 仍能正常完成 |
 | 8 | Chore | 飞书通知推送缺少版本号 | `scripts/notify_feishu.py` 推送的飞书卡片没有版本号信息，无法区分是哪个版本的推送 | 从 `plugin.yaml` 动态读取版本号，在飞书通知卡片首行显示 `**版本**: v0.19.1` |
+| 9 | Fix | `delete_element` → `delete_elements` API 迁移 | 飞书 Card 2.0 更新元素删除 API，`delete_element` 需传入 `element_ids` 数组而非 `element_id` 单值 | ① `cardkit.py` 保留式封卡占位提示/加载图标删除改为 `delete_elements` + `element_ids`；② `controller_linear_mixin.py` 首字即显加载提示删除改为 `delete_elements` + `element_ids` |
+| 10 | Fix | 加载占位提示仅等 answer 才删除，reasoning/tool 期间不删 | 首段是 reasoning 或 tool 时加载提示一直留在卡片上，用户看到"⏳ 加载上下文"与推理内容同时存在，认知冲突 | `controller_linear_mixin.py` 条件从 `seg.type == "answer"` 放宽为 `seg.type in ("reasoning", "tool", "answer")`，任何内容段首次出现即删除加载提示 |
+| 11 | Fix | `monkey_patch.py` 引用已删除的 `build_clarify_resolved_card` | Clarify 三态重构移除了 `build_clarify_resolved_card()`，`_schedule_confirm_card` 仍引用该函数名导致 `ImportError` | `monkey_patch.py` 改为导入 `build_clarify_confirmed_card`，移除不存在的 `choices` 参数 |
+| 12 | Chore | Clarify 交互卡片清理 — emoji 移除 + 图标替换 | Clarify 已确认态残留 `✓` emoji；待选择态使用 `helpdesk_outlined`（耳机图标），语义不匹配提问场景 | ① `build_clarify_confirmed_card` 移除 `✓ emoji`，纯文本显示 Confirmed/已确认；② `build_clarify_card` 待选择态图标 `helpdesk_outlined` → `info_outlined`（蓝色 ℹ️） |
 
 ## v0.19.0 (2026-06-08)
 
