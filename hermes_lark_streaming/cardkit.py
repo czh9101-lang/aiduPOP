@@ -401,6 +401,92 @@ def _build_footer_elements(
     ]
 
 
+def build_preservative_seal_actions(
+    *,
+    partial: bool = False,
+    footer_data: dict | None = None,
+    is_error: bool = False,
+    is_aborted: bool = False,
+    error_message: str = "",
+    footer_fields: list[list[str]] | None = None,
+    footer_show_label: bool = False,
+) -> list[dict]:
+    """构建保留式封卡的 batch_update actions.
+
+    生成增量操作：删除 loading icon + 添加 partial indicator 或 footer。
+    不重建整卡，避免 1→N+2M 的元素爆炸。
+
+    操作顺序：
+    1. insert_before loading_icon: 添加 error panel（如有）
+    2. insert_before loading_icon: 添加 partial indicator 或 footer
+    3. delete_element: 删除 loading_icon
+
+    所有 add_elements 都用 insert_before loading_icon 定位，
+    然后删除 loading_icon，最终效果是新增元素出现在卡片底部。
+    """
+    actions: list[dict] = []
+
+    # ── Error/interrupt panel (if any) ──
+    if error_message:
+        actions.append({
+            "action": "add_elements",
+            "params": {
+                "type": "insert_before",
+                "target_element_id": _LOADING_ELEMENT_ID,
+                "elements": [_build_error_panel(
+                    error_message, is_aborted=is_aborted, expanded=True,
+                )],
+            },
+        })
+
+    # ── Partial indicator or footer ──
+    if partial:
+        en_text, zh_text = _T["partial_continues"]
+        partial_elements = [
+            {"tag": "hr"},
+            {
+                "tag": "markdown",
+                "content": f"▸ {en_text} ↩",
+                "i18n_content": _i18n(f"▸ {en_text} ↩", f"▸ {zh_text} ↩"),
+            },
+        ]
+        actions.append({
+            "action": "add_elements",
+            "params": {
+                "type": "insert_before",
+                "target_element_id": _LOADING_ELEMENT_ID,
+                "elements": partial_elements,
+            },
+        })
+    else:
+        footer_elements = _build_footer_elements(
+            footer_data,
+            is_error=is_error,
+            is_aborted=is_aborted,
+            fields=footer_fields,
+            show_label=footer_show_label,
+        )
+        if footer_elements:
+            actions.append({
+                "action": "add_elements",
+                "params": {
+                    "type": "insert_before",
+                    "target_element_id": _LOADING_ELEMENT_ID,
+                    "elements": footer_elements,
+                },
+            })
+
+    # ── Delete loading icon ──
+    actions.append({
+        "action": "delete_element",
+        "params": {
+            "element_id": _LOADING_ELEMENT_ID,
+        },
+    })
+
+    return actions
+
+
 def _render_footer_field(
     name: str,
     data: dict,
@@ -973,4 +1059,222 @@ def build_gateway_card(
     if summary:
         card["config"]["summary"] = {"content": summary}
 
+    return card
+
+
+def build_clarify_card(
+    *,
+    question: str,
+    choices: list[str] | None = None,
+    clarify_id: str = "",
+) -> dict[str, Any]:
+    """构建 Clarify 交互卡片（下拉框 + 自定义输入选项）.
+
+    两种模式:
+      - choices 非空: 显示 select_static 下拉框，选项为 choices + "✏️ 自定义输入"
+      - choices 为空/None: 显示 input 文本输入框（开放式问题）
+
+    Args:
+        question: 问题文本
+        choices: 选项列表（最多 4 项），None/空表示开放式问题
+        clarify_id: 唯一标识，用于回调路由
+    """
+    elements: list[dict] = []
+
+    # ── 问题标题 (standard_icon for polished look) ──
+    elements.append({
+        "tag": "div",
+        "icon": {
+            "tag": "standard_icon",
+            "token": "helpdesk_outlined",
+            "size": "20px 20px",
+            "color": "blue",
+        },
+        "text": {
+            "tag": "lark_md",
+            "content": f"**{question}**",
+        },
+    })
+
+    if choices:
+        # ── 多选模式: select_static 下拉框 ──
+        options: list[dict] = []
+        for i, choice in enumerate(choices):
+            options.append({
+                "text": {"tag": "plain_text", "content": choice},
+                "value": str(i),
+            })
+        # 追加 "自定义输入" 选项
+        en_other, zh_other = _T["clarify_other"]
+        options.append({
+            "text": {"tag": "plain_text", "content": f"✏️ {en_other}", "i18n_content": _i18n(f"✏️ {en_other}", f"✏️ {zh_other}")},
+            "value": "other",
+        })
+
+        en_placeholder, zh_placeholder = _T["clarify_select_placeholder"]
+        select_el: dict[str, Any] = {
+            "tag": "select_static",
+            "element_id": "clarify_select",
+            "placeholder": {
+                "tag": "plain_text",
+                "content": en_placeholder,
+                "i18n_content": _i18n(en_placeholder, zh_placeholder),
+            },
+            "options": options,
+            "behaviors": [{
+                "type": "callback",
+                "value": {
+                    "hermes_clarify_action": "select",
+                    "clarify_id": clarify_id,
+                },
+            }],
+        }
+        elements.append(select_el)
+    else:
+        # ── 开放式问题: input 文本输入 ──
+        en_input_ph, zh_input_ph = _T["clarify_input_placeholder"]
+        input_el: dict[str, Any] = {
+            "tag": "input",
+            "element_id": "clarify_input",
+            "placeholder": {
+                "tag": "plain_text",
+                "content": en_input_ph,
+                "i18n_content": _i18n(en_input_ph, zh_input_ph),
+            },
+            "max_length": 500,
+            "name": "clarify_input",
+            "behaviors": [{
+                "type": "callback",
+                "value": {
+                    "hermes_clarify_action": "input_submit",
+                    "clarify_id": clarify_id,
+                },
+            }],
+        }
+        elements.append(input_el)
+
+    card: dict[str, Any] = {
+        "schema": "2.0",
+        "config": {
+            "wide_screen_mode": True,
+            "streaming_mode": False,
+            "locales": _LOCALES,
+        },
+        "body": {"elements": elements},
+    }
+    return card
+
+
+def build_clarify_resolved_card(
+    *,
+    question: str,
+    selected: str,
+) -> dict[str, Any]:
+    """构建 Clarify 已回复卡片.
+
+    用户做出选择后，返回此卡片作为 inline 更新，显示他们的选择。
+
+    Args:
+        question: 原始问题文本
+        selected: 用户选择的文本
+    """
+    en_resolved, zh_resolved = _T["clarify_resolved"]
+    en_label = en_resolved.format(selected)
+    zh_label = zh_resolved.format(selected)
+
+    elements: list[dict] = [
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "helpdesk_outlined",
+                "size": "20px 20px",
+                "color": "blue",
+            },
+            "text": {
+                "tag": "lark_md",
+                "content": f"**{question}**",
+            },
+        },
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "resolve_outlined",
+                "size": "16px 16px",
+                "color": "green",
+            },
+            "text": {
+                "tag": "lark_md",
+                "content": en_label,
+                "i18n_content": _i18n(en_label, zh_label),
+            },
+        },
+    ]
+
+    card: dict[str, Any] = {
+        "schema": "2.0",
+        "config": {
+            "wide_screen_mode": True,
+            "streaming_mode": False,
+            "locales": _LOCALES,
+        },
+        "body": {"elements": elements},
+    }
+    return card
+
+
+def build_clarify_awaiting_input_card(
+    *,
+    question: str,
+) -> dict[str, Any]:
+    """构建 Clarify 等待自定义输入卡片.
+
+    当用户选择 "自定义输入" 后，返回此卡片作为 inline 更新，
+    提示用户在聊天中输入回答。
+
+    Args:
+        question: 原始问题文本
+    """
+    en_awaiting, zh_awaiting = _T["clarify_awaiting_input"]
+
+    elements: list[dict] = [
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "helpdesk_outlined",
+                "size": "20px 20px",
+                "color": "blue",
+            },
+            "text": {
+                "tag": "lark_md",
+                "content": f"**{question}**",
+            },
+        },
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "edit_outlined",
+                "size": "16px 16px",
+                "color": "orange",
+            },
+            "text": {
+                "tag": "lark_md",
+                "content": en_awaiting,
+                "i18n_content": _i18n(en_awaiting, zh_awaiting),
+            },
+        },
+    ]
+
+    card: dict[str, Any] = {
+        "schema": "2.0",
+        "config": {
+            "wide_screen_mode": True,
+            "streaming_mode": False,
+            "locales": _LOCALES,
+        },
+        "body": {"elements": elements},
+    }
     return card

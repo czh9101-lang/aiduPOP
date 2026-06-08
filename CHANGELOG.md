@@ -1,4 +1,12 @@
-## v0.19.0 (2026-06-12)
+## v0.19.1 (2026-06-08)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | 保留式封卡（Preservative Seal） | 封卡时 `build_linear_complete_card` 调用 `_split_long_text()`（每2400字符一块）+ `_extract_images_from_markdown()`（每张图2个嵌套元素），导致1个流式streaming元素爆炸成N+2M个元素，超过飞书200元素限制，封卡失败 | 新增 `_preservative_seal()` 方法：`close_streaming` + `batch_update` 增量更新（删loading、加partial指示器/footer），保留已有streaming元素不动，避免元素爆炸。所有封卡场景（拆卡封存 `_do_linear_split` + 完成封存 `_do_linear_complete_inner`）统一先尝试保留式封卡，失败后降级为全量重建（含渐进降级 compact seal → minimal seal） |
+| 2 | Feature | Clarify 交互卡片 | Clarify 工具调用时使用文本消息显示选项列表，用户需手动输入数字或选项文本回复，体验差 | 新增 `build_clarify_card()` 构建飞书交互卡片：多选模式使用 `select_static` 下拉框展示选项 + "✏️ 自定义输入"选项；开放模式使用 `input` 文本输入框。Monkey-patch `FeishuAdapter.send_clarify` 替换文本消息为交互卡片；Monkey-patch `_on_card_action_trigger` 处理卡片回调，选择预定义选项直接解析，选择"自定义输入"后 `mark_awaiting_text` 等待用户下一条消息。回调解析通过 `resolve_gateway_clarify()` 公开 API 完成 |
+| 3 | Bug | CHANGELOG/SKILL.md 日期错误 | 多个版本的发布日期标注为6月9日-12日等未来日期 | 修正 v0.18.2/v0.18.3/v0.18.4 的日期为6月8日 |
+
+## v0.19.0 (2026-06-08)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
@@ -7,7 +15,7 @@
 | 3 | Perf | 性能指标采集（Performance Telemetry） | 关键路径（卡片创建、flush、stream_element、complete）无计时日志，性能瓶颈无法定位 | 在 `controller_linear_mixin.py` 的 `_do_create_linear_card`/`_do_linear_flush`/`stream_element` 调用/`_do_linear_complete_inner` 中添加 `time.monotonic()` 计时 + `debug` 级别日志；在 `feishu.py` 的 `cardkit_create`/`cardkit_stream_element`/`cardkit_batch_update` 中添加 API 调用计时；在 `controller.py` 的 `on_answer()` 中记录首字到达时间 `_first_answer_time` + TTFB 日志 |
 | 4 | Perf | stream_element 异步优化 | `cardkit_stream_element` 使用 `asyncio.to_thread` 包装同步 SDK 调用，增加线程切换开销；lark-oapi 新版已提供 `acontent` 异步方法 | `FeishuClient.__init__` 中探测 `card_element.acontent` 是否存在，缓存为 `_use_async_stream_element`；`cardkit_stream_element` 优先使用原生异步方法，回退到 `asyncio.to_thread` |
 
-## v0.18.4 (2026-06-12)
+## v0.18.4 (2026-06-08)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
@@ -16,7 +24,7 @@
 | 3 | Feature | 后台审查进度消息放入卡片 | `background_review` 消息（如"检查回复质量"、"更新记忆"）以纯文本发送到聊天，与卡片内容割裂，视觉不统一 | ① 新增 `_build_background_review_panel()` 构建可折叠审查面板；② `LinearState` 新增 `bg_review_messages` / `bg_review_panel_id` / `bg_review_panel_added` 属性；③ 线性模式下审查消息实时推入卡片面板（`defer_background_review` 返回 True 抑制纯文本）；④ 非线性模式仍走原暂存逻辑；⑤ 完成态卡片包含审查面板 |
 | 4 | Test | 新增配置、面板测试 | 新功能需测试覆盖 | ① 新增 `test_flush_interval_ms_default`、`test_flush_interval_sec_default`、`test_flush_interval_ms_custom`、`test_flush_interval_ms_clamped`；② 新增 `TestPartialStatusIndicator`（3 个测试）；③ 新增 `TestBackgroundReviewPanel`（3 个测试）；④ 修复 `test_first_call_schedules_delayed_flush` 和 `test_enables_flushing` 适配 500ms 默认值 |
 
-## v0.18.3 (2026-06-11)
+## v0.18.3 (2026-06-08)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
@@ -25,7 +33,7 @@
 | 3 | Docs | SKILL.md 路线图精简 | — | 移除 3 个过时/不适用条目；新增 10.11 message_id NoneType 下标崩溃、10.12 封卡 300305 元素超限丢失面板两个陷阱条目；新增 v0.18.3 版本历史条目 |
 | 4 | Chore | README 版本徽章未随版本号更新 | 版本号更新时遗漏了中英文 README 中的 shields.io badge 版本号 | 中英文 README 版本徽章统一更新至 0.18.3 |
 
-## v0.18.2 (2026-06-10)
+## v0.18.2 (2026-06-08)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
