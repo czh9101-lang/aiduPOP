@@ -52,6 +52,7 @@ REASONING_ELEMENT_ID = "reasoning_content"
 REASONING_TEXT_ELEMENT_ID = "reasoning_text"
 TOOL_PANEL_ELEMENT_ID = "tool_panel"
 _LOADING_ELEMENT_ID = "loading_icon"
+_LOADING_HINT_ELEMENT_ID = "context_loading_hint"
 _LOADING_IMG_KEY = "img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg"
 
 
@@ -108,6 +109,24 @@ def _loading_element() -> dict:
             "size": "16px 16px",
         },
         "element_id": _LOADING_ELEMENT_ID,
+    }
+
+
+def _loading_hint_element() -> dict:
+    """上下文加载占位元素 — 首卡创建后插入，首字即显时删除."""
+    return {
+        "tag": "div",
+        "icon": {
+            "tag": "standard_icon",
+            "token": "time_outlined",
+            "size": "16px 16px",
+        },
+        "text": {
+            "tag": "lark_md",
+            "content": _T["loading_context"][0],
+            "i18n_content": _t("loading_context"),
+        },
+        "element_id": _LOADING_HINT_ELEMENT_ID,
     }
 
 
@@ -475,6 +494,16 @@ def build_preservative_seal_actions(
                     "elements": footer_elements,
                 },
             })
+
+    # ── Delete context loading hint (if still present) ──
+    # 占位提示在首字即显时通常已被删除，但如果卡片在 answer
+    # 到来前就被封（如超限拆卡），占位提示可能仍在，需要兜底删除。
+    actions.append({
+        "action": "delete_element",
+        "params": {
+            "element_id": _LOADING_HINT_ELEMENT_ID,
+        },
+    })
 
     # ── Delete loading icon ──
     actions.append({
@@ -1068,30 +1097,23 @@ def build_clarify_card(
     choices: list[str] | None = None,
     clarify_id: str = "",
 ) -> dict[str, Any]:
-    """构建 Clarify 交互卡片 — 待选择态（三态之第一态）.
+    """构建 Clarify 待选择态卡片（State 1: Pending）.
 
-    卡片布局:
-      - 问题标题（helpdesk_outlined 图标）
-      - 选项列表（markdown A/B/C 格式完整展示，仅 choices 非空时）
-      - select_static 下拉框（仅 choices 非空时，选项不含"自定义输入"）
-      - input 输入框（始终展示，placeholder 提示"或输入自定义内容"）
-      - 提交按钮（支持点击提交 input 内容）
-
-    两种模式:
-      - choices 非空: 选项列表 + 下拉框 + 输入框 + 提交按钮
-      - choices 为空/None: 仅输入框 + 提交按钮（开放式问题）
-
-    三态流转:
-      待选择态(本函数) → 已提交态(build_clarify_submitted_card) → 已确认态(build_clarify_resolved_card)
+    三态卡片设计 — 待选择态:
+      - 标题: helpdesk_outlined 图标 + 问题文本
+      - 选项列表: markdown 全量展示所有选项（A. B. C.）
+      - 快速选择: select_static 下拉框（仅含预定义选项，无 "其他" 选项）
+      - 自定义输入: input 文本输入框（支持 Enter + 按钮提交）
+      - 无 choices 时仅显示 input 输入框
 
     Args:
         question: 问题文本
-        choices: 选项列表（最多 4 项），None/空表示开放式问题
+        choices: 选项列表，None/空表示开放式问题
         clarify_id: 唯一标识，用于回调路由
     """
     elements: list[dict] = []
 
-    # ── 问题标题 (standard_icon for polished look) ──
+    # ── 问题标题 (helpdesk_outlined icon) ──
     elements.append({
         "tag": "div",
         "icon": {
@@ -1107,25 +1129,23 @@ def build_clarify_card(
     })
 
     if choices:
-        # ── 选项列表完整展示（markdown 格式） ──
-        choice_labels = [
-            f"{'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i]}. {choice}"
-            for i, choice in enumerate(choices)
-        ]
-        choice_text_en = "\n".join(choice_labels)
-        choice_text_zh = choice_text_en  # A/B/C 格式无需翻译
+        # ── Markdown 全量展示选项列表 ──
+        option_lines = []
+        for i, choice in enumerate(choices):
+            label = chr(ord("A") + i)  # A, B, C, ...
+            option_lines.append(f"{label}. {choice}")
+        options_md = "\n".join(option_lines)
         elements.append({
             "tag": "markdown",
-            "content": choice_text_en,
-            "i18n_content": _i18n(choice_text_en, choice_text_zh),
+            "content": options_md,
         })
 
-        # ── select_static 下拉框（不含"自定义输入"选项） ──
+        # ── 快速选择: select_static 下拉框（无 "其他" 选项） ──
         options: list[dict] = []
         for i, choice in enumerate(choices):
-            label = f"{'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i]}. {choice}"
+            label = chr(ord("A") + i)
             options.append({
-                "text": {"tag": "plain_text", "content": label},
+                "text": {"tag": "plain_text", "content": f"{label}. {choice}"},
                 "value": str(i),
             })
 
@@ -1149,7 +1169,7 @@ def build_clarify_card(
         }
         elements.append(select_el)
 
-    # ── input 输入框（始终展示，支持 Enter 提交） ──
+    # ── 自定义输入: input 文本输入框（始终显示） ──
     en_input_ph, zh_input_ph = _T["clarify_input_placeholder"]
     input_el: dict[str, Any] = {
         "tag": "input",
@@ -1171,28 +1191,6 @@ def build_clarify_card(
     }
     elements.append(input_el)
 
-    # ── 提交按钮（V2: button 直接放入 elements，不再用 action 容器） ──
-    en_submit, zh_submit = _T["clarify_submit"]
-    button_el: dict[str, Any] = {
-        "tag": "button",
-        "element_id": "clarify_submit_btn",
-        "text": {
-            "tag": "plain_text",
-            "content": en_submit,
-            "i18n_content": _i18n(en_submit, zh_submit),
-        },
-        "type": "primary",
-        "size": "medium",
-        "behaviors": [{
-            "type": "callback",
-            "value": {
-                "hermes_clarify_action": "button_submit",
-                "clarify_id": clarify_id,
-            },
-        }],
-    }
-    elements.append(button_el)
-
     card: dict[str, Any] = {
         "schema": "2.0",
         "config": {
@@ -1209,98 +1207,84 @@ def build_clarify_submitted_card(
     *,
     question: str,
     selected: str,
-    choices: list[str] | None = None,
     clarify_id: str = "",
 ) -> dict[str, Any]:
-    """构建 Clarify 已提交卡片 — 软锁定态（三态之第二态）.
+    """构建 Clarify 已提交态卡片（State 2: Submitted / Soft Lock）.
 
-    用户做出选择或输入后，CallBackCard 即时返回此卡片。
-    卡片处于软锁定：显示用户的选择 + "已提交，等待确认..." + "重试提交"按钮。
-    如果网络异常导致 hermes 未收到，用户可点击"重试提交"重新发送同一选择。
-
-    当 hermes 成功收到后，服务端会通过 API 更新卡片为 build_clarify_resolved_card（硬锁定）。
+    三态卡片设计 — 已提交态（软锁定）:
+      - 标题: lock_outlined 图标 + 问题文本
+      - 用户选择内容
+      - "已提交，等待确认..." 提示
+      - 「重试提交」按钮：重新发送同一选择（非重新选择）
 
     Args:
         question: 原始问题文本
-        selected: 用户选择/输入的文本
-        choices: 原始选项列表（用于在卡片中完整展示），None/空表示开放式问题
-        clarify_id: 唯一标识，用于重试提交回调路由
+        selected: 用户选择的文本
+        clarify_id: 唯一标识，用于重试回调路由
     """
-    en_resolved, zh_resolved = _T["clarify_resolved"]
-    en_label = en_resolved.format(selected)
-    zh_label = zh_resolved.format(selected)
+    en_selected, zh_selected = _T["clarify_selected"]
+    en_sel_label = en_selected.format(selected)
+    zh_sel_label = zh_selected.format(selected)
 
     en_submitted, zh_submitted = _T["clarify_submitted"]
-
-    elements: list[dict] = []
-
-    # ── 问题标题（resolve_filled 图标 + 删除线表示已处理） ──
-    elements.append({
-        "tag": "div",
-        "icon": {
-            "tag": "standard_icon",
-            "token": "resolve_filled",
-            "size": "20px 20px",
-            "color": "green",
-        },
-        "text": {
-            "tag": "lark_md",
-            "content": f"~~{question}~~",
-        },
-    })
-
-    # ── 选项列表完整展示（保留上下文） ──
-    if choices:
-        choice_labels = [
-            f"{'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i]}. {choice}"
-            for i, choice in enumerate(choices)
-        ]
-        choice_text = "\n".join(choice_labels)
-        elements.append({
-            "tag": "markdown",
-            "content": choice_text,
-        })
-
-    # ── 用户选择/输入内容 + 已提交提示 ──
-    elements.append({
-        "tag": "div",
-        "icon": {
-            "tag": "standard_icon",
-            "token": "lock_outlined",
-            "size": "16px 16px",
-            "color": "orange",
-        },
-        "text": {
-            "tag": "lark_md",
-            "content": f"{en_label}\n<font color='orange'>{en_submitted}</font>",
-            "i18n_content": _i18n(
-                f"{en_label}\n<font color='orange'>{en_submitted}</font>",
-                f"{zh_label}\n<font color='orange'>{zh_submitted}</font>",
-            ),
-        },
-    })
-
-    # ── 重试提交按钮（V2: button 直接放入 elements，不再用 action 容器） ──
     en_retry, zh_retry = _T["clarify_retry"]
-    retry_el: dict[str, Any] = {
-        "tag": "button",
-        "element_id": "clarify_retry_btn",
-        "text": {
-            "tag": "plain_text",
-            "content": en_retry,
-            "i18n_content": _i18n(en_retry, zh_retry),
-        },
-        "type": "primary",
-        "size": "medium",
-        "behaviors": [{
-            "type": "callback",
-            "value": {
-                "hermes_clarify_action": "retry_submit",
-                "clarify_id": clarify_id,
+
+    elements: list[dict] = [
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "lock_outlined",
+                "size": "20px 20px",
+                "color": "orange",
             },
-        }],
-    }
-    elements.append(retry_el)
+            "text": {
+                "tag": "lark_md",
+                "content": f"**{question}**",
+            },
+        },
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "lock_outlined",
+                "size": "16px 16px",
+                "color": "orange",
+            },
+            "text": {
+                "tag": "lark_md",
+                "content": en_sel_label,
+                "i18n_content": _i18n(en_sel_label, zh_sel_label),
+            },
+        },
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"*{en_submitted}*",
+                "i18n_content": _i18n(f"*{en_submitted}*", f"*{zh_submitted}*"),
+            },
+        },
+        {
+            "tag": "action",
+            "actions": [{
+                "tag": "button",
+                "text": {
+                    "tag": "plain_text",
+                    "content": en_retry,
+                    "i18n_content": _i18n(en_retry, zh_retry),
+                },
+                "type": "primary",
+                "behaviors": [{
+                    "type": "callback",
+                    "value": {
+                        "hermes_clarify_action": "retry_submit",
+                        "clarify_id": clarify_id,
+                    },
+                }],
+            }],
+        },
+    ]
 
     card: dict[str, Any] = {
         "schema": "2.0",
@@ -1314,76 +1298,66 @@ def build_clarify_submitted_card(
     return card
 
 
-def build_clarify_resolved_card(
+def build_clarify_confirmed_card(
     *,
     question: str,
     selected: str,
-    choices: list[str] | None = None,
 ) -> dict[str, Any]:
-    """构建 Clarify 已确认卡片 — 硬锁定态（三态之第三态/终态）.
+    """构建 Clarify 已确认态卡片（State 3: Confirmed / Hard Lock）.
 
-    当 hermes 成功收到用户的选择/输入后，服务端通过 API 更新卡片为此状态。
-    卡片处于硬锁定：显示用户的选择 + "已确认"，无任何操作按钮。
-    这是卡片的终态，不可再修改。
+    三态卡片设计 — 已确认态（硬锁定）:
+      - 标题: resolve_filled 图标 + 问题文本
+      - 用户选择内容
+      - "已确认" 文本
+      - 无操作按钮（由服务端更新卡片至此态）
 
     Args:
         question: 原始问题文本
-        selected: 用户选择/输入的文本
-        choices: 原始选项列表（用于在卡片中完整展示），None/空表示开放式问题
+        selected: 用户选择的文本
     """
-    en_resolved, zh_resolved = _T["clarify_resolved"]
-    en_label = en_resolved.format(selected)
-    zh_label = zh_resolved.format(selected)
+    en_selected, zh_selected = _T["clarify_selected"]
+    en_sel_label = en_selected.format(selected)
+    zh_sel_label = zh_selected.format(selected)
 
     en_confirmed, zh_confirmed = _T["clarify_confirmed"]
 
-    elements: list[dict] = []
-
-    # ── 问题标题（resolve_filled 图标表示已解决 + 删除线） ──
-    elements.append({
-        "tag": "div",
-        "icon": {
-            "tag": "standard_icon",
-            "token": "resolve_filled",
-            "size": "20px 20px",
-            "color": "green",
+    elements: list[dict] = [
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "resolve_filled",
+                "size": "20px 20px",
+                "color": "green",
+            },
+            "text": {
+                "tag": "lark_md",
+                "content": f"**{question}**",
+            },
         },
-        "text": {
-            "tag": "lark_md",
-            "content": f"~~{question}~~",
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "resolve_filled",
+                "size": "16px 16px",
+                "color": "green",
+            },
+            "text": {
+                "tag": "lark_md",
+                "content": en_sel_label,
+                "i18n_content": _i18n(en_sel_label, zh_sel_label),
+            },
         },
-    })
-
-    # ── 选项列表完整展示（保留上下文） ──
-    if choices:
-        choice_labels = [
-            f"{'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i]}. {choice}"
-            for i, choice in enumerate(choices)
-        ]
-        choice_text = "\n".join(choice_labels)
-        elements.append({
-            "tag": "markdown",
-            "content": choice_text,
-        })
-
-    # ── 用户选择/输入内容 + 已确认标识 ──
-    elements.append({
-        "tag": "div",
-        "icon": {
-            "tag": "standard_icon",
-            "token": "resolve_filled",
-            "size": "16px 16px",
-            "color": "green",
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"✓ {en_confirmed}",
+                "i18n_content": _i18n(f"✓ {en_confirmed}", f"✓ {zh_confirmed}"),
+            },
         },
-        "text": {
-            "tag": "lark_md",
-            "content": f"{en_label}\n<font color='green'>{en_confirmed}</font>",
-            "i18n_content": _i18n(
-                f"{en_label}\n<font color='green'>{en_confirmed}</font>",
-                f"{zh_label}\n<font color='green'>{zh_confirmed}</font>",
-            ),
-        },
-    })
+    ]
 
     card: dict[str, Any] = {
         "schema": "2.0",

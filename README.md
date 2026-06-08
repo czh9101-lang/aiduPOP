@@ -16,7 +16,7 @@
 English | <a href="README.zh-CN.md">中文版</a>
 </p>
 
-Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, tool panels, reasoning, background task cards, and more.
+Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, context loading hint, tool panels, reasoning, background task cards, and more.
 
 > Based on [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0, with extensive refactoring and optimizations
 >
@@ -217,6 +217,11 @@ display:
 ---
 
 ## Changelog
+
+### v0.19.1
+
+- **Context loading hint**: When the first card is created, a "Loading context..." placeholder (with `time_outlined` icon) is immediately inserted. When the first answer text arrives, the hint is automatically removed in the same `batch_update` call — zero extra API overhead. Split cards don't insert the hint. Seal operations also delete the hint as a fallback.
+- **Split card seal order fix**: Changed `_do_linear_split()` to seal the old card **before** creating the new card (was: create new card first, then seal old card). Also fixed `_preservative_seal()` sequence conflict handling: instead of returning `True` (treating it as idempotent success), it now retries up to 2 times before falling back to full rebuild.
 
 > See [CHANGELOG.md](CHANGELOG.md) for full version history.
 

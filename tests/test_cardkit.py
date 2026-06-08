@@ -6,6 +6,7 @@ from hermes_lark_streaming.cardkit import (
     REASONING_ELEMENT_ID,
     REASONING_TEXT_ELEMENT_ID,
     TOOL_PANEL_ELEMENT_ID,
+    _LOADING_HINT_ELEMENT_ID,
     _build_error_panel,
     _build_footer_elements,
     _build_reasoning_panel,
@@ -14,12 +15,14 @@ from hermes_lark_streaming.cardkit import (
     _escape_md,
     _extract_images_from_markdown,
     _format_elapsed,
+    _loading_hint_element,
     _longest_backtick_run,
     _render_footer_field,
     build_complete_card,
     build_im_fallback_card,
     build_linear_complete_card,
     build_linear_compact_seal_card,
+    build_preservative_seal_actions,
     build_streaming_card,
     build_streaming_card_v2,
 )
@@ -1113,3 +1116,76 @@ class TestBackgroundReviewPanel:
         elements = card["body"]["elements"]
         panels = [e for e in elements if e.get("tag") == "collapsible_panel"]
         assert len(panels) >= 1
+
+
+# ── 上下文加载占位提示测试 ──
+
+
+class TestLoadingHintElement:
+    """_loading_hint_element() 占位元素结构测试."""
+
+    def test_element_id(self) -> None:
+        el = _loading_hint_element()
+        assert el["element_id"] == _LOADING_HINT_ELEMENT_ID
+
+    def test_tag_is_div(self) -> None:
+        el = _loading_hint_element()
+        assert el["tag"] == "div"
+
+    def test_icon_is_standard_icon(self) -> None:
+        el = _loading_hint_element()
+        assert el["icon"]["tag"] == "standard_icon"
+        assert el["icon"]["token"] == "time_outlined"
+
+    def test_text_is_lark_md(self) -> None:
+        el = _loading_hint_element()
+        assert el["text"]["tag"] == "lark_md"
+
+    def test_text_has_i18n(self) -> None:
+        el = _loading_hint_element()
+        assert "i18n_content" in el["text"]
+
+    def test_streaming_card_does_not_include_hint(self) -> None:
+        """流式占位卡片初始不包含占位提示（占位提示通过 batch_update 单独插入）."""
+        card = build_streaming_card_v2()
+        element_ids = [e.get("element_id") for e in card["body"]["elements"]]
+        assert _LOADING_HINT_ELEMENT_ID not in element_ids
+
+
+class TestPreservativeSealActionsDeleteHint:
+    """build_preservative_seal_actions() 包含删除占位提示的 action."""
+
+    def test_partial_seal_deletes_loading_hint(self) -> None:
+        actions = build_preservative_seal_actions(partial=True)
+        delete_actions = [
+            a for a in actions
+            if a["action"] == "delete_element"
+            and a["params"]["element_id"] == _LOADING_HINT_ELEMENT_ID
+        ]
+        assert len(delete_actions) == 1
+
+    def test_full_seal_deletes_loading_hint(self) -> None:
+        actions = build_preservative_seal_actions(
+            footer_data={},
+            footer_fields=[["status"]],
+        )
+        delete_actions = [
+            a for a in actions
+            if a["action"] == "delete_element"
+            and a["params"]["element_id"] == _LOADING_HINT_ELEMENT_ID
+        ]
+        assert len(delete_actions) == 1
+
+    def test_delete_hint_before_delete_loading_icon(self) -> None:
+        """占位提示删除在 loading icon 删除之前（顺序重要）."""
+        actions = build_preservative_seal_actions(partial=True)
+        delete_ids = [
+            a["params"]["element_id"]
+            for a in actions
+            if a["action"] == "delete_element"
+        ]
+        assert _LOADING_HINT_ELEMENT_ID in delete_ids
+        assert "loading_icon" in delete_ids
+        hint_idx = delete_ids.index(_LOADING_HINT_ELEMENT_ID)
+        loading_idx = delete_ids.index("loading_icon")
+        assert hint_idx < loading_idx

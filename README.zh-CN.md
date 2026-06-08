@@ -16,7 +16,7 @@
 <a href="README.md">English</a> | 中文版
 </p>
 
-为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、工具面板、推理过程、后台任务卡片等。
+为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、上下文加载提示、工具面板、推理过程、后台任务卡片等。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >
@@ -215,6 +215,11 @@ display:
 ---
 
 ## 更新日志
+
+### v0.19.1
+
+- **上下文加载提示**：首张卡片创建时立即插入「加载上下文中...」占位符（带 `time_outlined` 图标）。当首段回答文本到达时，该提示在同一个 `batch_update` 调用中自动移除——零额外 API 开销。拆卡不插入提示。封卡操作也会删除提示作为兜底。
+- **拆卡封卡顺序修复**：`_do_linear_split()` 改为先封存旧卡、再创建新卡（原顺序：先创建新卡、再封存旧卡）。同时修复 `_preservative_seal()` 序列冲突处理：不再返回 `True`（将其视为幂等成功），而是重试最多 2 次后回退到完整重建。
 
 > 完整版本历史请查看 [CHANGELOG.md](CHANGELOG.md)
 

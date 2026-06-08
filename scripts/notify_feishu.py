@@ -9,6 +9,20 @@ import time
 import urllib.request
 import xml.etree.ElementTree as ET
 
+# ── 从 plugin.yaml 读取版本号 ──
+
+PLUGIN_VERSION = "unknown"
+try:
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    _plugin_yaml = os.path.join(_script_dir, "..", "plugin.yaml")
+    with open(_plugin_yaml, "r") as _f:
+        for _line in _f:
+            if _line.strip().startswith("version:"):
+                PLUGIN_VERSION = _line.split(":", 1)[1].strip().strip('"').strip("'")
+                break
+except Exception:
+    pass
+
 # ── 从环境变量读取配置 ──
 
 FEISHU_WEBHOOK = os.environ["FEISHU_WEBHOOK"]
@@ -141,6 +155,7 @@ elements = [
         "text": {
             "tag": "lark_md",
             "content": (
+                f"**版本**: `v{PLUGIN_VERSION}`\n"
                 f"**同步**: ✅ 已推送\n"
                 f"**触发**: {trigger_label}\n"
                 f"**仓库**: {REPO} `master`\n"

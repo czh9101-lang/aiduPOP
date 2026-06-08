@@ -12,10 +12,12 @@ import re
 
 from .cardkit import (
     _LOADING_ELEMENT_ID,
+    _LOADING_HINT_ELEMENT_ID,
     _build_background_review_panel,
     _build_reasoning_panel,
     _build_tool_panel,
     _format_elapsed,
+    _loading_hint_element,
     _streaming_element,
     build_im_fallback_card,
     build_linear_compact_seal_card,
@@ -207,6 +209,31 @@ class LinearControllerMixin:
                 session.use_cardkit = True
                 session.element_count = 1  # loading element
                 session.flush.set_throttle(self._cfg.flush_interval_sec)
+
+                # ── 首卡插入上下文加载占位提示 ──
+                # 只在首卡插入，拆卡新卡不插入（_do_linear_split 重置后
+                # _loading_hint_removed 已为 True）。
+                # 占位提示在首字即显时通过 _do_linear_flush 删除。
+                if not session._loading_hint_removed:
+                    try:
+                        hint_actions = [{
+                            "action": "add_elements",
+                            "params": {
+                                "type": "insert_before",
+                                "target_element_id": _LOADING_ELEMENT_ID,
+                                "elements": [_loading_hint_element()],
+                            },
+                        }]
+                        session.sequence += 1
+                        await self._client.cardkit_batch_update(
+                            card_id, hint_actions, sequence=session.sequence,
+                        )
+                        session.element_count += 1
+                    except FeishuAPIError:
+                        _logger.debug(
+                            "loading hint insert failed, ignoring: card=%s",
+                            card_id[:12],
+                        )
             except FeishuAPIError:
                 _logger.info("linear CardKit create failed, falling back to non-linear")
                 card = build_im_fallback_card()
@@ -408,6 +435,19 @@ class LinearControllerMixin:
                         "elements": [el],
                     },
                 })
+
+                # ── 首字即显时删除上下文加载占位提示 ──
+                # 当第一个 answer segment 被创建（即首个文字到来时），
+                # 在同一批 batch_update 操作中删除占位提示，无需额外 API 调用。
+                if seg.type == "answer" and not session._loading_hint_removed:
+                    actions.append({
+                        "action": "delete_element",
+                        "params": {
+                            "element_id": _LOADING_HINT_ELEMENT_ID,
+                        },
+                    })
+                    session._loading_hint_removed = True
+                    session.element_count -= 1  # 占位提示被删除
                 if (
                     seg.type == "tool"
                     and i + 1 < len(segments)
@@ -711,11 +751,55 @@ class LinearControllerMixin:
             return True
         except FeishuAPIError as e:
             if e.code == CARDKIT_SEQUENCE_CONFLICT:
-                _logger.info(
-                    "preservative seal: 300317 sequence conflict → idempotent success, card=%s",
+                # ── v0.19.1-hotfix: sequence conflict 重试 ──
+                # 旧逻辑直接 return True（误判为幂等成功），导致 close_streaming
+                # 和 batch_update 静默失败，跑马灯不停、无 footer。
+                # 现改为重试：递增 sequence 后重新执行 close_streaming + batch_update。
+                _logger.warning(
+                    "preservative seal: sequence conflict, retrying... card=%s seq=%d",
+                    card_id[:12], session.sequence,
+                )
+                for retry in range(2):
+                    try:
+                        session.sequence += 1
+                        await self._client.cardkit_close_streaming(
+                            card_id, sequence=session.sequence,
+                        )
+                        actions = build_preservative_seal_actions(
+                            partial=partial,
+                            footer_data=footer_data,
+                            is_error=is_error,
+                            is_aborted=is_aborted,
+                            error_message=error_message,
+                            footer_fields=footer_fields,
+                            footer_show_label=footer_show_label,
+                        )
+                        if actions:
+                            session.sequence += 1
+                            await self._client.cardkit_batch_update(
+                                card_id,
+                                actions,
+                                sequence=session.sequence,
+                            )
+                        _logger.info(
+                            "preservative seal: retry %d succeeded card=%s",
+                            retry + 1, card_id[:12],
+                        )
+                        return True
+                    except FeishuAPIError as retry_e:
+                        if retry_e.code == CARDKIT_SEQUENCE_CONFLICT:
+                            _logger.debug(
+                                "preservative seal: retry %d still conflict card=%s",
+                                retry + 1, card_id[:12],
+                            )
+                            continue
+                        raise
+                # 重试全部失败
+                _logger.warning(
+                    "preservative seal: retry exhausted after sequence conflicts card=%s",
                     card_id[:12],
                 )
-                return True
+                return False
             _logger.debug(
                 "preservative seal failed: card=%s, falling back to full rebuild",
                 card_id[:12], exc_info=True,
@@ -835,7 +919,12 @@ class LinearControllerMixin:
         new_el_estimates: dict[str, int],
         updated_tool_segs: list[Segment],
     ) -> bool:
-        """拆卡：先 flush pending actions，封旧卡，创建新卡。返回 False 表示失败需中断 flush."""
+        """拆卡：先 flush pending actions，封旧卡，创建新卡。返回 False 表示失败需中断 flush.
+
+        v0.19.1-hotfix: 调整为先封旧卡再建新卡，避免并发操作导致 sequence conflict
+        被误判为幂等成功（旧逻辑先建新卡再封旧卡，两步并发时 sequence conflict
+        导致 close_streaming + batch_update 静默失败，跑马灯不停、无 footer）。
+        """
         assert self._client is not None
         old_card_id = session.card_id
         assert old_card_id is not None
@@ -844,11 +933,13 @@ class LinearControllerMixin:
         segments = linear_state.segments
         all_steps = session.tool_use.build_display_steps()
 
+        # ── Step 0: flush pending actions ──
         if actions and not await self._do_linear_batch_update(
             session, segments, actions, new_el_ids, new_el_estimates, updated_tool_segs,
         ):
             return False
 
+        # 准备封卡数据
         seal_segments = [s for s in segments[:split_idx] if s.created]
         if session.image_resolver:
             for seg in seal_segments:
@@ -868,32 +959,12 @@ class LinearControllerMixin:
             bg_review_messages=linear_state.bg_review_messages if linear_state else None,
         )
 
+        # ── Step 1: 封旧卡（先封！避免并发 sequence conflict）──
         try:
-            card = build_streaming_card_v2(
-                show_tool_use=False,
-                show_reasoning=False,
-                show_streaming_element=False,
-                streaming_panel_expanded=self._cfg.streaming_panel_expanded,
-                print_strategy=self._cfg.print_strategy,
-            )
-            new_card_id = await self._client.cardkit_create(card)
-            new_msg_id = await self._client.reply_card_by_id(session.anchor_id or session.message_id, new_card_id)
-        except Exception:
-            _logger.warning(
-                "linear split fallback: create next card failed, continue on current card",
-                exc_info=True,
-            )
-            # 拆卡失败时降级为继续写当前卡，并禁用后续拆卡重试以避免反复卡在同一边界。
-            session.split_disabled = True
-            return True
-
-        try:
-            # ── Step 1: Try preservative seal first (no element explosion) ──
-            # 保留式封卡：关闭流式 + 增量更新，不触发 _split_long_text，
-            # 流式阶段的 streaming element 仍为 1 个元素。
+            # 尝试保留式封卡
             seal_ok = await self._preservative_seal(session, partial=True)
             if not seal_ok:
-                # ── Step 2: Preservative seal failed — fall back to full rebuild ──
+                # 保留式封卡失败 → 全量重建封卡
                 # Note: streaming may already be closed by preservative seal attempt,
                 # so we catch CARDKIT_STREAMING_CLOSED and skip close_streaming.
                 session.sequence += 1
@@ -907,15 +978,11 @@ class LinearControllerMixin:
                 await self._client.cardkit_update(old_card_id, seal_card, sequence=session.sequence)
         except FeishuAPIError as e:
             # ── 封卡 300305 元素超限 → 渐进降级：compact seal → minimal seal ──
-            # 仅 close_streaming 不更新内容，让旧卡片保留流式态最后内容，
-            # 好过卡片永远停留在跑马灯状态。
             if e.code == CARDKIT_CONTENT_FAILED and e.extract_sub_code() == CARDKIT_ELEMENT_LIMIT:
                 _logger.warning(
                     "linear seal element limit for old card %s, attempting compact seal",
                     old_card_id[:12],
                 )
-                # ── Progressive degradation: compact seal → minimal seal ──
-                # Step 1: Try compact seal (keeps all panel types but truncated)
                 try:
                     compact_seal = build_linear_compact_seal_card(
                         segments=seal_segments,
@@ -926,7 +993,6 @@ class LinearControllerMixin:
                     session.sequence += 1
                     await self._client.cardkit_update(old_card_id, compact_seal, sequence=session.sequence)
                 except Exception:
-                    # Step 2: Compact seal also failed → minimal seal (answer only)
                     _logger.debug(
                         "compact seal also failed for old card %s, trying minimal seal",
                         old_card_id[:12], exc_info=True,
@@ -961,6 +1027,29 @@ class LinearControllerMixin:
                 exc_info=True,
             )
 
+        # ── Step 2: 创建新卡（后建！确保封旧卡串行完成）──
+        try:
+            card = build_streaming_card_v2(
+                show_tool_use=False,
+                show_reasoning=False,
+                show_streaming_element=False,
+                streaming_panel_expanded=self._cfg.streaming_panel_expanded,
+                print_strategy=self._cfg.print_strategy,
+            )
+            new_card_id = await self._client.cardkit_create(card)
+            new_msg_id = await self._client.reply_card_by_id(session.anchor_id or session.message_id, new_card_id)
+        except Exception:
+            _logger.warning(
+                "linear split fallback: create next card failed, continue on current card",
+                exc_info=True,
+            )
+            # 新卡创建失败时降级为继续写旧卡，并禁用后续拆卡重试。
+            # 但旧卡已经封了，无法继续写 → 设置 split_disabled 避免
+            # 反复尝试，返回 True 让后续 flush 在当前（已封）卡上降级处理。
+            session.split_disabled = True
+            return True
+
+        # ── Step 3: 切换 session 到新卡 ──
         session.card_id = new_card_id
         session.card_msg_id = new_msg_id
         session.element_count = 1  # loading
@@ -968,6 +1057,9 @@ class LinearControllerMixin:
         session.split_disabled = False
         session.element_limit_hit = False  # 拆卡后重置超限标记
         session.split_index = split_idx
+        # 拆卡新卡不插入上下文加载占位提示：
+        # _loading_hint_removed 在首卡首次 answer 时已设为 True，
+        # 拆卡后不再重置，新卡创建时自然跳过。
         _logger.info(
             "linear split: msg=%s sealed=%d new_card=%s",
             (session.message_id or "?")[:12],

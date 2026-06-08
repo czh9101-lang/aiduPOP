@@ -36,14 +36,15 @@ _T: dict[str, tuple[str, str]] = {
     "background_review": ("Background Review", "后台审查"),
     "bg_review_panel": ("Review", "审查"),
     "partial_continues": ("Continues in next message", "内容未完，继续在下一条消息"),
-    # ── Clarify interactive card ──
+    # ── Context loading hint (first card only, removed on first token) ──
+    "loading_context": ("Loading context...", "正在加载上下文..."),
+    # ── Clarify interactive card (three-state: pending / submitted / confirmed) ──
     "clarify_question": ("Question", "问题"),
-    "clarify_select_placeholder": ("Please select...", "请选择..."),
-    "clarify_input_placeholder": ("Or type your answer...", "或输入自定义内容..."),
-    "clarify_submit": ("Submit", "提交"),
-    "clarify_submitted": ("Submitted, waiting for confirmation...", "已提交，等待确认..."),
-    "clarify_retry": ("Retry Submit", "重试提交"),
-    "clarify_resolved": ("Selected: {}", "已选择: {}"),
+    "clarify_select_placeholder": ("Quick select...", "快速选择..."),
+    "clarify_input_placeholder": ("Type your answer...", "请输入你的回答..."),
+    "clarify_selected": ("Selected: {}", "已选择: {}"),
+    "clarify_submitted": ("Submitted, awaiting confirmation...", "已提交，等待确认..."),
+    "clarify_retry": ("Retry submission", "重试提交"),
     "clarify_confirmed": ("Confirmed", "已确认"),
 }
 
