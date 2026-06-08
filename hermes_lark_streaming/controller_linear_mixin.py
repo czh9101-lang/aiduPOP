@@ -47,10 +47,12 @@ from .controller_mixin import (
 from .feishu import (
     CARDKIT_CONTENT_FAILED,
     CARDKIT_ELEMENT_LIMIT,
+    CARDKIT_ELEMENT_LIMIT_DIRECT,
     CARDKIT_RATE_LIMITED,
     CARDKIT_SEQUENCE_CONFLICT,
     CARDKIT_STREAMING_CLOSED,
     FeishuAPIError,
+    is_element_limit_error,
 )
 from .flush import CARDKIT_MS, PATCH_MS
 from .image import ImageResolver
@@ -437,13 +439,13 @@ class LinearControllerMixin:
                 })
 
                 # ── 首字即显时删除上下文加载占位提示 ──
-                # 当第一个 answer segment 被创建（即首个文字到来时），
+                # 当第一个内容段被创建（不论类型：reasoning/tool/answer），
                 # 在同一批 batch_update 操作中删除占位提示，无需额外 API 调用。
-                if seg.type == "answer" and not session._loading_hint_removed:
+                if not session._loading_hint_removed and seg.type in ("reasoning", "tool", "answer"):
                     actions.append({
-                        "action": "delete_element",
+                        "action": "delete_elements",
                         "params": {
-                            "element_id": _LOADING_HINT_ELEMENT_ID,
+                            "element_ids": [_LOADING_HINT_ELEMENT_ID],
                         },
                     })
                     session._loading_hint_removed = True
@@ -978,7 +980,7 @@ class LinearControllerMixin:
                 await self._client.cardkit_update(old_card_id, seal_card, sequence=session.sequence)
         except FeishuAPIError as e:
             # ── 封卡 300305 元素超限 → 渐进降级：compact seal → minimal seal ──
-            if e.code == CARDKIT_CONTENT_FAILED and e.extract_sub_code() == CARDKIT_ELEMENT_LIMIT:
+            if is_element_limit_error(e):
                 _logger.warning(
                     "linear seal element limit for old card %s, attempting compact seal",
                     old_card_id[:12],
@@ -1083,8 +1085,8 @@ class LinearControllerMixin:
             return False
         if e.code == CARDKIT_STREAMING_CLOSED:
             return False
-        if e.code == CARDKIT_CONTENT_FAILED:
-            sub_code = e.extract_sub_code()
+        if e.code == CARDKIT_CONTENT_FAILED or e.code == CARDKIT_ELEMENT_LIMIT_DIRECT:
+            sub_code = e.extract_sub_code() if e.code == CARDKIT_CONTENT_FAILED else CARDKIT_ELEMENT_LIMIT
             if sub_code == CARDKIT_ELEMENT_LIMIT:
                 _logger.warning(
                     "linear card element limit exceeded: msg=%s element_count=%d split_disabled=%s",
@@ -1281,11 +1283,7 @@ class LinearControllerMixin:
                 # 需要简化卡片内容后再提交。
                 # Level 1 (compact): 保留所有面板但截断内容
                 # Level 2 (minimal): 移除 reasoning，保留 tool+answer
-                if (
-                    e.code == CARDKIT_CONTENT_FAILED
-                    and e.extract_sub_code() == CARDKIT_ELEMENT_LIMIT
-                    and simplify_level < 2
-                ):
+                if is_element_limit_error(e) and simplify_level < 2:
                     simplify_level += 1
                     _logger.warning(
                         "linear complete: element limit (300305), rebuilding card (level %d): "

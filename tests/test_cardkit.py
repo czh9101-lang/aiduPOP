@@ -1159,8 +1159,8 @@ class TestPreservativeSealActionsDeleteHint:
         actions = build_preservative_seal_actions(partial=True)
         delete_actions = [
             a for a in actions
-            if a["action"] == "delete_element"
-            and a["params"]["element_id"] == _LOADING_HINT_ELEMENT_ID
+            if a["action"] == "delete_elements"
+            and a["params"]["element_ids"] == [_LOADING_HINT_ELEMENT_ID]
         ]
         assert len(delete_actions) == 1
 
@@ -1171,8 +1171,8 @@ class TestPreservativeSealActionsDeleteHint:
         )
         delete_actions = [
             a for a in actions
-            if a["action"] == "delete_element"
-            and a["params"]["element_id"] == _LOADING_HINT_ELEMENT_ID
+            if a["action"] == "delete_elements"
+            and a["params"]["element_ids"] == [_LOADING_HINT_ELEMENT_ID]
         ]
         assert len(delete_actions) == 1
 
@@ -1180,9 +1180,10 @@ class TestPreservativeSealActionsDeleteHint:
         """占位提示删除在 loading icon 删除之前（顺序重要）."""
         actions = build_preservative_seal_actions(partial=True)
         delete_ids = [
-            a["params"]["element_id"]
+            id
             for a in actions
-            if a["action"] == "delete_element"
+            if a["action"] == "delete_elements"
+            for id in a["params"]["element_ids"]
         ]
         assert _LOADING_HINT_ELEMENT_ID in delete_ids
         assert "loading_icon" in delete_ids
