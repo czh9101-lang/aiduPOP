@@ -40,11 +40,15 @@
 ### 安装
 
 ```bash
-hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
+hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
 ```
 或
+
 ```bash
 hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
+```
+```bash
+hermes plugins install git@github.com:Aowen-Nowor/hermes-lark-streaming.git
 ```
 
 提示时输入 `Y` 启用插件，然后重启网关：
@@ -88,6 +92,7 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 # 验证插件配置和凭据（使用 Hermes 的 Python）
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
 $HERMES_PYTHON -m hermes_lark_streaming status
+$HERMES_PYTHON -m hermes_lark_streaming verify
 ```
 
 > **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无备份目录干扰（删除 `*.bak` 目录）；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。

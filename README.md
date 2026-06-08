@@ -42,12 +42,15 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 > 插件会自动读取 Hermes 的 `HERMES_HOME` 环境变量定位安装路径（默认 `~/.hermes`），非默认路径下无需额外操作。
 
 ```bash
-hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
+hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
 ```
 or
 
 ```bash
 hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
+```
+```bash
+hermes plugins install git@github.com:Aowen-Nowor/hermes-lark-streaming.git
 ```
 
 Enter `Y` when prompted to enable the plugin, then restart the gateway:
@@ -91,6 +94,7 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 # Verify plugin config & credentials (uses Hermes's Python)
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
 $HERMES_PYTHON -m hermes_lark_streaming status
+$HERMES_PYTHON -m hermes_lark_streaming verify
 ```
 
 > **Troubleshooting**: If no card effect appears after installation, check: (1) `hermes plugins list` shows the plugin as enabled; (2) no backup directory exists under `~/.hermes/plugins/` (remove any `*.bak` directories); (3) Feishu credentials are configured (see [Feishu Credentials](#feishu-credentials)).
