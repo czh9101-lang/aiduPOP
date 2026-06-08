@@ -157,17 +157,17 @@ class TestBuildClarifyCardWithChoices:
         assert behaviors[0]["value"]["clarify_id"] == "id10"
 
     def test_submit_button_present(self) -> None:
-        """Submit button should be present in the card."""
+        """Submit button should be present in the card (V2: button directly in elements)."""
         card = build_clarify_card(
             question="Q",
             choices=["A"],
             clarify_id="id_btn1",
         )
-        action_els = [e for e in card["body"]["elements"] if e.get("tag") == "action"]
-        assert len(action_els) == 1
-        button = action_els[0]["actions"][0]
-        assert button["tag"] == "button"
+        button_els = [e for e in card["body"]["elements"] if e.get("tag") == "button"]
+        assert len(button_els) == 1
+        button = button_els[0]
         assert button["type"] == "primary"
+        assert button["element_id"] == "clarify_submit_btn"
 
     def test_submit_button_has_button_submit_behavior(self) -> None:
         card = build_clarify_card(
@@ -175,9 +175,8 @@ class TestBuildClarifyCardWithChoices:
             choices=["A"],
             clarify_id="id_btn2",
         )
-        action_el = next(e for e in card["body"]["elements"] if e.get("tag") == "action")
-        button = action_el["actions"][0]
-        behaviors = button["behaviors"]
+        button_el = next(e for e in card["body"]["elements"] if e.get("tag") == "button")
+        behaviors = button_el["behaviors"]
         assert len(behaviors) == 1
         assert behaviors[0]["type"] == "callback"
         assert behaviors[0]["value"]["hermes_clarify_action"] == "button_submit"
@@ -189,9 +188,8 @@ class TestBuildClarifyCardWithChoices:
             choices=["A"],
             clarify_id="id_btn3",
         )
-        action_el = next(e for e in card["body"]["elements"] if e.get("tag") == "action")
-        button = action_el["actions"][0]
-        assert "i18n_content" in button["text"]
+        button_el = next(e for e in card["body"]["elements"] if e.get("tag") == "button")
+        assert "i18n_content" in button_el["text"]
 
 
 class TestBuildClarifyCardWithoutChoices:
@@ -265,21 +263,21 @@ class TestBuildClarifyCardWithoutChoices:
             choices=None,
             clarify_id="id_open7",
         )
-        # Elements: question div + input + action (submit button)
+        # Elements: question div + input + button (submit, V2 direct in elements)
         elements = card["body"]["elements"]
         assert elements[0]["tag"] == "div"
         assert elements[1]["tag"] == "input"
-        assert elements[2]["tag"] == "action"
+        assert elements[2]["tag"] == "button"
 
     def test_submit_button_present_without_choices(self) -> None:
-        """Submit button should be present even without choices."""
+        """Submit button should be present even without choices (V2: direct button)."""
         card = build_clarify_card(
             question="Q",
             choices=None,
             clarify_id="id_open8",
         )
-        action_els = [e for e in card["body"]["elements"] if e.get("tag") == "action"]
-        assert len(action_els) == 1
+        button_els = [e for e in card["body"]["elements"] if e.get("tag") == "button"]
+        assert len(button_els) == 1
 
 
 # ── build_clarify_submitted_card ──
@@ -349,23 +347,22 @@ class TestBuildClarifySubmittedCard:
         assert "i18n_content" in lock_el["text"]
 
     def test_retry_button_present(self) -> None:
-        """Submitted card should have a retry submit button."""
+        """Submitted card should have a retry submit button (V2: button directly in elements)."""
         card = build_clarify_submitted_card(
             question="Q", selected="Fast", clarify_id="cid8",
         )
-        action_els = [e for e in card["body"]["elements"] if e.get("tag") == "action"]
-        assert len(action_els) == 1
-        button = action_els[0]["actions"][0]
-        assert button["tag"] == "button"
+        button_els = [e for e in card["body"]["elements"] if e.get("tag") == "button"]
+        assert len(button_els) == 1
+        button = button_els[0]
         assert button["type"] == "primary"
+        assert button["element_id"] == "clarify_retry_btn"
 
     def test_retry_button_has_correct_behavior(self) -> None:
         card = build_clarify_submitted_card(
             question="Q", selected="Fast", clarify_id="cid9",
         )
-        action_el = next(e for e in card["body"]["elements"] if e.get("tag") == "action")
-        button = action_el["actions"][0]
-        behaviors = button["behaviors"]
+        button_el = next(e for e in card["body"]["elements"] if e.get("tag") == "button")
+        behaviors = button_el["behaviors"]
         assert len(behaviors) == 1
         assert behaviors[0]["type"] == "callback"
         assert behaviors[0]["value"]["hermes_clarify_action"] == "retry_submit"
@@ -375,9 +372,8 @@ class TestBuildClarifySubmittedCard:
         card = build_clarify_submitted_card(
             question="Q", selected="Fast", clarify_id="cid10",
         )
-        action_el = next(e for e in card["body"]["elements"] if e.get("tag") == "action")
-        button = action_el["actions"][0]
-        assert "i18n_content" in button["text"]
+        button_el = next(e for e in card["body"]["elements"] if e.get("tag") == "button")
+        assert "i18n_content" in button_el["text"]
 
     def test_choices_list_displayed_when_provided(self) -> None:
         """When choices are provided, they should be displayed in the submitted card."""
@@ -466,10 +462,10 @@ class TestBuildClarifyResolvedCard:
         assert len(lock_els) == 0
 
     def test_no_buttons_in_resolved_card(self) -> None:
-        """Resolved card (hard lock) should NOT have any action buttons."""
+        """Resolved card (hard lock) should NOT have any buttons."""
         card = build_clarify_resolved_card(question="Q", selected="Fast")
-        action_els = [e for e in card["body"]["elements"] if e.get("tag") == "action"]
-        assert len(action_els) == 0
+        button_els = [e for e in card["body"]["elements"] if e.get("tag") == "button"]
+        assert len(button_els) == 0
 
     def test_i18n_on_selected_label(self) -> None:
         card = build_clarify_resolved_card(question="Q", selected="Fast")

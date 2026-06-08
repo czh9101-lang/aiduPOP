@@ -1171,25 +1171,24 @@ def build_clarify_card(
     }
     elements.append(input_el)
 
-    # ── 提交按钮（支持点击提交 input 内容） ──
+    # ── 提交按钮（V2: button 直接放入 elements，不再用 action 容器） ──
     en_submit, zh_submit = _T["clarify_submit"]
     button_el: dict[str, Any] = {
-        "tag": "action",
-        "actions": [{
-            "tag": "button",
-            "text": {
-                "tag": "plain_text",
-                "content": en_submit,
-                "i18n_content": _i18n(en_submit, zh_submit),
+        "tag": "button",
+        "element_id": "clarify_submit_btn",
+        "text": {
+            "tag": "plain_text",
+            "content": en_submit,
+            "i18n_content": _i18n(en_submit, zh_submit),
+        },
+        "type": "primary",
+        "size": "medium",
+        "behaviors": [{
+            "type": "callback",
+            "value": {
+                "hermes_clarify_action": "button_submit",
+                "clarify_id": clarify_id,
             },
-            "type": "primary",
-            "behaviors": [{
-                "type": "callback",
-                "value": {
-                    "hermes_clarify_action": "button_submit",
-                    "clarify_id": clarify_id,
-                },
-            }],
         }],
     }
     elements.append(button_el)
@@ -1281,25 +1280,24 @@ def build_clarify_submitted_card(
         },
     })
 
-    # ── 重试提交按钮 ──
+    # ── 重试提交按钮（V2: button 直接放入 elements，不再用 action 容器） ──
     en_retry, zh_retry = _T["clarify_retry"]
     retry_el: dict[str, Any] = {
-        "tag": "action",
-        "actions": [{
-            "tag": "button",
-            "text": {
-                "tag": "plain_text",
-                "content": en_retry,
-                "i18n_content": _i18n(en_retry, zh_retry),
+        "tag": "button",
+        "element_id": "clarify_retry_btn",
+        "text": {
+            "tag": "plain_text",
+            "content": en_retry,
+            "i18n_content": _i18n(en_retry, zh_retry),
+        },
+        "type": "primary",
+        "size": "medium",
+        "behaviors": [{
+            "type": "callback",
+            "value": {
+                "hermes_clarify_action": "retry_submit",
+                "clarify_id": clarify_id,
             },
-            "type": "primary",
-            "behaviors": [{
-                "type": "callback",
-                "value": {
-                    "hermes_clarify_action": "retry_submit",
-                    "clarify_id": clarify_id,
-                },
-            }],
         }],
     }
     elements.append(retry_el)
