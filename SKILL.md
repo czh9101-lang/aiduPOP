@@ -74,7 +74,7 @@ monkey_patch.py (运行时拦截)
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获；`on_cron_deliver` 是 async；`on_message_completed` 传递 cache tokens |
 | `controller.py` | 681 | 主控制器(单例) | `CardSession` 状态机（含 `COMPLETING` 状态）；`on_cron_deliver_async` 直接 await；`error_message` 属性；`element_limit_hit` 标志；`_was_aborted` 中断标记；footer 新增 `cache_read_tokens`/`cache_write_tokens` |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态: IDLE→CREATING→STREAMING→COMPLETING→COMPLETED/FAILED/ABORTED；CardKit→IM PATCH 降级链；300317 幂等处理 |
-| `controller_linear_mixin.py` | 1130 | 线性模式编排 | 拆卡阈值 150 元素（飞书 200 含嵌套，预留 50）；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数（含 `_count_images_in_text` 图片计数）；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算；封卡 300305 渐进降级（compact seal → minimal seal）；`message_id` NoneType 防护；`_simplify_segments_for_complete` 两级降级 |
+| `controller_linear_mixin.py` | 1130 | 线性模式编排 | 拆卡阈值 150 元素（飞书 200 含嵌套，预留 50）；超限自动拆卡；`element_limit_hit` 标志；segment 按事件顺序扁平排列；answer 估算对齐封卡实际元素数（含 `_count_images_in_text` 图片计数）；answer 内部拆分（`split_answer_segment`）；answer 增长时动态重新估算；封卡 300305 渐进降级（compact seal → minimal seal）；`message_id` NoneType 防护；`_simplify_segments_for_complete` 两级降级；上下文加载提示（`_ctx_loading_hint` + `batch_update` 同批移除）；拆卡先封旧卡再建新卡（`_do_linear_split` 顺序修正）；`_preservative_seal()` 序列冲突重试（最多 2 次后回退全量重建） |
 | `cardkit.py` | 810 | 卡片 JSON 构建 | `_downgrade_tables()`；`_build_error_panel()`；`build_cron_card()`；`build_linear_compact_seal_card()` 封卡渐进降级（保留面板+截断内容）；i18n locales；`cache` 字段渲染（💾 缓存命中/总输入 命中率%）；无 emoji 头部（已移除 `_CATEGORY_ICONS`） |
 | `cardkit_i18n.py` | 45 | 中英双语映射 | `_T` dict，`_i18n()` / `_t()` 快捷函数；新增 `cache` 条目 |
 | `cardkit_md.py` | 121 | Markdown 处理 | 标题降级、表格降级(≤20)、图片 key 剥离、长文本分块(2400 chars) |
@@ -356,6 +356,32 @@ v0.18.2 起，answer 估算新增图片元素计数（`_count_images_in_text`）
 **解决**: 默认值改为 500ms（API 调用量降至 1/5）；新增 `streaming.flush_interval_ms` 配置项（100~2000ms），用户可根据设备性能调整。打字机效果不受影响（飞书客户端 15ms 逐字渲染独立于服务端推送频率）。
 **模式**: 性能敏感参数应可配置，不应硬编码——不同网络/设备/负载的最优值不同。
 
+### 10.14 上下文加载提示（v0.19.1 新增）
+
+**设计**: 首张卡片创建时，在 answer 位置前插入一个 "加载上下文中..." 占位符（`time_outlined` 图标 + 提示文字），消除首卡空白等待感。
+
+**关键实现细节**:
+- 占位符在 `on_message_started` 创建卡片时插入，字段名 `_ctx_loading_hint`
+- 当首段 answer 文本到达时（`on_answer_delta` 首次写入 answer segment），提示在同一个 `batch_update` 调用中被移除——**零额外 API 开销**
+- 拆卡产生的卡片不插入提示（`_do_linear_split` 不设置 hint）
+- 封卡操作（`_preservative_seal` / `_seal_card`）作为兜底也会删除提示，防止提示残留在完成态卡片中
+
+**模式**: 即时反馈（Instant Feedback）——用户看到卡片的第一时间就知道系统正在工作，而非面对空白卡片等待。
+
+### 10.15 拆卡封卡顺序与序列冲突重试（v0.19.1 修复）
+
+**问题 1: 拆卡封卡顺序颠倒**
+`_do_linear_split()` 原来先创建新卡、再封存旧卡。这意味着旧卡封存的 `batch_update` 可能与新卡的创建请求交叉，导致旧卡序列号与飞书服务端不一致（sequence conflict）。
+
+**修复**: 调换顺序——先封存旧卡，再创建新卡。旧卡封存完成后，序列号已确定，新卡创建不再受影响。
+
+**问题 2: `_preservative_seal()` 序列冲突误判**
+`_preservative_seal()` 遇到 300317 序列冲突时，旧代码直接返回 `True`（视为幂等成功）。但实际上 300317 表示飞书服务端的 sequence 与请求不一致，封卡内容可能未生效——返回 `True` 会导致旧卡内容丢失（新卡已创建，旧卡未封存）。
+
+**修复**: 不再将 300317 视为幂等成功，改为重试最多 2 次（重新获取最新 sequence 后再提交封卡），2 次重试仍失败则回退到全量重建（`_rebuild_card`）。
+
+**模式**: 序列冲突不等于幂等成功——300317 说明服务端状态与请求不一致，必须重试或降级，不能静默忽略。
+
 ### 10.12 封卡 300305 元素超限丢失面板（v0.18.3 修复）
 **问题**: 拆卡封存旧卡时，封卡内容超过飞书 200 元素限制触发 300305，旧代码直接降级为"仅 answer 文本"的极简封卡，丢弃所有推理面板和工具面板。完成阶段同样存在此问题——`_simplify_segments_for_complete` 直接移除所有 reasoning segment。
 **解决**: 渐进降级策略——封卡时依次尝试：① 全量封卡 → ② compact seal（保留所有面板类型但截断内容：推理≤2000字、answer≤4000字、工具步骤仅保留标题）→ ③ minimal seal（仅 answer 文本）。完成阶段同样改为两级降级：Level 1 截断保留面板、Level 2 移除推理面板。
@@ -417,7 +443,7 @@ hermes gateway restart
 
 | 版本 | 日期 | 核心变更 |
 |------|------|----------|
-| v0.19.1 | 2026-06-08 | 保留式封卡 + Clarify 三态交互卡片 + streaming_panel_expanded 默认值修正 + 日期错误修正 |
+| v0.19.1 | 2026-06-08 | 保留式封卡 + Clarify 三态交互卡片 + streaming_panel_expanded 默认值修正 + 日期错误修正 + 上下文加载提示（首卡占位符）+ 拆卡封卡顺序修复（先封旧卡再建新卡）+ `_preservative_seal()` 序列冲突重试 |
 | v0.18.3 | 2026-06-08 | message_id NoneType 下标崩溃修复 + 封卡 300305 渐进降级 |
 | v0.18.2 | 2026-06-08 | 拆卡阈值修正（180→150）+ answer 图片元素计数 |
 | v0.18.1 | 2026-06-08 | 更新命令修正 + 配置/决策点/初始化诊断日志 |
@@ -478,4 +504,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-12 | Version: 0.19.0*
+*Last updated: 2026-06-12 | Version: 0.19.1*

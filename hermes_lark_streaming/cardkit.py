@@ -52,6 +52,7 @@ REASONING_ELEMENT_ID = "reasoning_content"
 REASONING_TEXT_ELEMENT_ID = "reasoning_text"
 TOOL_PANEL_ELEMENT_ID = "tool_panel"
 _LOADING_ELEMENT_ID = "loading_icon"
+_LOADING_HINT_ELEMENT_ID = "context_loading_hint"
 _LOADING_IMG_KEY = "img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg"
 
 
@@ -108,6 +109,24 @@ def _loading_element() -> dict:
             "size": "16px 16px",
         },
         "element_id": _LOADING_ELEMENT_ID,
+    }
+
+
+def _loading_hint_element() -> dict:
+    """上下文加载占位元素 — 首卡创建后插入，首字即显时删除."""
+    return {
+        "tag": "div",
+        "icon": {
+            "tag": "standard_icon",
+            "token": "time_outlined",
+            "size": "16px 16px",
+        },
+        "text": {
+            "tag": "lark_md",
+            "content": _T["loading_context"][0],
+            "i18n_content": _t("loading_context"),
+        },
+        "element_id": _LOADING_HINT_ELEMENT_ID,
     }
 
 
@@ -475,6 +494,16 @@ def build_preservative_seal_actions(
                     "elements": footer_elements,
                 },
             })
+
+    # ── Delete context loading hint (if still present) ──
+    # 占位提示在首字即显时通常已被删除，但如果卡片在 answer
+    # 到来前就被封（如超限拆卡），占位提示可能仍在，需要兜底删除。
+    actions.append({
+        "action": "delete_element",
+        "params": {
+            "element_id": _LOADING_HINT_ELEMENT_ID,
+        },
+    })
 
     # ── Delete loading icon ──
     actions.append({

@@ -643,3 +643,15 @@ class TestClarifyI18n:
             en, zh = _T[key]
             assert isinstance(en, str) and len(en) > 0, f"Empty English text for {key}"
             assert isinstance(zh, str) and len(zh) > 0, f"Empty Chinese text for {key}"
+
+
+class TestLoadingContextI18n:
+    """Test loading_context i18n entry exists."""
+
+    def test_loading_context_entry(self) -> None:
+        assert "loading_context" in _T
+
+    def test_loading_context_is_tuple_of_two(self) -> None:
+        en, zh = _T["loading_context"]
+        assert isinstance(en, str) and len(en) > 0
+        assert isinstance(zh, str) and len(zh) > 0

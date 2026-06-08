@@ -36,6 +36,8 @@ _T: dict[str, tuple[str, str]] = {
     "background_review": ("Background Review", "后台审查"),
     "bg_review_panel": ("Review", "审查"),
     "partial_continues": ("Continues in next message", "内容未完，继续在下一条消息"),
+    # ── Context loading hint (first card only, removed on first token) ──
+    "loading_context": ("Loading context...", "正在加载上下文..."),
     # ── Clarify interactive card (three-state: pending / submitted / confirmed) ──
     "clarify_question": ("Question", "问题"),
     "clarify_select_placeholder": ("Quick select...", "快速选择..."),

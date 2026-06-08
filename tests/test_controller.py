@@ -384,6 +384,76 @@ class TestDoCreateLinearCard:
             await ctrl._do_create_linear_card(session)
             m.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_first_card_inserts_loading_hint(self) -> None:
+        """首卡创建后通过 batch_update 插入上下文加载占位提示."""
+        ctrl = _setup_ctrl(linear=True)
+        session = _make_session("msg_hint")
+        ctrl._sessions["msg_hint"] = session
+
+        batch_actions: list[list[dict]] = []
+
+        async def capture_batch(card_id: str, actions: list[dict], **kw: object) -> None:
+            batch_actions.append(actions)
+
+        ctrl._client.cardkit_batch_update = capture_batch
+
+        await ctrl._do_create_linear_card(session)
+
+        # 应该有一次 batch_update 插入占位提示
+        assert len(batch_actions) == 1
+        add_actions = [
+            a for a in batch_actions[0]
+            if a["action"] == "add_elements"
+        ]
+        assert len(add_actions) == 1
+        elements = add_actions[0]["params"]["elements"]
+        assert elements[0]["element_id"] == "context_loading_hint"
+        # element_count 应包含占位提示
+        assert session.element_count == 2  # loading + hint
+        # _loading_hint_removed 应为 False
+        assert session._loading_hint_removed is False
+
+    @pytest.mark.asyncio
+    async def test_split_new_card_no_loading_hint(self) -> None:
+        """拆卡后新卡不插入上下文加载占位提示."""
+        ctrl = _setup_ctrl(linear=True)
+        session = _make_session("msg_split_hint", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_old"
+        session.card_msg_id = "msg_old"
+        session._loading_hint_removed = True  # 模拟首卡已有 answer
+        session.element_count = 144
+        session.linear_state.on_reasoning_delta("old")
+        session.linear_state.segments[0].created = True
+        session.linear_state.segments[0].dirty = False
+        session.linear_state.on_answer_delta("pending")
+        session.tool_use.record_start("read", "f")
+        session.linear_state.on_tool_event(1)
+        ctrl._sessions["msg_split_hint"] = session
+
+        batch_after_create: list[list[dict]] = []
+
+        async def capture_batch(card_id: str, actions: list[dict], **kw: object) -> None:
+            if card_id == "card_next":
+                batch_after_create.append(actions)
+
+        ctrl._client.cardkit_batch_update = capture_batch
+
+        await ctrl._do_linear_flush(session)
+
+        # 新卡不应有插入占位提示的 batch_update
+        for actions in batch_after_create:
+            add_hint_actions = [
+                a for a in actions
+                if a["action"] == "add_elements"
+                and any(
+                    e.get("element_id") == "context_loading_hint"
+                    for e in a["params"]["elements"]
+                )
+            ]
+            assert len(add_hint_actions) == 0, "新卡不应插入上下文加载占位提示"
+
 
 # ── _do_linear_flush 集成测试 ──
 
@@ -464,12 +534,15 @@ class TestDoLinearFlush:
 
         await ctrl._do_linear_flush(session)
 
+        # v0.19.1-hotfix: 先封旧卡再建新卡
+        # 旧顺序: batch → create → reply → close → batch(old seal) → batch(new)
+        # 新顺序: batch → close → batch(old seal) → create → reply → batch(new)
         assert calls == [
+            ("batch", "card_old"),
+            ("close", "card_old"),
             ("batch", "card_old"),
             ("create", ""),
             ("reply", ""),
-            ("close", "card_old"),
-            ("batch", "card_old"),
             ("batch", "card_next"),
         ]
         assert session.card_id == "card_next"
@@ -507,12 +580,13 @@ class TestDoLinearFlush:
 
         await ctrl._do_linear_flush(session)
 
+        # v0.19.1-hotfix: 先封旧卡再建新卡
         assert calls == [
+            ("batch", "card_tool_old"),
+            ("close", "card_tool_old"),
             ("batch", "card_tool_old"),
             ("create", ""),
             ("reply", ""),
-            ("close", "card_tool_old"),
-            ("batch", "card_tool_old"),
             ("batch", "card_tool_next"),
         ]
         assert session.card_id == "card_tool_next"
@@ -546,17 +620,18 @@ class TestDoLinearFlush:
 
         await ctrl._do_linear_flush(session)
 
+        # v0.19.1-hotfix: 先封旧卡再建新卡
         assert calls == [
             ("batch", "card_tool_page_1"),
-            ("create", ""),
-            ("reply", ""),
             ("close", "card_tool_page_1"),
             ("batch", "card_tool_page_1"),
+            ("create", ""),
+            ("reply", ""),
+            ("batch", "card_tool_page_2"),
+            ("close", "card_tool_page_2"),
             ("batch", "card_tool_page_2"),
             ("create", ""),
             ("reply", ""),
-            ("close", "card_tool_page_2"),
-            ("batch", "card_tool_page_2"),
             ("batch", "card_tool_page_3"),
         ]
         assert session.card_id == "card_tool_page_3"
@@ -571,7 +646,7 @@ class TestDoLinearFlush:
 
     @pytest.mark.asyncio
     async def test_tool_rollover_create_failure_falls_back_on_current_card(self) -> None:
-        """tool rollover 新卡创建失败后，在当前卡保留 step 分界并禁用后续拆卡重试."""
+        """tool rollover 新卡创建失败后，旧卡已封卡（v0.19.1-hotfix: 先封旧卡再建新卡）."""
         ctrl = _setup_ctrl()
         batch_card_ids = _capture_split_calls(ctrl, create_error=RuntimeError("create failed"))
         client = ctrl._client
@@ -594,6 +669,7 @@ class TestDoLinearFlush:
 
         await ctrl._do_linear_flush(session)
 
+        # v0.19.1-hotfix: 旧卡已封卡（先封旧卡再建新卡）
         assert session.card_id == "card_tool_current"
         assert session.split_index == 0
         assert session.split_disabled is True
@@ -601,13 +677,19 @@ class TestDoLinearFlush:
         assert session.linear_state.segments[0].tool_end_offset == 1
         assert session.linear_state.segments[1].tool_offset == 1
         assert session.linear_state.segments[1].created is True
-        assert batch_card_ids == [("batch", "card_tool_current"), ("batch", "card_tool_current")]
-        client.cardkit_close_streaming.assert_not_called()
-        client.cardkit_update.assert_not_called()
+        # 新顺序: batch(flush) + close(seal) + batch(seal) + batch(后续 segment) + [create FAIL]
+        assert batch_card_ids == [
+            ("batch", "card_tool_current"),
+            ("close", "card_tool_current"),
+            ("batch", "card_tool_current"),
+            ("batch", "card_tool_current"),
+        ]
+        # 旧卡已封卡，close_streaming 已被调用
+        client.cardkit_close_streaming.assert_called()
 
     @pytest.mark.asyncio
     async def test_split_create_failure_falls_back_to_current_card(self) -> None:
-        """新卡创建失败是有意降级：不推进 split_index，继续把后续内容写回当前卡."""
+        """新卡创建失败是有意降级：旧卡已封卡，设置 split_disabled 防止反复重试."""
         ctrl = _setup_ctrl()
         batch_card_ids = _capture_split_calls(ctrl, create_error=RuntimeError("create failed"))
         client = ctrl._client
@@ -627,15 +709,21 @@ class TestDoLinearFlush:
 
         await ctrl._do_linear_flush(session)
 
+        # v0.19.1-hotfix: 旧卡已封卡（先封旧卡再建新卡）
         assert session.card_id == "card_current"
         assert session.card_msg_id == "msg_current"
         assert session.split_index == 0
         assert session.split_disabled is True
-        assert session.element_count > 144
-        assert batch_card_ids == [("batch", "card_current"), ("batch", "card_current")]
+        # 新顺序: batch(flush) + close(seal) + batch(seal) + batch(后续 segment) + [create FAIL]
+        assert batch_card_ids == [
+            ("batch", "card_current"),
+            ("close", "card_current"),
+            ("batch", "card_current"),
+            ("batch", "card_current"),
+        ]
         assert session.linear_state.segments[2].created is True
-        client.cardkit_close_streaming.assert_not_called()
-        client.cardkit_update.assert_not_called()
+        # 旧卡已封卡
+        client.cardkit_close_streaming.assert_called()
 
         client.cardkit_create.reset_mock()
         session.linear_state.on_answer_delta(" after fallback")
@@ -643,7 +731,10 @@ class TestDoLinearFlush:
         await ctrl._do_linear_flush(session)
 
         client.cardkit_create.assert_not_called()
+        # 第二次 flush 的 batch 也会追加到 calls 列表
         assert batch_card_ids == [
+            ("batch", "card_current"),
+            ("close", "card_current"),
             ("batch", "card_current"),
             ("batch", "card_current"),
             ("batch", "card_current"),
@@ -783,6 +874,74 @@ class TestDoLinearFlush:
 
         ctrl._client.cardkit_batch_update.assert_not_called()
         ctrl._client.cardkit_stream_element.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_first_answer_removes_loading_hint(self) -> None:
+        """首字即显时在同一批 batch_update 中删除上下文加载占位提示."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_hint_del", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_hint"
+        session._loading_hint_removed = False  # 模拟占位提示仍在
+        session.element_count = 2  # loading + hint
+        session.linear_state.on_answer_delta("hello")
+        ctrl._sessions["msg_hint_del"] = session
+
+        batch_actions: list[list[dict]] = []
+
+        async def capture_batch(card_id: str, actions: list[dict], **kw: object) -> None:
+            batch_actions.append(actions)
+
+        ctrl._client.cardkit_batch_update = capture_batch
+
+        await ctrl._do_linear_flush(session)
+
+        # 应该包含删除占位提示的 action
+        assert len(batch_actions) >= 1
+        all_actions = batch_actions[0]
+        delete_hint_actions = [
+            a for a in all_actions
+            if a["action"] == "delete_element"
+            and a["params"]["element_id"] == "context_loading_hint"
+        ]
+        assert len(delete_hint_actions) == 1
+        # _loading_hint_removed 应为 True
+        assert session._loading_hint_removed is True
+        # element_count: 开始 2 (loading + hint) → +1 (answer) → -1 (hint removed) = 2
+        assert session.element_count == 2
+
+    @pytest.mark.asyncio
+    async def test_loading_hint_not_removed_on_reasoning_only(self) -> None:
+        """只有 reasoning segment 时不应删除占位提示（等 answer 到来再删）."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_hint_reasoning", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_hint_r"
+        session._loading_hint_removed = False
+        session.element_count = 2  # loading + hint
+        session.linear_state.on_reasoning_delta("thinking")
+        ctrl._sessions["msg_hint_reasoning"] = session
+
+        batch_actions: list[list[dict]] = []
+
+        async def capture_batch(card_id: str, actions: list[dict], **kw: object) -> None:
+            batch_actions.append(actions)
+
+        ctrl._client.cardkit_batch_update = capture_batch
+
+        await ctrl._do_linear_flush(session)
+
+        # 不应包含删除占位提示的 action
+        assert len(batch_actions) >= 1
+        all_actions = batch_actions[0]
+        delete_hint_actions = [
+            a for a in all_actions
+            if a["action"] == "delete_element"
+            and a["params"]["element_id"] == "context_loading_hint"
+        ]
+        assert len(delete_hint_actions) == 0
+        # _loading_hint_removed 仍为 False
+        assert session._loading_hint_removed is False
 
 
 # ── _do_linear_complete 集成测试 ──
