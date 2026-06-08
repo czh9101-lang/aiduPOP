@@ -288,9 +288,9 @@ class TestStreamingPanelExpanded:
         cfg = _make_config({"streaming": {"streaming_panel_expanded": False}})
         assert cfg.streaming_panel_expanded is False
 
-    def test_streaming_panel_expanded_missing_defaults_true(self) -> None:
+    def test_streaming_panel_expanded_missing_defaults_false(self) -> None:
         cfg = _make_config({"streaming": {}})
-        assert cfg.streaming_panel_expanded is True
+        assert cfg.streaming_panel_expanded is False
 
 
 class TestPrintStrategy:

@@ -1068,20 +1068,23 @@ def build_clarify_card(
     choices: list[str] | None = None,
     clarify_id: str = "",
 ) -> dict[str, Any]:
-    """构建 Clarify 交互卡片（下拉框 + 自定义输入选项）.
+    """构建 Clarify 待选择态卡片（State 1: Pending）.
 
-    两种模式:
-      - choices 非空: 显示 select_static 下拉框，选项为 choices + "✏️ 自定义输入"
-      - choices 为空/None: 显示 input 文本输入框（开放式问题）
+    三态卡片设计 — 待选择态:
+      - 标题: helpdesk_outlined 图标 + 问题文本
+      - 选项列表: markdown 全量展示所有选项（A. B. C.）
+      - 快速选择: select_static 下拉框（仅含预定义选项，无 "其他" 选项）
+      - 自定义输入: input 文本输入框（支持 Enter + 按钮提交）
+      - 无 choices 时仅显示 input 输入框
 
     Args:
         question: 问题文本
-        choices: 选项列表（最多 4 项），None/空表示开放式问题
+        choices: 选项列表，None/空表示开放式问题
         clarify_id: 唯一标识，用于回调路由
     """
     elements: list[dict] = []
 
-    # ── 问题标题 (standard_icon for polished look) ──
+    # ── 问题标题 (helpdesk_outlined icon) ──
     elements.append({
         "tag": "div",
         "icon": {
@@ -1097,19 +1100,25 @@ def build_clarify_card(
     })
 
     if choices:
-        # ── 多选模式: select_static 下拉框 ──
+        # ── Markdown 全量展示选项列表 ──
+        option_lines = []
+        for i, choice in enumerate(choices):
+            label = chr(ord("A") + i)  # A, B, C, ...
+            option_lines.append(f"{label}. {choice}")
+        options_md = "\n".join(option_lines)
+        elements.append({
+            "tag": "markdown",
+            "content": options_md,
+        })
+
+        # ── 快速选择: select_static 下拉框（无 "其他" 选项） ──
         options: list[dict] = []
         for i, choice in enumerate(choices):
+            label = chr(ord("A") + i)
             options.append({
-                "text": {"tag": "plain_text", "content": choice},
+                "text": {"tag": "plain_text", "content": f"{label}. {choice}"},
                 "value": str(i),
             })
-        # 追加 "自定义输入" 选项
-        en_other, zh_other = _T["clarify_other"]
-        options.append({
-            "text": {"tag": "plain_text", "content": f"✏️ {en_other}", "i18n_content": _i18n(f"✏️ {en_other}", f"✏️ {zh_other}")},
-            "value": "other",
-        })
 
         en_placeholder, zh_placeholder = _T["clarify_select_placeholder"]
         select_el: dict[str, Any] = {
@@ -1130,28 +1139,28 @@ def build_clarify_card(
             }],
         }
         elements.append(select_el)
-    else:
-        # ── 开放式问题: input 文本输入 ──
-        en_input_ph, zh_input_ph = _T["clarify_input_placeholder"]
-        input_el: dict[str, Any] = {
-            "tag": "input",
-            "element_id": "clarify_input",
-            "placeholder": {
-                "tag": "plain_text",
-                "content": en_input_ph,
-                "i18n_content": _i18n(en_input_ph, zh_input_ph),
+
+    # ── 自定义输入: input 文本输入框（始终显示） ──
+    en_input_ph, zh_input_ph = _T["clarify_input_placeholder"]
+    input_el: dict[str, Any] = {
+        "tag": "input",
+        "element_id": "clarify_input",
+        "placeholder": {
+            "tag": "plain_text",
+            "content": en_input_ph,
+            "i18n_content": _i18n(en_input_ph, zh_input_ph),
+        },
+        "max_length": 500,
+        "name": "clarify_input",
+        "behaviors": [{
+            "type": "callback",
+            "value": {
+                "hermes_clarify_action": "input_submit",
+                "clarify_id": clarify_id,
             },
-            "max_length": 500,
-            "name": "clarify_input",
-            "behaviors": [{
-                "type": "callback",
-                "value": {
-                    "hermes_clarify_action": "input_submit",
-                    "clarify_id": clarify_id,
-                },
-            }],
-        }
-        elements.append(input_el)
+        }],
+    }
+    elements.append(input_el)
 
     card: dict[str, Any] = {
         "schema": "2.0",
@@ -1165,31 +1174,40 @@ def build_clarify_card(
     return card
 
 
-def build_clarify_resolved_card(
+def build_clarify_submitted_card(
     *,
     question: str,
     selected: str,
+    clarify_id: str = "",
 ) -> dict[str, Any]:
-    """构建 Clarify 已回复卡片.
+    """构建 Clarify 已提交态卡片（State 2: Submitted / Soft Lock）.
 
-    用户做出选择后，返回此卡片作为 inline 更新，显示他们的选择。
+    三态卡片设计 — 已提交态（软锁定）:
+      - 标题: lock_outlined 图标 + 问题文本
+      - 用户选择内容
+      - "已提交，等待确认..." 提示
+      - 「重试提交」按钮：重新发送同一选择（非重新选择）
 
     Args:
         question: 原始问题文本
         selected: 用户选择的文本
+        clarify_id: 唯一标识，用于重试回调路由
     """
-    en_resolved, zh_resolved = _T["clarify_resolved"]
-    en_label = en_resolved.format(selected)
-    zh_label = zh_resolved.format(selected)
+    en_selected, zh_selected = _T["clarify_selected"]
+    en_sel_label = en_selected.format(selected)
+    zh_sel_label = zh_selected.format(selected)
+
+    en_submitted, zh_submitted = _T["clarify_submitted"]
+    en_retry, zh_retry = _T["clarify_retry"]
 
     elements: list[dict] = [
         {
             "tag": "div",
             "icon": {
                 "tag": "standard_icon",
-                "token": "helpdesk_outlined",
+                "token": "lock_outlined",
                 "size": "20px 20px",
-                "color": "blue",
+                "color": "orange",
             },
             "text": {
                 "tag": "lark_md",
@@ -1200,15 +1218,42 @@ def build_clarify_resolved_card(
             "tag": "div",
             "icon": {
                 "tag": "standard_icon",
-                "token": "resolve_outlined",
+                "token": "lock_outlined",
                 "size": "16px 16px",
-                "color": "green",
+                "color": "orange",
             },
             "text": {
                 "tag": "lark_md",
-                "content": en_label,
-                "i18n_content": _i18n(en_label, zh_label),
+                "content": en_sel_label,
+                "i18n_content": _i18n(en_sel_label, zh_sel_label),
             },
+        },
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"*{en_submitted}*",
+                "i18n_content": _i18n(f"*{en_submitted}*", f"*{zh_submitted}*"),
+            },
+        },
+        {
+            "tag": "action",
+            "actions": [{
+                "tag": "button",
+                "text": {
+                    "tag": "plain_text",
+                    "content": en_retry,
+                    "i18n_content": _i18n(en_retry, zh_retry),
+                },
+                "type": "primary",
+                "behaviors": [{
+                    "type": "callback",
+                    "value": {
+                        "hermes_clarify_action": "retry_submit",
+                        "clarify_id": clarify_id,
+                    },
+                }],
+            }],
         },
     ]
 
@@ -1224,28 +1269,37 @@ def build_clarify_resolved_card(
     return card
 
 
-def build_clarify_awaiting_input_card(
+def build_clarify_confirmed_card(
     *,
     question: str,
+    selected: str,
 ) -> dict[str, Any]:
-    """构建 Clarify 等待自定义输入卡片.
+    """构建 Clarify 已确认态卡片（State 3: Confirmed / Hard Lock）.
 
-    当用户选择 "自定义输入" 后，返回此卡片作为 inline 更新，
-    提示用户在聊天中输入回答。
+    三态卡片设计 — 已确认态（硬锁定）:
+      - 标题: resolve_filled 图标 + 问题文本
+      - 用户选择内容
+      - "已确认" 文本
+      - 无操作按钮（由服务端更新卡片至此态）
 
     Args:
         question: 原始问题文本
+        selected: 用户选择的文本
     """
-    en_awaiting, zh_awaiting = _T["clarify_awaiting_input"]
+    en_selected, zh_selected = _T["clarify_selected"]
+    en_sel_label = en_selected.format(selected)
+    zh_sel_label = zh_selected.format(selected)
+
+    en_confirmed, zh_confirmed = _T["clarify_confirmed"]
 
     elements: list[dict] = [
         {
             "tag": "div",
             "icon": {
                 "tag": "standard_icon",
-                "token": "helpdesk_outlined",
+                "token": "resolve_filled",
                 "size": "20px 20px",
-                "color": "blue",
+                "color": "green",
             },
             "text": {
                 "tag": "lark_md",
@@ -1256,14 +1310,22 @@ def build_clarify_awaiting_input_card(
             "tag": "div",
             "icon": {
                 "tag": "standard_icon",
-                "token": "edit_outlined",
+                "token": "resolve_filled",
                 "size": "16px 16px",
-                "color": "orange",
+                "color": "green",
             },
             "text": {
                 "tag": "lark_md",
-                "content": en_awaiting,
-                "i18n_content": _i18n(en_awaiting, zh_awaiting),
+                "content": en_sel_label,
+                "i18n_content": _i18n(en_sel_label, zh_sel_label),
+            },
+        },
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"✓ {en_confirmed}",
+                "i18n_content": _i18n(f"✓ {en_confirmed}", f"✓ {zh_confirmed}"),
             },
         },
     ]

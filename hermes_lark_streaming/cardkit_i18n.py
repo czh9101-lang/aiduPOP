@@ -36,13 +36,14 @@ _T: dict[str, tuple[str, str]] = {
     "background_review": ("Background Review", "后台审查"),
     "bg_review_panel": ("Review", "审查"),
     "partial_continues": ("Continues in next message", "内容未完，继续在下一条消息"),
-    # ── Clarify interactive card ──
+    # ── Clarify interactive card (three-state: pending / submitted / confirmed) ──
     "clarify_question": ("Question", "问题"),
-    "clarify_select_placeholder": ("Please select...", "请选择..."),
-    "clarify_other": ("✏️ Custom input", "✏️ 自定义输入"),
+    "clarify_select_placeholder": ("Quick select...", "快速选择..."),
     "clarify_input_placeholder": ("Type your answer...", "请输入你的回答..."),
-    "clarify_resolved": ("Selected: {}", "已选择: {}"),
-    "clarify_awaiting_input": ("Please type your answer in chat", "请在聊天中输入你的回答"),
+    "clarify_selected": ("Selected: {}", "已选择: {}"),
+    "clarify_submitted": ("Submitted, awaiting confirmation...", "已提交，等待确认..."),
+    "clarify_retry": ("Retry submission", "重试提交"),
+    "clarify_confirmed": ("Confirmed", "已确认"),
 }
 
 

@@ -3,8 +3,9 @@
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
 | 1 | Feature | 保留式封卡（Preservative Seal） | 封卡时 `build_linear_complete_card` 调用 `_split_long_text()`（每2400字符一块）+ `_extract_images_from_markdown()`（每张图2个嵌套元素），导致1个流式streaming元素爆炸成N+2M个元素，超过飞书200元素限制，封卡失败 | 新增 `_preservative_seal()` 方法：`close_streaming` + `batch_update` 增量更新（删loading、加partial指示器/footer），保留已有streaming元素不动，避免元素爆炸。所有封卡场景（拆卡封存 `_do_linear_split` + 完成封存 `_do_linear_complete_inner`）统一先尝试保留式封卡，失败后降级为全量重建（含渐进降级 compact seal → minimal seal） |
-| 2 | Feature | Clarify 交互卡片 | Clarify 工具调用时使用文本消息显示选项列表，用户需手动输入数字或选项文本回复，体验差 | 新增 `build_clarify_card()` 构建飞书交互卡片：多选模式使用 `select_static` 下拉框展示选项 + "✏️ 自定义输入"选项；开放模式使用 `input` 文本输入框。Monkey-patch `FeishuAdapter.send_clarify` 替换文本消息为交互卡片；Monkey-patch `_on_card_action_trigger` 处理卡片回调，选择预定义选项直接解析，选择"自定义输入"后 `mark_awaiting_text` 等待用户下一条消息。回调解析通过 `resolve_gateway_clarify()` 公开 API 完成 |
-| 3 | Bug | CHANGELOG/SKILL.md 日期错误 | 多个版本的发布日期标注为6月9日-12日等未来日期 | 修正 v0.18.2/v0.18.3/v0.18.4 的日期为6月8日 |
+| 2 | Feature | Clarify 交互卡片三态设计 | 原 Clarify 卡片只有两态（待选择 + 已确认），选择后网络丢包导致 hermes 未收到回答时卡片死锁，用户无法重试 | 重构为三态卡片：① **待选择态**（`helpdesk_outlined` 图标）：markdown 全量展示选项 A. B. C. + `select_static` 快速选择下拉框（无"其他"选项）+ `input` 自定义输入框（始终显示，支持 Enter + 按钮提交）；② **已提交态**（`lock_outlined` 图标，软锁定）：显示用户选择内容 + "已提交，等待确认..." + 「重试提交」按钮（CallBackCard 即时返回，重试重新发送同一选择而非重新选择）；③ **已确认态**（`resolve_filled` 图标，硬锁定）：显示用户选择内容 + "已确认" + 无操作按钮（服务端 `update_card` 更新）。移除 `build_clarify_resolved_card()` 和 `build_clarify_awaiting_input_card()`，新增 `build_clarify_submitted_card()` 和 `build_clarify_confirmed_card()`；移除 `selected_option == "other"` 分支和 `mark_awaiting_text` 调用；新增 `_clarify_answers` / `_clarify_card_info` 存储；新增 `_schedule_clarify_resolve_and_confirm()` 统一处理 resolve + 服务端确认更新 |
+| 3 | Bug | `streaming_panel_expanded` 默认值不一致 | `config.py` 属性默认值为 `False`，但 `plugin.py` 中 `_DEFAULT_STREAMING_CONFIG` 写入 config.yaml 的初始值为 `True`，导致重新安装后流式态卡片面板默认展开 | 修改 `plugin.py` 第57行 `_DEFAULT_STREAMING_CONFIG` 中 `streaming_panel_expanded: True` → `streaming_panel_expanded: False` |
+| 4 | Bug | CHANGELOG/SKILL.md 日期错误 | 多个版本的发布日期标注为6月9日-12日等未来日期 | 修正 v0.18.2/v0.18.3/v0.18.4 的日期为6月8日 |
 
 ## v0.19.0 (2026-06-08)
 
