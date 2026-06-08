@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 0.19.0 (DEV 分支) |
+| 版本 | 0.19.1 (DEV 分支) |
 | 仓库 | `https://gitee.com/Aowen-Nowor/hermes-lark-streaming` |
 | 协议 | MIT |
 | Python | ≥3.11 |
@@ -361,6 +361,31 @@ v0.18.2 起，answer 估算新增图片元素计数（`_count_images_in_text`）
 **解决**: 渐进降级策略——封卡时依次尝试：① 全量封卡 → ② compact seal（保留所有面板类型但截断内容：推理≤2000字、answer≤4000字、工具步骤仅保留标题）→ ③ minimal seal（仅 answer 文本）。完成阶段同样改为两级降级：Level 1 截断保留面板、Level 2 移除推理面板。
 **模式**: 降级不应一步到位跳到最简方案——中间档位往往能兼顾"可用"和"信息保留"。
 
+### 10.14 Clarify 卡片三态设计（v0.19.1 改进）
+
+**设计决策**: 用户选择/输入后，卡片进入**软锁定**（已提交态），hermes 确认收到后进入**硬锁定**（已确认态）。网络异常时用户可点「重试提交」重新发送同一选择，避免死结。
+
+**三态流转**:
+1. **待选择态**（`build_clarify_card`）：选项列表 + 下拉框 + 输入框 + 提交按钮
+2. **已提交态**（`build_clarify_submitted_card`）：显示用户选择 + "已提交，等待确认..." + 「重试提交」按钮（软锁定）
+3. **已确认态**（`build_clarify_resolved_card`）：显示用户选择 + "已确认"，无按钮（硬锁定）
+
+**实现**: CallBackCard 同步返回已提交态（软锁定），hermes 成功处理后 `_schedule_confirm_card()` 通过 IM PATCH API 更新为已确认态（硬锁定）。用户点「重试提交」时重新发送同一选择（`_clarify_selections` 存储）。
+
+**关键**: 不再使用即时硬锁定——网络异常可能导致 hermes 未收到用户选择，而卡片已锁定不可修改，形成死结。软锁定 + 重试按钮提供逃生通道。
+
+**图标**: 使用飞书官方 `standard_icon` token：`helpdesk_outlined`（待选择）、`lock_outlined`（已提交，橙色）、`resolve_filled`（已确认，绿色），不使用 emoji。
+
+**模式**: 交互卡片应提供"逃生通道"——网络不可靠时，纯锁定可能导致用户无法重试。软锁定 + 服务端确认是更健壮的模式。
+
+### 10.15 streaming_panel_expanded 默认值不一致（v0.19.1 修复）
+
+**问题**: `config.py` 属性 `streaming_panel_expanded` 默认 `False`，但 `plugin.py` 的 `_DEFAULT_STREAMING_CONFIG` 字典中值为 `True`。安装时 `_DEFAULT_STREAMING_CONFIG` 写入 `config.yaml`，导致 `config.yaml` 中 `streaming_panel_expanded: true`，与 `config.py` 的 fallback 默认值矛盾。
+
+**解决**: 将 `_DEFAULT_STREAMING_CONFIG` 中 `streaming_panel_expanded` 从 `True` 改为 `False`。
+
+**模式**: `plugin.py` 的默认值字典是写入 `config.yaml` 的源头，必须与 `config.py` 的属性默认值保持一致——后者仅在 `config.yaml` 缺少该键时才生效。
+
 ---
 
 ## 11. 测试结构
@@ -394,7 +419,6 @@ tests/
 git clone -b DEV https://gitee.com/Aowen-Nowor/hermes-lark-streaming.git
 
 # 安装到 Hermes
-hermes plugins install /path/to/hermes-lark-streaming
 
 # 查看日志
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
@@ -417,12 +441,12 @@ hermes gateway restart
 
 | 版本 | 日期 | 核心变更 |
 |------|------|----------|
-| v0.18.3 | 2026-06-11 | Bug C-1 修复：`message_id=None` 时 `message_id[:12]` 崩溃（36处防护）+ Bug C-2 修复：封卡 300305 渐进降级（compact seal 保留面板 → minimal seal）+ SKILL.md 路线图精简 |
-| v0.18.2 | 2026-06-10 | 拆卡阈值修正（180→150，含图片估算）+ answer 图片元素计数 |
-| v0.18.1 | 2026-06-08 | GatewayRunner 延迟补丁 + edit_message chat_id 参数修复 + 拆卡跑马灯修复 + 线性模式中断面板位置优化 + 面板展开配置控制 |
-| v0.18.0 | 2026-06-07 | 插件更新命令修正 + 启动配置诊断日志 + 网关卡片路径决策点日志 + FeishuClient 初始化诊断日志 |
-| v0.17.0 | 2026-06-07 | 图片 Card 2.0 升级 + 完成态图片独立渲染 + 页脚去💾 + 时间感知模式重命名 |
-| v0.8.5 | 2026-05-26 | 初始 fork，修复桥接导入、回调重复、contextvars 跨线程 |
+| v0.19.1 | 2026-06-08 | 保留式封卡 + Clarify 交互卡片 UX 改进（选项展示+即时锁定+飞书官方图标）+ streaming_panel_expanded 默认值修正 |
+| v0.18.3 | 2026-06-08 | message_id NoneType 下标崩溃修复 + 封卡 300305 渐进降级 |
+| v0.18.2 | 2026-06-08 | 拆卡阈值修正（180→150）+ answer 图片元素计数 |
+| v0.18.1 | 2026-06-08 | 更新命令修正 + 配置/决策点/初始化诊断日志 |
+| v0.18.0 | 2026-06-07 | （见 v0.18.1 合并条目） |
+| v0.17.0 | 2026-06-07 | 图片 Card 2.0 + 独立渲染 + 页脚去💾 + 时间感知模式重命名 |
 | v0.8.6 | 2026-05-26 | Config 读取修复、配置序列化修复、卸载清理 |
 | v0.9.0 | 2026-05-27 | 内容重复修复、页脚耗时修复、CLI 路径修复、表格限制放宽、api_calls/history_offset |
 | v0.10.0 | 2026-05-28 | 时间感知模式、/stop 状态显示、错误面板、compression_exhausted、Apple Silicon 修复、补丁隔离、Cron 死锁修复、Cron 表格降级 |

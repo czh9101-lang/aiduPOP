@@ -16,6 +16,8 @@ when the plugin loads.
     FeishuAdapter.edit_message               → update gateway card content (Phase 2)
     FeishuAdapter.add_reaction               → card status indicator (Phase 3)
     FeishuAdapter.delete_reaction            → card status clear (Phase 3)
+    FeishuAdapter.send_clarify               → interactive clarify card (dropdown + input)
+    FeishuAdapter._on_card_action_trigger    → clarify card callback handler
 
 Message context (``message_id``, ``event_message_id``, ``chat_id``, …) is
 propagated through a ``contextvars.ContextVar`` — safe within a single async
@@ -1676,6 +1678,506 @@ def _wrap_feishu_adapter_delete_reaction(orig_delete_reaction: Callable) -> Call
     return _intercepted_delete_reaction
 
 
+# ── Clarify interactive card registry ──────────────────────────────────
+# Stores the choices list for each clarify_id so the card action callback
+# handler can look up the choice text from the option index.
+_clarify_choices: dict[str, list[str]] = {}  # clarify_id → choices list
+_clarify_questions: dict[str, str] = {}  # clarify_id → question text
+_clarify_card_msg_ids: dict[str, str] = {}  # clarify_id → card_msg_id (for server-side confirm update)
+_clarify_selections: dict[str, str] = {}  # clarify_id → user's selected/input text (for retry)
+
+
+def _wrap_feishu_adapter_send_clarify(orig_send_clarify: Callable) -> Callable:
+    """Intercept ``FeishuAdapter.send_clarify()`` — render interactive card.
+
+    Instead of the default text-based numbered list, we build a CardKit 2.0
+    interactive card with:
+      - A ``select_static`` dropdown for choices + "✏️ 自定义输入" option
+      - An ``input`` field for open-ended questions (no choices)
+      - Callback behaviors that route to our card action handler
+
+    When the card can't be sent (controller disabled, API error), falls
+    back to the original text-based send_clarify.
+    """
+
+    async def _intercepted_send_clarify(
+        self_feishu, chat_id, question, choices, clarify_id, session_key, metadata=None, **kwargs
+    ):
+        _logger.info(
+            "clarify card: send_clarify intercepted chat=%s question=%r choices=%s clarify_id=%s",
+            (chat_id or "?")[:12],
+            question[:50] if question else "",
+            choices,
+            (clarify_id or "?")[:12],
+        )
+
+        try:
+            from .controller import get_controller
+            ctrl = get_controller()
+            if not ctrl or not ctrl.enabled or not ctrl._client_ok():
+                _logger.debug("clarify card: controller not available, falling back to text")
+                return await orig_send_clarify(
+                    self_feishu, chat_id, question, choices, clarify_id, session_key,
+                    metadata=metadata, **kwargs
+                )
+
+            from .cardkit import build_clarify_card
+
+            card = build_clarify_card(
+                question=question,
+                choices=choices if choices else None,
+                clarify_id=clarify_id,
+            )
+
+            # Store choices and question for callback lookup
+            if choices:
+                _clarify_choices[clarify_id] = list(choices)
+            _clarify_questions[clarify_id] = question
+
+            # Send the card via FeishuClient
+            reply_to = None
+            if metadata and isinstance(metadata, dict):
+                reply_to = metadata.get("reply_to") or metadata.get("message_id")
+
+            if reply_to:
+                card_msg_id = await ctrl._client.reply_card(reply_to, card)
+            else:
+                card_msg_id = await ctrl._client.send_card_to_chat(chat_id, card)
+
+            _logger.info(
+                "clarify card: card sent successfully, clarify_id=%s card_msg_id=%s",
+                (clarify_id or "?")[:12],
+                (card_msg_id or "?")[:12],
+            )
+
+            # Store card_msg_id for server-side confirm update
+            if card_msg_id:
+                _clarify_card_msg_ids[clarify_id] = card_msg_id
+
+            # Register the card in gateway card registry (for edit tracking)
+            _register_gateway_card(card_msg_id, chat_id=chat_id, card_id=None, category="clarify")
+
+            # For choices mode: we handle resolution in the card action callback.
+            # For open-ended mode (no choices): the input field triggers input_submit.
+            # In both cases, we call mark_awaiting_text as a fallback so the
+            # gateway text-intercept can also resolve if the user types instead.
+            try:
+                from tools.clarify_gateway import mark_awaiting_text
+                mark_awaiting_text(clarify_id)
+                _logger.debug("clarify card: mark_awaiting_text called for clarify_id=%s", (clarify_id or "?")[:12])
+            except (ImportError, Exception) as e:
+                _logger.debug("clarify card: mark_awaiting_text failed (%s), card callback will handle resolution", e)
+
+            # Return success to suppress the original text-based send_clarify
+            try:
+                from gateway.platforms.base import SendResult
+                return SendResult(success=True, message_id=card_msg_id)
+            except (ImportError, AttributeError):
+                return None
+
+        except Exception as e:
+            _logger.warning(
+                "clarify card: failed to send card, falling back to text: %s",
+                e,
+                exc_info=True,
+            )
+            return await orig_send_clarify(
+                self_feishu, chat_id, question, choices, clarify_id, session_key,
+                metadata=metadata, **kwargs
+            )
+
+    return _intercepted_send_clarify
+
+
+def _wrap_feishu_card_action_trigger(original_method: Callable) -> Callable:
+    """Wrap ``FeishuAdapter._on_card_action_trigger`` to handle clarify card callbacks.
+
+    When a user interacts with a clarify card (selects a dropdown option,
+    submits text input, or clicks a button), this wrapper intercepts the
+    callback and:
+
+      - For ``select``: resolves with the selected choice text
+      - For ``input_submit``: resolves with the typed text (Enter key)
+      - For ``button_submit``: resolves with the typed text (click submit button)
+      - For ``retry_submit``: re-sends the previously submitted text
+
+    All actions return a CallBackCard showing the soft-lock "submitted" state
+    (with retry button). After hermes successfully processes the resolve,
+    the card is updated server-side to the hard-lock "confirmed" state.
+    """
+
+    def _wrapped(self, data):
+        # ── Check if this is a clarify card action ──
+        event = getattr(data, "event", None)
+        action = getattr(event, "action", None)
+        action_value = getattr(action, "value", {}) or {}
+
+        clarify_action = action_value.get("hermes_clarify_action") if isinstance(action_value, dict) else None
+
+        if clarify_action:
+            return _handle_clarify_card_action(self, data, clarify_action, action_value)
+
+        # Not a clarify action — pass through to original
+        return original_method(self, data)
+
+    return _wrapped
+
+
+async def _schedule_confirm_card(*, cid: str) -> None:
+    """Server-side card update: soft-lock → hard-lock (confirmed state).
+
+    After hermes successfully receives the user's clarify answer, this
+    function updates the card via the IM PATCH API to the confirmed state,
+    removing the "重试提交" button and showing "已确认".
+
+    Also cleans up stored clarify data (choices, questions, etc.).
+
+    Args:
+        cid: clarify_id to confirm
+    """
+    import asyncio
+
+    # Small delay to ensure the CallBackCard (submitted state) is processed first
+    await asyncio.sleep(1.0)
+
+    card_msg_id = _clarify_card_msg_ids.get(cid, "")
+    question = _clarify_questions.get(cid, "")
+    choices = _clarify_choices.get(cid) or None
+    selected = _clarify_selections.get(cid, "")
+
+    if not card_msg_id:
+        _logger.warning(
+            "clarify card: cannot confirm, no card_msg_id for clarify_id=%s",
+            (cid or "?")[:12],
+        )
+        # Still cleanup
+        _clarify_choices.pop(cid, None)
+        _clarify_questions.pop(cid, None)
+        _clarify_card_msg_ids.pop(cid, None)
+        _clarify_selections.pop(cid, None)
+        return
+
+    if not selected:
+        _logger.warning(
+            "clarify card: cannot confirm, no stored selection for clarify_id=%s",
+            (cid or "?")[:12],
+        )
+        _clarify_choices.pop(cid, None)
+        _clarify_questions.pop(cid, None)
+        _clarify_card_msg_ids.pop(cid, None)
+        _clarify_selections.pop(cid, None)
+        return
+
+    try:
+        from .cardkit import build_clarify_resolved_card
+        from .controller import get_controller
+
+        ctrl = get_controller()
+        if not ctrl or not ctrl._client_ok():
+            _logger.warning(
+                "clarify card: cannot confirm, controller not available for clarify_id=%s",
+                (cid or "?")[:12],
+            )
+            return
+
+        card_data = build_clarify_resolved_card(
+            question=question, selected=selected, choices=choices,
+        )
+        await ctrl._client.update_card(card_msg_id, card_data)
+
+        _logger.info(
+            "clarify card: confirmed (hard lock) for clarify_id=%s card_msg_id=%s",
+            (cid or "?")[:12],
+            (card_msg_id or "?")[:12],
+        )
+    except Exception:
+        _logger.warning(
+            "clarify card: server-side confirm update failed for clarify_id=%s",
+            (cid or "?")[:12],
+            exc_info=True,
+        )
+    finally:
+        # Always cleanup stored data after confirm attempt
+        _clarify_choices.pop(cid, None)
+        _clarify_questions.pop(cid, None)
+        _clarify_card_msg_ids.pop(cid, None)
+        _clarify_selections.pop(cid, None)
+
+
+def _handle_clarify_card_action(
+    adapter_instance,
+    data: Any,
+    clarify_action: str,
+    action_value: dict,
+) -> Any:
+    """Handle a clarify card action callback — three-state flow.
+
+    This function is called synchronously from the card action trigger.
+
+    Three-state flow:
+      1. 待选择态 (build_clarify_card) → card initially sent
+      2. 已提交态 (build_clarify_submitted_card) → CallBackCard returned on user action
+         - Shows "已提交，等待确认..." + "重试提交" button (soft lock)
+      3. 已确认态 (build_clarify_resolved_card) → server-side API update after hermes confirms
+         - Shows "已确认", no buttons (hard lock)
+
+    If the user clicks "重试提交", the same selection is re-sent to hermes
+    and the card stays in the submitted state.
+    """
+    # Import P2CardActionTriggerResponse and CallBackCard (may be None if SDK version doesn't support)
+    try:
+        from lark_oapi.api.cardkit.v1 import P2CardActionTriggerResponse, CallBackCard
+    except ImportError:
+        P2CardActionTriggerResponse = None
+        CallBackCard = None
+
+    def _empty_response():
+        if P2CardActionTriggerResponse is None:
+            return None
+        return P2CardActionTriggerResponse()
+
+    def _submitted_card_response(selected_text: str, choices_list: list[str] | None, q: str, cid: str):
+        """Build a CallBackCard showing the soft-lock submitted state."""
+        if P2CardActionTriggerResponse is None or CallBackCard is None:
+            return _empty_response()
+        from .cardkit import build_clarify_submitted_card
+        card_data = build_clarify_submitted_card(
+            question=q, selected=selected_text,
+            choices=choices_list, clarify_id=cid,
+        )
+        response = P2CardActionTriggerResponse()
+        card = CallBackCard()
+        card.type = "raw"
+        card.data = card_data
+        response.card = card
+        return response
+
+    clarify_id = action_value.get("clarify_id", "")
+    if not clarify_id:
+        _logger.debug("clarify card: callback missing clarify_id, ignoring")
+        return _empty_response()
+
+    _logger.info(
+        "clarify card: callback received action=%s clarify_id=%s",
+        clarify_action,
+        (clarify_id or "?")[:12],
+    )
+
+    # ── Authorization check ──
+    event = getattr(data, "event", None)
+    operator = getattr(event, "operator", None)
+    open_id = str(getattr(operator, "open_id", "") or "")
+    if hasattr(adapter_instance, "_is_interactive_operator_authorized"):
+        if not adapter_instance._is_interactive_operator_authorized(open_id):
+            _logger.warning(
+                "clarify card: unauthorized click by %s for clarify_id=%s",
+                open_id or "<unknown>",
+                (clarify_id or "?")[:12],
+            )
+            return _empty_response()
+
+    question = _clarify_questions.get(clarify_id, "")
+    choices = _clarify_choices.get(clarify_id) or None
+
+    # ── Handle retry_submit action (re-send previous selection) ──
+    if clarify_action == "retry_submit":
+        stored_selection = _clarify_selections.get(clarify_id, "")
+        if not stored_selection:
+            _logger.debug("clarify card: retry but no stored selection for clarify_id=%s", (clarify_id or "?")[:12])
+            return _empty_response()
+
+        _logger.info(
+            "clarify card: retrying with selection '%s' for clarify_id=%s",
+            stored_selection[:50],
+            (clarify_id or "?")[:12],
+        )
+
+        # Re-resolve the clarify
+        loop = getattr(adapter_instance, "_loop", None)
+        if loop is not None:
+            try:
+                from tools.clarify_gateway import resolve_gateway_clarify
+                from agent.async_utils import safe_schedule_threadsafe
+
+                async def _do_retry_resolve():
+                    resolve_gateway_clarify(clarify_id, stored_selection)
+                    # Schedule server-side confirm update after retry
+                    await _schedule_confirm_card(cid=clarify_id)
+
+                safe_schedule_threadsafe(
+                    _do_retry_resolve(), loop,
+                    logger=_logger,
+                    log_message="clarify card: failed to schedule retry resolve",
+                    log_level=logging.WARNING,
+                )
+            except (ImportError, Exception) as e:
+                _logger.warning("clarify card: retry resolve scheduling failed: %s", e)
+                try:
+                    from tools.clarify_gateway import resolve_gateway_clarify
+                    resolve_gateway_clarify(clarify_id, stored_selection)
+                except (ImportError, Exception) as e2:
+                    _logger.warning("clarify card: synchronous retry resolve also failed: %s", e2)
+
+        # Return the same submitted card (soft lock with retry button)
+        return _submitted_card_response(stored_selection, choices, question, clarify_id)
+
+    # ── Handle select action (dropdown choice) ──
+    if clarify_action == "select":
+        selected_option = str(getattr(getattr(event, "action", None), "option", "") or "")
+
+        # Predefined choice selected → resolve
+        choices_list = _clarify_choices.get(clarify_id, [])
+        try:
+            idx = int(selected_option)
+            choice_text = choices_list[idx]
+        except (ValueError, IndexError):
+            _logger.warning(
+                "clarify card: invalid option index '%s' for clarify_id=%s (choices=%s)",
+                selected_option,
+                (clarify_id or "?")[:12],
+                choices_list,
+            )
+            return _empty_response()
+
+        _logger.info(
+            "clarify card: resolving with choice '%s' for clarify_id=%s",
+            choice_text,
+            (clarify_id or "?")[:12],
+        )
+
+        # Store selection for retry
+        _clarify_selections[clarify_id] = choice_text
+
+        # Resolve the clarify (schedule on event loop since we're in a sync callback)
+        loop = getattr(adapter_instance, "_loop", None)
+        if loop is not None:
+            try:
+                from tools.clarify_gateway import resolve_gateway_clarify
+                from agent.async_utils import safe_schedule_threadsafe
+
+                async def _do_resolve():
+                    resolve_gateway_clarify(clarify_id, choice_text)
+                    # Schedule server-side confirm update after resolve
+                    await _schedule_confirm_card(cid=clarify_id)
+
+                safe_schedule_threadsafe(
+                    _do_resolve(), loop,
+                    logger=_logger,
+                    log_message="clarify card: failed to schedule resolve_gateway_clarify",
+                    log_level=logging.WARNING,
+                )
+            except (ImportError, Exception) as e:
+                _logger.warning("clarify card: resolve_gateway_clarify scheduling failed: %s", e)
+                # Try synchronous fallback
+                try:
+                    from tools.clarify_gateway import resolve_gateway_clarify
+                    resolve_gateway_clarify(clarify_id, choice_text)
+                except (ImportError, Exception) as e2:
+                    _logger.warning("clarify card: synchronous resolve also failed: %s", e2)
+
+        # Return submitted card (soft lock with retry button) — don't cleanup yet
+        return _submitted_card_response(choice_text, choices_list or None, question, clarify_id)
+
+    # ── Handle input_submit action (text input via Enter key) ──
+    if clarify_action == "input_submit":
+        action_obj = getattr(event, "action", None)
+        input_text = str(getattr(action_obj, "input_value", "") or "").strip()
+
+        if not input_text:
+            _logger.debug("clarify card: empty input submitted for clarify_id=%s", (clarify_id or "?")[:12])
+            return _empty_response()
+
+        _logger.info(
+            "clarify card: resolving with input '%s' for clarify_id=%s",
+            input_text[:50],
+            (clarify_id or "?")[:12],
+        )
+
+        # Store selection for retry
+        _clarify_selections[clarify_id] = input_text
+
+        # Resolve the clarify
+        loop = getattr(adapter_instance, "_loop", None)
+        if loop is not None:
+            try:
+                from tools.clarify_gateway import resolve_gateway_clarify
+                from agent.async_utils import safe_schedule_threadsafe
+
+                async def _do_resolve_input():
+                    resolve_gateway_clarify(clarify_id, input_text)
+                    # Schedule server-side confirm update after resolve
+                    await _schedule_confirm_card(cid=clarify_id)
+
+                safe_schedule_threadsafe(
+                    _do_resolve_input(), loop,
+                    logger=_logger,
+                    log_message="clarify card: failed to schedule resolve_gateway_clarify",
+                    log_level=logging.WARNING,
+                )
+            except (ImportError, Exception) as e:
+                _logger.warning("clarify card: resolve_gateway_clarify scheduling failed: %s", e)
+                try:
+                    from tools.clarify_gateway import resolve_gateway_clarify
+                    resolve_gateway_clarify(clarify_id, input_text)
+                except (ImportError, Exception) as e2:
+                    _logger.warning("clarify card: synchronous resolve also failed: %s", e2)
+
+        # Return submitted card (soft lock with retry button) — don't cleanup yet
+        return _submitted_card_response(input_text, choices, question, clarify_id)
+
+    # ── Handle button_submit action (click submit button) ──
+    if clarify_action == "button_submit":
+        action_obj = getattr(event, "action", None)
+        # Read input from form_value (button callbacks include all form values)
+        form_value = getattr(action_obj, "form_value", None) or {}
+        input_text = str(form_value.get("clarify_input", "") or "").strip()
+
+        if not input_text:
+            _logger.debug("clarify card: empty button submit for clarify_id=%s", (clarify_id or "?")[:12])
+            return _empty_response()
+
+        _logger.info(
+            "clarify card: resolving with button submit '%s' for clarify_id=%s",
+            input_text[:50],
+            (clarify_id or "?")[:12],
+        )
+
+        # Store selection for retry
+        _clarify_selections[clarify_id] = input_text
+
+        # Resolve the clarify
+        loop = getattr(adapter_instance, "_loop", None)
+        if loop is not None:
+            try:
+                from tools.clarify_gateway import resolve_gateway_clarify
+                from agent.async_utils import safe_schedule_threadsafe
+
+                async def _do_resolve_button():
+                    resolve_gateway_clarify(clarify_id, input_text)
+                    # Schedule server-side confirm update after resolve
+                    await _schedule_confirm_card(cid=clarify_id)
+
+                safe_schedule_threadsafe(
+                    _do_resolve_button(), loop,
+                    logger=_logger,
+                    log_message="clarify card: failed to schedule resolve_gateway_clarify",
+                    log_level=logging.WARNING,
+                )
+            except (ImportError, Exception) as e:
+                _logger.warning("clarify card: resolve_gateway_clarify scheduling failed: %s", e)
+                try:
+                    from tools.clarify_gateway import resolve_gateway_clarify
+                    resolve_gateway_clarify(clarify_id, input_text)
+                except (ImportError, Exception) as e2:
+                    _logger.warning("clarify card: synchronous resolve also failed: %s", e2)
+
+        # Return submitted card (soft lock with retry button) — don't cleanup yet
+        return _submitted_card_response(input_text, choices, question, clarify_id)
+
+    _logger.debug("clarify card: unknown action '%s', ignoring", clarify_action)
+    return _empty_response()
+
+
 def _wrap_feishu_adapter_send_image_file(orig_send_image_file: Callable) -> Callable:
     """Intercept ``FeishuAdapter.send_image_file()`` — add image to card session.
 
@@ -2241,8 +2743,26 @@ def apply_patches() -> None:
         # send, causing images to disappear entirely.
         # Images are now sent as standalone messages (pre-v0.15.3 behavior).
         # See: issue-v0.15.3-image-card-wrapping
+
+        # ── Clarify interactive card patches ──
+        # Patch send_clarify to render interactive CardKit cards instead of
+        # text-based numbered lists.  Patch _on_card_action_trigger to handle
+        # clarify card callbacks (dropdown select, text input).
+        clarify_patched = False
+        try:
+            FeishuAdapter.send_clarify = _wrap_feishu_adapter_send_clarify(FeishuAdapter.send_clarify)
+            clarify_patched = True
+            _logger.info("hermes-lark-streaming: FeishuAdapter.send_clarify patched ✓ (clarify interactive card)")
+        except AttributeError:
+            _logger.debug("hermes-lark-streaming: FeishuAdapter.send_clarify not found, clarify card skipped")
+        try:
+            FeishuAdapter._on_card_action_trigger = _wrap_feishu_card_action_trigger(FeishuAdapter._on_card_action_trigger)
+            _logger.info("hermes-lark-streaming: FeishuAdapter._on_card_action_trigger patched ✓ (clarify card callback)")
+        except AttributeError:
+            _logger.debug("hermes-lark-streaming: FeishuAdapter._on_card_action_trigger not found, clarify callback skipped")
+
         feishu_patched = True
-        _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit/reaction/image patched ✓ (gateway message cards enabled)")
+        _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit/reaction/image/clarify patched ✓ (gateway message cards enabled)")
     except (ImportError, AttributeError) as e:
         _logger.info("hermes-lark-streaming: FeishuAdapter patch skipped (%s)", e)
 

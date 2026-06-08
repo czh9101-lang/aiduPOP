@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.19.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.19.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -40,11 +40,15 @@
 ### 安装
 
 ```bash
-hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
+hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
 ```
 或
+
 ```bash
 hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
+```
+```bash
+hermes plugins install git@github.com:Aowen-Nowor/hermes-lark-streaming.git
 ```
 
 提示时输入 `Y` 启用插件，然后重启网关：
@@ -88,6 +92,7 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 # 验证插件配置和凭据（使用 Hermes 的 Python）
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
 $HERMES_PYTHON -m hermes_lark_streaming status
+$HERMES_PYTHON -m hermes_lark_streaming verify
 ```
 
 > **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无备份目录干扰（删除 `*.bak` 目录）；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。
@@ -132,8 +137,8 @@ hermes gateway restart
 streaming:
   enabled: true              # 启用流式卡片
   linear: true               # 线性模式：单卡片原地更新，支持自动拆卡
-  panel_expanded: false      # 完成态卡片中面板（工具、推理）是否保持展开
-  streaming_panel_expanded: true  # 流式态卡片面板是否保持展开（默认: true）
+  panel_expanded: false      # 完成态卡片中折叠面板是否保持展开
+  streaming_panel_expanded: false  # 流式态卡片中折叠面板是否保持展开
   print_strategy: delay      # 卡片上屏策略："fast"（即时）或 "delay"（更丝滑的打字机效果，默认）
   flush_interval_ms: 500     # 流式卡片刷新间隔（毫秒，默认: 500，范围: 100~2000）
   card_ttl_sec: 600         # 卡片存活检测超时（秒）

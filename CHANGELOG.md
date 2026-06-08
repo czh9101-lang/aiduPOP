@@ -1,4 +1,13 @@
-## v0.19.0 (2026-06-12)
+## v0.19.1 (2026-06-08)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | 保留式封卡（Preservative Seal） | 封卡时 `build_linear_complete_card` 调用 `_split_long_text()`（每2400字符一块）+ `_extract_images_from_markdown()`（每张图2个嵌套元素），导致1个流式streaming元素爆炸成N+2M个元素，超过飞书200元素限制，封卡失败 | 新增 `_preservative_seal()` 方法：`close_streaming` + `batch_update` 增量更新（删loading、加partial指示器/footer），保留已有streaming元素不动，避免元素爆炸。所有封卡场景（拆卡封存 `_do_linear_split` + 完成封存 `_do_linear_complete_inner`）统一先尝试保留式封卡，失败后降级为全量重建（含渐进降级 compact seal → minimal seal） |
+| 2 | Feature | Clarify 交互卡片 UX 改进 — 三态设计 | Clarify 卡片体验差：(1) 下拉框和输入框分属不同模式，无法同时展示；(2) 用户选择/输入后无即时视觉反馈；(3) 选择后仍可修改，缺乏锁定机制；(4) 选项仅在下拉框内可见，无法一目了然；(5) 网络异常导致 hermes 未收到用户选择时出现死结 | ① 合并下拉框+输入框+提交按钮为同一卡片：选项列表以 `A. / B. / C.` 格式完整展示在卡片正文中，下拉框供快速选择，输入框始终可见供自定义输入（支持 Enter + 按钮两种提交方式）；② 三态设计：**待选择态**（`build_clarify_card`）→ **已提交态**（`build_clarify_submitted_card`，软锁定，"已提交，等待确认..." + 「重试提交」按钮）→ **已确认态**（`build_clarify_resolved_card`，硬锁定，"已确认"，无按钮）；③ 用户选择/输入后 CallBackCard 即时返回已提交态（软锁定），hermes 成功收到后服务端 API 更新为已确认态（硬锁定）；④ 网络异常时用户可点「重试提交」重新发送同一选择，避免死结；⑤ 使用飞书官方 `standard_icon` token（`helpdesk_outlined` 待选择、`resolve_filled` 已确认、`lock_outlined` 已提交）；⑥ 新增 i18n 条目：`clarify_submit`、`clarify_submitted`、`clarify_retry`、`clarify_confirmed`；移除 `clarify_locked`；⑦ 新增 `_clarify_card_msg_ids`、`_clarify_selections` 存储，`_schedule_confirm_card()` 服务端确认更新 |
+| 3 | Bug | `streaming_panel_expanded` 配置默认值不一致 | `config.py` 属性默认 `False`，但 `plugin.py` 中 `_DEFAULT_STREAMING_CONFIG` 写入 `True`，导致安装后 `config.yaml` 中 `streaming_panel_expanded: true`，流式态面板默认展开 | 将 `_DEFAULT_STREAMING_CONFIG` 中 `streaming_panel_expanded` 从 `True` 改为 `False`，与 `config.py` 保持一致 |
+| 4 | Bug | CHANGELOG/SKILL.md 日期错误 | 多个版本的发布日期标注为6月9日-12日等未来日期 | 修正 v0.18.2/v0.18.3/v0.18.4 的日期为6月8日 |
+
+## v0.19.0 (2026-06-08)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
@@ -7,7 +16,7 @@
 | 3 | Perf | 性能指标采集（Performance Telemetry） | 关键路径（卡片创建、flush、stream_element、complete）无计时日志，性能瓶颈无法定位 | 在 `controller_linear_mixin.py` 的 `_do_create_linear_card`/`_do_linear_flush`/`stream_element` 调用/`_do_linear_complete_inner` 中添加 `time.monotonic()` 计时 + `debug` 级别日志；在 `feishu.py` 的 `cardkit_create`/`cardkit_stream_element`/`cardkit_batch_update` 中添加 API 调用计时；在 `controller.py` 的 `on_answer()` 中记录首字到达时间 `_first_answer_time` + TTFB 日志 |
 | 4 | Perf | stream_element 异步优化 | `cardkit_stream_element` 使用 `asyncio.to_thread` 包装同步 SDK 调用，增加线程切换开销；lark-oapi 新版已提供 `acontent` 异步方法 | `FeishuClient.__init__` 中探测 `card_element.acontent` 是否存在，缓存为 `_use_async_stream_element`；`cardkit_stream_element` 优先使用原生异步方法，回退到 `asyncio.to_thread` |
 
-## v0.18.4 (2026-06-12)
+## v0.18.4 (2026-06-08)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
@@ -16,7 +25,7 @@
 | 3 | Feature | 后台审查进度消息放入卡片 | `background_review` 消息（如"检查回复质量"、"更新记忆"）以纯文本发送到聊天，与卡片内容割裂，视觉不统一 | ① 新增 `_build_background_review_panel()` 构建可折叠审查面板；② `LinearState` 新增 `bg_review_messages` / `bg_review_panel_id` / `bg_review_panel_added` 属性；③ 线性模式下审查消息实时推入卡片面板（`defer_background_review` 返回 True 抑制纯文本）；④ 非线性模式仍走原暂存逻辑；⑤ 完成态卡片包含审查面板 |
 | 4 | Test | 新增配置、面板测试 | 新功能需测试覆盖 | ① 新增 `test_flush_interval_ms_default`、`test_flush_interval_sec_default`、`test_flush_interval_ms_custom`、`test_flush_interval_ms_clamped`；② 新增 `TestPartialStatusIndicator`（3 个测试）；③ 新增 `TestBackgroundReviewPanel`（3 个测试）；④ 修复 `test_first_call_schedules_delayed_flush` 和 `test_enables_flushing` 适配 500ms 默认值 |
 
-## v0.18.3 (2026-06-11)
+## v0.18.3 (2026-06-08)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
@@ -25,7 +34,7 @@
 | 3 | Docs | SKILL.md 路线图精简 | — | 移除 3 个过时/不适用条目；新增 10.11 message_id NoneType 下标崩溃、10.12 封卡 300305 元素超限丢失面板两个陷阱条目；新增 v0.18.3 版本历史条目 |
 | 4 | Chore | README 版本徽章未随版本号更新 | 版本号更新时遗漏了中英文 README 中的 shields.io badge 版本号 | 中英文 README 版本徽章统一更新至 0.18.3 |
 
-## v0.18.2 (2026-06-10)
+## v0.18.2 (2026-06-08)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|

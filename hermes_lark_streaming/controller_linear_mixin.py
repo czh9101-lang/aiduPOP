@@ -20,6 +20,7 @@ from .cardkit import (
     build_im_fallback_card,
     build_linear_compact_seal_card,
     build_linear_complete_card,
+    build_preservative_seal_actions,
     build_streaming_card_v2,
 )
 
@@ -648,6 +649,85 @@ class LinearControllerMixin:
             return False
         return True
 
+    async def _preservative_seal(
+        self,
+        session: CardSession,
+        *,
+        partial: bool = False,
+        footer_data: dict | None = None,
+        is_error: bool = False,
+        is_aborted: bool = False,
+        error_message: str = "",
+        footer_fields: list[list[str]] | None = None,
+        footer_show_label: bool = False,
+    ) -> bool:
+        """保留式封卡：关闭流式模式 + 增量更新，不重建整卡.
+
+        优势：流式阶段的 streaming element 在封卡后仍为 1 个元素（不触发 _split_long_text），
+        避免 1→N+2M 的元素爆炸，根本性解决封卡超限问题。
+
+        返回 True 表示成功，False 表示失败（需降级为全量重建）。
+        失败时 session.sequence 可能已递增，调用方需自行处理降级路径。
+        """
+        assert self._client is not None
+        card_id = session.card_id
+        assert card_id is not None
+
+        try:
+            # Step 1: Close streaming mode
+            session.sequence += 1
+            _logger.info(
+                "preservative seal: closing streaming card=%s seq=%d",
+                card_id[:12], session.sequence,
+            )
+            await self._client.cardkit_close_streaming(card_id, sequence=session.sequence)
+
+            # Step 2: Batch update — delete loading, add partial/footer
+            actions = build_preservative_seal_actions(
+                partial=partial,
+                footer_data=footer_data,
+                is_error=is_error,
+                is_aborted=is_aborted,
+                error_message=error_message,
+                footer_fields=footer_fields,
+                footer_show_label=footer_show_label,
+            )
+            if actions:
+                session.sequence += 1
+                _logger.info(
+                    "preservative seal: batch_update card=%s seq=%d actions=%d",
+                    card_id[:12], session.sequence, len(actions),
+                )
+                await self._client.cardkit_batch_update(
+                    card_id,
+                    actions,
+                    sequence=session.sequence,
+                )
+
+            _logger.info(
+                "preservative seal: success card=%s partial=%s",
+                card_id[:12], partial,
+            )
+            return True
+        except FeishuAPIError as e:
+            if e.code == CARDKIT_SEQUENCE_CONFLICT:
+                _logger.info(
+                    "preservative seal: 300317 sequence conflict → idempotent success, card=%s",
+                    card_id[:12],
+                )
+                return True
+            _logger.debug(
+                "preservative seal failed: card=%s, falling back to full rebuild",
+                card_id[:12], exc_info=True,
+            )
+            return False
+        except Exception:
+            _logger.debug(
+                "preservative seal failed: card=%s, falling back to full rebuild",
+                (card_id or "")[:12], exc_info=True,
+            )
+            return False
+
     def _find_tool_split_offset(
         self,
         base_count: int,
@@ -808,10 +888,23 @@ class LinearControllerMixin:
             return True
 
         try:
-            session.sequence += 1
-            await self._client.cardkit_close_streaming(old_card_id, sequence=session.sequence)
-            session.sequence += 1
-            await self._client.cardkit_update(old_card_id, seal_card, sequence=session.sequence)
+            # ── Step 1: Try preservative seal first (no element explosion) ──
+            # 保留式封卡：关闭流式 + 增量更新，不触发 _split_long_text，
+            # 流式阶段的 streaming element 仍为 1 个元素。
+            seal_ok = await self._preservative_seal(session, partial=True)
+            if not seal_ok:
+                # ── Step 2: Preservative seal failed — fall back to full rebuild ──
+                # Note: streaming may already be closed by preservative seal attempt,
+                # so we catch CARDKIT_STREAMING_CLOSED and skip close_streaming.
+                session.sequence += 1
+                try:
+                    await self._client.cardkit_close_streaming(old_card_id, sequence=session.sequence)
+                except FeishuAPIError as close_err:
+                    if close_err.code != CARDKIT_STREAMING_CLOSED:
+                        raise
+                    # Streaming already closed by preservative seal attempt — that's fine
+                session.sequence += 1
+                await self._client.cardkit_update(old_card_id, seal_card, sequence=session.sequence)
         except FeishuAPIError as e:
             # ── 封卡 300305 元素超限 → 渐进降级：compact seal → minimal seal ──
             # 仅 close_streaming 不更新内容，让旧卡片保留流式态最后内容，
@@ -1028,6 +1121,27 @@ class LinearControllerMixin:
             bg_review_messages=linear_state.bg_review_messages if linear_state else None,
         )
 
+        # ── Try preservative seal first (no element explosion) ──
+        # 保留式封卡：关闭流式 + 增量更新，不触发 _split_long_text，
+        # 流式阶段的 streaming element 仍为 1 个元素。
+        if session.card_id:
+            seal_ok = await self._preservative_seal(
+                session,
+                partial=False,
+                footer_data=session.footer,
+                is_error=is_error,
+                is_aborted=is_aborted,
+                error_message=error_message,
+                footer_fields=self._cfg.footer_fields,
+                footer_show_label=self._cfg.footer_show_label,
+            )
+            if seal_ok:
+                session.state = COMPLETED
+                _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
+                return True
+            # Preservative seal failed — fall back to full rebuild below
+
+        # ── Full rebuild path (preservative seal failed or not applicable) ──
         streaming_closed = False
         simplify_level = 0  # 0=full, 1=compact, 2=minimal
         for attempt in range(3):
@@ -1036,10 +1150,15 @@ class LinearControllerMixin:
                 if session.card_id:
                     if not streaming_closed:
                         session.sequence += 1
-                        await self._client.cardkit_close_streaming(
-                            session.card_id,
-                            sequence=session.sequence,
-                        )
+                        try:
+                            await self._client.cardkit_close_streaming(
+                                session.card_id,
+                                sequence=session.sequence,
+                            )
+                        except FeishuAPIError as close_err:
+                            if close_err.code != CARDKIT_STREAMING_CLOSED:
+                                raise
+                            # Streaming already closed by preservative seal attempt
                         streaming_closed = True
                     session.sequence += 1
                     await self._client.cardkit_update(

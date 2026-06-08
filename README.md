@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.19.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.19.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -42,12 +42,15 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 > 插件会自动读取 Hermes 的 `HERMES_HOME` 环境变量定位安装路径（默认 `~/.hermes`），非默认路径下无需额外操作。
 
 ```bash
-hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
+hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
 ```
 or
 
 ```bash
 hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
+```
+```bash
+hermes plugins install git@github.com:Aowen-Nowor/hermes-lark-streaming.git
 ```
 
 Enter `Y` when prompted to enable the plugin, then restart the gateway:
@@ -91,6 +94,7 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 # Verify plugin config & credentials (uses Hermes's Python)
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
 $HERMES_PYTHON -m hermes_lark_streaming status
+$HERMES_PYTHON -m hermes_lark_streaming verify
 ```
 
 > **Troubleshooting**: If no card effect appears after installation, check: (1) `hermes plugins list` shows the plugin as enabled; (2) no backup directory exists under `~/.hermes/plugins/` (remove any `*.bak` directories); (3) Feishu credentials are configured (see [Feishu Credentials](#feishu-credentials)).
@@ -136,7 +140,7 @@ streaming:
   enabled: true              # Enable streaming cards
   linear: true               # Linear mode: single card in-place update with auto card splitting
   panel_expanded: false      # Keep panels (tools, reasoning) expanded in completed cards
-  streaming_panel_expanded: true  # Keep panels expanded during streaming (default: true)
+  streaming_panel_expanded: false  # Keep panels expanded during streaming
   print_strategy: delay      # Card streaming strategy: "fast" (instant) or "delay" (smoother typewriter, default)
   flush_interval_ms: 500     # Streaming card refresh interval in ms (default: 500, range: 100-2000)
   card_ttl_sec: 600         # Card alive detection timeout (seconds)

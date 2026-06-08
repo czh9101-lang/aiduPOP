@@ -469,7 +469,7 @@ class TestDoLinearFlush:
             ("create", ""),
             ("reply", ""),
             ("close", "card_old"),
-            ("seal", "card_old"),
+            ("batch", "card_old"),
             ("batch", "card_next"),
         ]
         assert session.card_id == "card_next"
@@ -512,7 +512,7 @@ class TestDoLinearFlush:
             ("create", ""),
             ("reply", ""),
             ("close", "card_tool_old"),
-            ("seal", "card_tool_old"),
+            ("batch", "card_tool_old"),
             ("batch", "card_tool_next"),
         ]
         assert session.card_id == "card_tool_next"
@@ -551,12 +551,12 @@ class TestDoLinearFlush:
             ("create", ""),
             ("reply", ""),
             ("close", "card_tool_page_1"),
-            ("seal", "card_tool_page_1"),
+            ("batch", "card_tool_page_1"),
             ("batch", "card_tool_page_2"),
             ("create", ""),
             ("reply", ""),
             ("close", "card_tool_page_2"),
-            ("seal", "card_tool_page_2"),
+            ("batch", "card_tool_page_2"),
             ("batch", "card_tool_page_3"),
         ]
         assert session.card_id == "card_tool_page_3"
@@ -805,24 +805,18 @@ class TestDoLinearComplete:
 
         assert await ctrl._do_linear_complete(session) is True
         assert session.state == COMPLETED
-        assert call_order == ["close", "update"]
+        # With preservative seal, the flow is: close + batch_update (not full rebuild)
+        # The preservative seal calls close_streaming + batch_update
+        assert "close" in call_order
+        # cardkit_update should NOT be called (preservative seal succeeded)
+        client.cardkit_update.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_streaming_closed_flag_prevents_double_close(self) -> None:
+        """Preservative seal succeeds on first attempt, so close_streaming is called once."""
         ctrl = _setup_ctrl()
         client = ctrl._client
         client.cardkit_close_streaming = AsyncMock()
-        call_count = 0
-        original_update = client.cardkit_update
-
-        async def flaky_update(*args: object, **kwargs: object) -> None:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise FeishuAPIError("conflict", code=300317)
-            return await original_update(*args, **kwargs)
-
-        client.cardkit_update = flaky_update
 
         session = _make_session("msg_retry", linear=True)
         session.state = STREAMING
@@ -832,7 +826,8 @@ class TestDoLinearComplete:
 
         assert await ctrl._do_linear_complete(session) is True
         assert client.cardkit_close_streaming.call_count == 1
-        assert call_count == 1
+        # cardkit_update should NOT be called (preservative seal succeeded)
+        client.cardkit_update.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_three_retries_exhausted(self) -> None:
