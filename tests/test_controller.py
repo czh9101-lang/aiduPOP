@@ -901,8 +901,8 @@ class TestDoLinearFlush:
         all_actions = batch_actions[0]
         delete_hint_actions = [
             a for a in all_actions
-            if a["action"] == "delete_element"
-            and a["params"]["element_id"] == "context_loading_hint"
+            if a["action"] == "delete_elements"
+            and a["params"]["element_ids"] == ["context_loading_hint"]
         ]
         assert len(delete_hint_actions) == 1
         # _loading_hint_removed 应为 True
@@ -911,8 +911,8 @@ class TestDoLinearFlush:
         assert session.element_count == 2
 
     @pytest.mark.asyncio
-    async def test_loading_hint_not_removed_on_reasoning_only(self) -> None:
-        """只有 reasoning segment 时不应删除占位提示（等 answer 到来再删）."""
+    async def test_loading_hint_removed_on_reasoning(self) -> None:
+        """reasoning segment 到达时删除占位提示（不再等 answer）."""
         ctrl = _setup_ctrl()
         session = _make_session("msg_hint_reasoning", linear=True)
         session.state = STREAMING
@@ -931,17 +931,17 @@ class TestDoLinearFlush:
 
         await ctrl._do_linear_flush(session)
 
-        # 不应包含删除占位提示的 action
+        # 应包含删除占位提示的 action（reasoning 也触发删除）
         assert len(batch_actions) >= 1
         all_actions = batch_actions[0]
         delete_hint_actions = [
             a for a in all_actions
-            if a["action"] == "delete_element"
-            and a["params"]["element_id"] == "context_loading_hint"
+            if a["action"] == "delete_elements"
+            and a["params"]["element_ids"] == ["context_loading_hint"]
         ]
-        assert len(delete_hint_actions) == 0
-        # _loading_hint_removed 仍为 False
-        assert session._loading_hint_removed is False
+        assert len(delete_hint_actions) == 1
+        # _loading_hint_removed 应为 True
+        assert session._loading_hint_removed is True
 
 
 # ── _do_linear_complete 集成测试 ──

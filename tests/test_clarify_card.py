@@ -44,7 +44,7 @@ class TestBuildClarifyCardWithChoices:
         elements = card["body"]["elements"]
         assert elements[0]["tag"] == "div"
         assert elements[0]["icon"]["tag"] == "standard_icon"
-        assert elements[0]["icon"]["token"] == "helpdesk_outlined"
+        assert elements[0]["icon"]["token"] == "info_outlined"
         assert "Which approach?" in elements[0]["text"]["content"]
 
     def test_options_displayed_as_markdown_list(self) -> None:
