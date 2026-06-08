@@ -1789,11 +1789,10 @@ def _wrap_feishu_card_action_trigger(original_method: Callable) -> Callable:
     When a user interacts with a clarify card (selects a dropdown option
     or submits text input), this wrapper intercepts the callback and:
       - For predefined choices: calls ``resolve_gateway_clarify(clarify_id, choice_text)``
-      - For "Other/custom input": calls ``mark_awaiting_text(clarify_id)``
       - For input_submit: calls ``resolve_gateway_clarify(clarify_id, input_text)``
 
-    Returns an updated card inline (via P2CardActionTriggerResponse) to
-    show the resolved/awaiting state.
+    Both actions instantly lock the card (via CallBackCard) showing the
+    resolved state with lock icon — no intermediate "awaiting" state.
     """
 
     def _wrapped(self, data):
@@ -1866,30 +1865,6 @@ def _handle_clarify_card_action(
     if clarify_action == "select":
         selected_option = str(getattr(getattr(event, "action", None), "option", "") or "")
 
-        if selected_option == "other":
-            # User selected "Custom input" → switch to text-capture mode
-            _logger.info(
-                "clarify card: user selected 'Other' for clarify_id=%s",
-                (clarify_id or "?")[:12],
-            )
-            try:
-                from tools.clarify_gateway import mark_awaiting_text
-                mark_awaiting_text(clarify_id)
-            except (ImportError, Exception) as e:
-                _logger.warning("clarify card: mark_awaiting_text failed: %s", e)
-
-            # Return an updated card showing "awaiting input" state
-            if P2CardActionTriggerResponse is not None and CallBackCard is not None:
-                from .cardkit import build_clarify_awaiting_input_card
-                card_data = build_clarify_awaiting_input_card(question=question)
-                response = P2CardActionTriggerResponse()
-                card = CallBackCard()
-                card.type = "raw"
-                card.data = card_data
-                response.card = card
-                return response
-            return _empty_response()
-
         # Predefined choice selected → resolve immediately
         choices = _clarify_choices.get(clarify_id, [])
         try:
@@ -1939,10 +1914,10 @@ def _handle_clarify_card_action(
         _clarify_choices.pop(clarify_id, None)
         _clarify_questions.pop(clarify_id, None)
 
-        # Return updated card showing resolved state
+        # Return updated card showing locked state
         if P2CardActionTriggerResponse is not None and CallBackCard is not None:
             from .cardkit import build_clarify_resolved_card
-            card_data = build_clarify_resolved_card(question=question, selected=choice_text)
+            card_data = build_clarify_resolved_card(question=question, selected=choice_text, choices=choices or None)
             response = P2CardActionTriggerResponse()
             card = CallBackCard()
             card.type = "raw"
@@ -1990,14 +1965,17 @@ def _handle_clarify_card_action(
                 except (ImportError, Exception) as e2:
                     _logger.warning("clarify card: synchronous resolve also failed: %s", e2)
 
+        # Save choices before cleanup (needed for resolved card)
+        input_choices = _clarify_choices.get(clarify_id) or None
+
         # Cleanup stored data
         _clarify_choices.pop(clarify_id, None)
         _clarify_questions.pop(clarify_id, None)
 
-        # Return updated card showing resolved state
+        # Return updated card showing locked state
         if P2CardActionTriggerResponse is not None and CallBackCard is not None:
             from .cardkit import build_clarify_resolved_card
-            card_data = build_clarify_resolved_card(question=question, selected=input_text)
+            card_data = build_clarify_resolved_card(question=question, selected=input_text, choices=input_choices)
             response = P2CardActionTriggerResponse()
             card = CallBackCard()
             card.type = "raw"

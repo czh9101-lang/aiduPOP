@@ -3,8 +3,9 @@
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
 | 1 | Feature | 保留式封卡（Preservative Seal） | 封卡时 `build_linear_complete_card` 调用 `_split_long_text()`（每2400字符一块）+ `_extract_images_from_markdown()`（每张图2个嵌套元素），导致1个流式streaming元素爆炸成N+2M个元素，超过飞书200元素限制，封卡失败 | 新增 `_preservative_seal()` 方法：`close_streaming` + `batch_update` 增量更新（删loading、加partial指示器/footer），保留已有streaming元素不动，避免元素爆炸。所有封卡场景（拆卡封存 `_do_linear_split` + 完成封存 `_do_linear_complete_inner`）统一先尝试保留式封卡，失败后降级为全量重建（含渐进降级 compact seal → minimal seal） |
-| 2 | Feature | Clarify 交互卡片 | Clarify 工具调用时使用文本消息显示选项列表，用户需手动输入数字或选项文本回复，体验差 | 新增 `build_clarify_card()` 构建飞书交互卡片：多选模式使用 `select_static` 下拉框展示选项 + "✏️ 自定义输入"选项；开放模式使用 `input` 文本输入框。Monkey-patch `FeishuAdapter.send_clarify` 替换文本消息为交互卡片；Monkey-patch `_on_card_action_trigger` 处理卡片回调，选择预定义选项直接解析，选择"自定义输入"后 `mark_awaiting_text` 等待用户下一条消息。回调解析通过 `resolve_gateway_clarify()` 公开 API 完成 |
-| 3 | Bug | CHANGELOG/SKILL.md 日期错误 | 多个版本的发布日期标注为6月9日-12日等未来日期 | 修正 v0.18.2/v0.18.3/v0.18.4 的日期为6月8日 |
+| 2 | Feature | Clarify 交互卡片 UX 改进 | Clarify 卡片体验差：(1) 下拉框和输入框分属不同模式，无法同时展示；(2) 用户选择/输入后无即时视觉反馈；(3) 选择后仍可修改，缺乏锁定机制；(4) 选项仅在下拉框内可见，无法一目了然 | ① 合并下拉框+输入框为同一卡片：选项列表以 `A. / B. / C.` 格式完整展示在卡片正文中，下拉框供快速选择，输入框始终可见供自定义输入；② 移除下拉框中的"✏️ 自定义输入"选项，输入框独立提供自定义功能；③ 选择或输入后即时锁定（CallBackCard 同步返回），问题标题变灰（删除线 `~~`），使用飞书官方 `standard_icon` token（`resolve_filled` 已解决、`lock_outlined` 锁定）；④ 删除 `build_clarify_awaiting_input_card` 中间态，所有操作直接进入锁定状态 |
+| 3 | Bug | `streaming_panel_expanded` 配置默认值不一致 | `config.py` 属性默认 `False`，但 `plugin.py` 中 `_DEFAULT_STREAMING_CONFIG` 写入 `True`，导致安装后 `config.yaml` 中 `streaming_panel_expanded: true`，流式态面板默认展开 | 将 `_DEFAULT_STREAMING_CONFIG` 中 `streaming_panel_expanded` 从 `True` 改为 `False`，与 `config.py` 保持一致 |
+| 4 | Bug | CHANGELOG/SKILL.md 日期错误 | 多个版本的发布日期标注为6月9日-12日等未来日期 | 修正 v0.18.2/v0.18.3/v0.18.4 的日期为6月8日 |
 
 ## v0.19.0 (2026-06-08)
 

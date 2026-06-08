@@ -1068,11 +1068,18 @@ def build_clarify_card(
     choices: list[str] | None = None,
     clarify_id: str = "",
 ) -> dict[str, Any]:
-    """构建 Clarify 交互卡片（下拉框 + 自定义输入选项）.
+    """构建 Clarify 交互卡片（选项列表 + 下拉框 + 输入框 合并展示）.
+
+    卡片布局:
+      - 问题标题（helpdesk_outlined 图标）
+      - 选项列表（markdown A/B/C 格式完整展示，仅 choices 非空时）
+      - select_static 下拉框（仅 choices 非空时，选项不含"自定义输入"）
+      - input 输入框（始终展示，placeholder 提示"或输入自定义内容"）
+      - 提交按钮
 
     两种模式:
-      - choices 非空: 显示 select_static 下拉框，选项为 choices + "✏️ 自定义输入"
-      - choices 为空/None: 显示 input 文本输入框（开放式问题）
+      - choices 非空: 选项列表 + 下拉框 + 输入框，任一操作即时锁定
+      - choices 为空/None: 仅输入框（开放式问题）
 
     Args:
         question: 问题文本
@@ -1097,19 +1104,27 @@ def build_clarify_card(
     })
 
     if choices:
-        # ── 多选模式: select_static 下拉框 ──
+        # ── 选项列表完整展示（markdown 格式） ──
+        choice_labels = [
+            f"{'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i]}. {choice}"
+            for i, choice in enumerate(choices)
+        ]
+        choice_text_en = "\n".join(choice_labels)
+        choice_text_zh = choice_text_en  # A/B/C 格式无需翻译
+        elements.append({
+            "tag": "markdown",
+            "content": choice_text_en,
+            "i18n_content": _i18n(choice_text_en, choice_text_zh),
+        })
+
+        # ── select_static 下拉框（不含"自定义输入"选项） ──
         options: list[dict] = []
         for i, choice in enumerate(choices):
+            label = f"{'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i]}. {choice}"
             options.append({
-                "text": {"tag": "plain_text", "content": choice},
+                "text": {"tag": "plain_text", "content": label},
                 "value": str(i),
             })
-        # 追加 "自定义输入" 选项
-        en_other, zh_other = _T["clarify_other"]
-        options.append({
-            "text": {"tag": "plain_text", "content": f"✏️ {en_other}", "i18n_content": _i18n(f"✏️ {en_other}", f"✏️ {zh_other}")},
-            "value": "other",
-        })
 
         en_placeholder, zh_placeholder = _T["clarify_select_placeholder"]
         select_el: dict[str, Any] = {
@@ -1130,28 +1145,28 @@ def build_clarify_card(
             }],
         }
         elements.append(select_el)
-    else:
-        # ── 开放式问题: input 文本输入 ──
-        en_input_ph, zh_input_ph = _T["clarify_input_placeholder"]
-        input_el: dict[str, Any] = {
-            "tag": "input",
-            "element_id": "clarify_input",
-            "placeholder": {
-                "tag": "plain_text",
-                "content": en_input_ph,
-                "i18n_content": _i18n(en_input_ph, zh_input_ph),
+
+    # ── input 输入框（始终展示） ──
+    en_input_ph, zh_input_ph = _T["clarify_input_placeholder"]
+    input_el: dict[str, Any] = {
+        "tag": "input",
+        "element_id": "clarify_input",
+        "placeholder": {
+            "tag": "plain_text",
+            "content": en_input_ph,
+            "i18n_content": _i18n(en_input_ph, zh_input_ph),
+        },
+        "max_length": 500,
+        "name": "clarify_input",
+        "behaviors": [{
+            "type": "callback",
+            "value": {
+                "hermes_clarify_action": "input_submit",
+                "clarify_id": clarify_id,
             },
-            "max_length": 500,
-            "name": "clarify_input",
-            "behaviors": [{
-                "type": "callback",
-                "value": {
-                    "hermes_clarify_action": "input_submit",
-                    "clarify_id": clarify_id,
-                },
-            }],
-        }
-        elements.append(input_el)
+        }],
+    }
+    elements.append(input_el)
 
     card: dict[str, Any] = {
         "schema": "2.0",
@@ -1169,104 +1184,71 @@ def build_clarify_resolved_card(
     *,
     question: str,
     selected: str,
+    choices: list[str] | None = None,
 ) -> dict[str, Any]:
-    """构建 Clarify 已回复卡片.
+    """构建 Clarify 已锁定卡片.
 
-    用户做出选择后，返回此卡片作为 inline 更新，显示他们的选择。
+    用户做出选择或输入后，返回此卡片作为 inline 更新（CallBackCard），
+    显示完整选项列表 + 用户的选择 + 锁定标识。卡片即时锁定，不可再修改。
 
     Args:
         question: 原始问题文本
         selected: 用户选择的文本
+        choices: 原始选项列表（用于在锁定卡片中完整展示），None/空表示开放式问题
     """
     en_resolved, zh_resolved = _T["clarify_resolved"]
     en_label = en_resolved.format(selected)
     zh_label = zh_resolved.format(selected)
 
-    elements: list[dict] = [
-        {
-            "tag": "div",
-            "icon": {
-                "tag": "standard_icon",
-                "token": "helpdesk_outlined",
-                "size": "20px 20px",
-                "color": "blue",
-            },
-            "text": {
-                "tag": "lark_md",
-                "content": f"**{question}**",
-            },
+    en_locked, zh_locked = _T["clarify_locked"]
+
+    elements: list[dict] = []
+
+    # ── 问题标题（resolve_filled 图标表示已解决） ──
+    elements.append({
+        "tag": "div",
+        "icon": {
+            "tag": "standard_icon",
+            "token": "resolve_filled",
+            "size": "20px 20px",
+            "color": "green",
         },
-        {
-            "tag": "div",
-            "icon": {
-                "tag": "standard_icon",
-                "token": "resolve_outlined",
-                "size": "16px 16px",
-                "color": "green",
-            },
-            "text": {
-                "tag": "lark_md",
-                "content": en_label,
-                "i18n_content": _i18n(en_label, zh_label),
-            },
+        "text": {
+            "tag": "lark_md",
+            "content": f"~~{question}~~",
         },
-    ]
+    })
 
-    card: dict[str, Any] = {
-        "schema": "2.0",
-        "config": {
-            "wide_screen_mode": True,
-            "streaming_mode": False,
-            "locales": _LOCALES,
+    # ── 选项列表完整展示（保留上下文） ──
+    if choices:
+        choice_labels = [
+            f"{'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i]}. {choice}"
+            for i, choice in enumerate(choices)
+        ]
+        choice_text = "\n".join(choice_labels)
+        elements.append({
+            "tag": "markdown",
+            "content": choice_text,
+        })
+
+    # ── 用户选择/输入内容 + 锁定标识 ──
+    elements.append({
+        "tag": "div",
+        "icon": {
+            "tag": "standard_icon",
+            "token": "lock_outlined",
+            "size": "16px 16px",
+            "color": "grey",
         },
-        "body": {"elements": elements},
-    }
-    return card
-
-
-def build_clarify_awaiting_input_card(
-    *,
-    question: str,
-) -> dict[str, Any]:
-    """构建 Clarify 等待自定义输入卡片.
-
-    当用户选择 "自定义输入" 后，返回此卡片作为 inline 更新，
-    提示用户在聊天中输入回答。
-
-    Args:
-        question: 原始问题文本
-    """
-    en_awaiting, zh_awaiting = _T["clarify_awaiting_input"]
-
-    elements: list[dict] = [
-        {
-            "tag": "div",
-            "icon": {
-                "tag": "standard_icon",
-                "token": "helpdesk_outlined",
-                "size": "20px 20px",
-                "color": "blue",
-            },
-            "text": {
-                "tag": "lark_md",
-                "content": f"**{question}**",
-            },
+        "text": {
+            "tag": "lark_md",
+            "content": f"{en_label}\n<font color='grey'>{en_locked}</font>",
+            "i18n_content": _i18n(
+                f"{en_label}\n<font color='grey'>{en_locked}</font>",
+                f"{zh_label}\n<font color='grey'>{zh_locked}</font>",
+            ),
         },
-        {
-            "tag": "div",
-            "icon": {
-                "tag": "standard_icon",
-                "token": "edit_outlined",
-                "size": "16px 16px",
-                "color": "orange",
-            },
-            "text": {
-                "tag": "lark_md",
-                "content": en_awaiting,
-                "i18n_content": _i18n(en_awaiting, zh_awaiting),
-            },
-        },
-    ]
+    })
 
     card: dict[str, Any] = {
         "schema": "2.0",
