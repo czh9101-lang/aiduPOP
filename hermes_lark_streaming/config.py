@@ -60,11 +60,11 @@ class Config:
     def streaming_panel_expanded(self) -> bool:
         """流式态卡片中面板（工具、推理）是否保持展开.
 
-        默认 True（保持现有行为：流式态面板展开）。
+        默认 False（保持现有行为：流式态面板收起）。
         与 panel_expanded（完成态面板）独立配置。
         """
         sec = self._streaming_sec()
-        return bool(sec.get("streaming_panel_expanded", True))
+        return bool(sec.get("streaming_panel_expanded", False))
 
     @property
     def print_strategy(self) -> str:

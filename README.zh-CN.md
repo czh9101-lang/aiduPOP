@@ -137,8 +137,8 @@ hermes gateway restart
 streaming:
   enabled: true              # 启用流式卡片
   linear: true               # 线性模式：单卡片原地更新，支持自动拆卡
-  panel_expanded: false      # 完成态卡片中面板（工具、推理）是否保持展开
-  streaming_panel_expanded: true  # 流式态卡片面板是否保持展开（默认: true）
+  panel_expanded: false      # 完成态卡片中折叠面板是否保持展开
+  streaming_panel_expanded: false  # 流式态卡片中折叠面板是否保持展开
   print_strategy: delay      # 卡片上屏策略："fast"（即时）或 "delay"（更丝滑的打字机效果，默认）
   flush_interval_ms: 500     # 流式卡片刷新间隔（毫秒，默认: 500，范围: 100~2000）
   card_ttl_sec: 600         # 卡片存活检测超时（秒）

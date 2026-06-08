@@ -140,7 +140,7 @@ streaming:
   enabled: true              # Enable streaming cards
   linear: true               # Linear mode: single card in-place update with auto card splitting
   panel_expanded: false      # Keep panels (tools, reasoning) expanded in completed cards
-  streaming_panel_expanded: true  # Keep panels expanded during streaming (default: true)
+  streaming_panel_expanded: false  # Keep panels expanded during streaming
   print_strategy: delay      # Card streaming strategy: "fast" (instant) or "delay" (smoother typewriter, default)
   flush_interval_ms: 500     # Streaming card refresh interval in ms (default: 500, range: 100-2000)
   card_ttl_sec: 600         # Card alive detection timeout (seconds)
