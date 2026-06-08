@@ -1686,6 +1686,10 @@ _clarify_questions: dict[str, str] = {}  # clarify_id → question text
 _clarify_card_msg_ids: dict[str, str] = {}  # clarify_id → card_msg_id (for server-side confirm update)
 _clarify_selections: dict[str, str] = {}  # clarify_id → user's selected/input text (for retry)
 
+# Backward-compatible aliases (old names used in tests)
+_clarify_answers = _clarify_selections  # noqa: F841
+_clarify_card_info = _clarify_card_msg_ids  # noqa: F841
+
 
 def _wrap_feishu_adapter_send_clarify(orig_send_clarify: Callable) -> Callable:
     """Intercept ``FeishuAdapter.send_clarify()`` — render interactive card.
@@ -2017,6 +2021,13 @@ def _handle_clarify_card_action(
                     resolve_gateway_clarify(clarify_id, stored_selection)
                 except (ImportError, Exception) as e2:
                     _logger.warning("clarify card: synchronous retry resolve also failed: %s", e2)
+        else:
+            # No event loop — synchronous fallback
+            try:
+                from tools.clarify_gateway import resolve_gateway_clarify
+                resolve_gateway_clarify(clarify_id, stored_selection)
+            except (ImportError, Exception) as e:
+                _logger.warning("clarify card: synchronous retry resolve failed: %s", e)
 
         # Return the same submitted card (soft lock with retry button)
         return _submitted_card_response(stored_selection, choices, question, clarify_id)
@@ -2074,6 +2085,13 @@ def _handle_clarify_card_action(
                     resolve_gateway_clarify(clarify_id, choice_text)
                 except (ImportError, Exception) as e2:
                     _logger.warning("clarify card: synchronous resolve also failed: %s", e2)
+        else:
+            # No event loop — synchronous fallback
+            try:
+                from tools.clarify_gateway import resolve_gateway_clarify
+                resolve_gateway_clarify(clarify_id, choice_text)
+            except (ImportError, Exception) as e:
+                _logger.warning("clarify card: synchronous resolve failed: %s", e)
 
         # Return submitted card (soft lock with retry button) — don't cleanup yet
         return _submitted_card_response(choice_text, choices_list or None, question, clarify_id)
@@ -2121,6 +2139,13 @@ def _handle_clarify_card_action(
                     resolve_gateway_clarify(clarify_id, input_text)
                 except (ImportError, Exception) as e2:
                     _logger.warning("clarify card: synchronous resolve also failed: %s", e2)
+        else:
+            # No event loop — synchronous fallback
+            try:
+                from tools.clarify_gateway import resolve_gateway_clarify
+                resolve_gateway_clarify(clarify_id, input_text)
+            except (ImportError, Exception) as e:
+                _logger.warning("clarify card: synchronous resolve failed: %s", e)
 
         # Return submitted card (soft lock with retry button) — don't cleanup yet
         return _submitted_card_response(input_text, choices, question, clarify_id)
@@ -2170,6 +2195,13 @@ def _handle_clarify_card_action(
                     resolve_gateway_clarify(clarify_id, input_text)
                 except (ImportError, Exception) as e2:
                     _logger.warning("clarify card: synchronous resolve also failed: %s", e2)
+        else:
+            # No event loop — synchronous fallback
+            try:
+                from tools.clarify_gateway import resolve_gateway_clarify
+                resolve_gateway_clarify(clarify_id, input_text)
+            except (ImportError, Exception) as e:
+                _logger.warning("clarify card: synchronous resolve failed: %s", e)
 
         # Return submitted card (soft lock with retry button) — don't cleanup yet
         return _submitted_card_response(input_text, choices, question, clarify_id)

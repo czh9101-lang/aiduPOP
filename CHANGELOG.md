@@ -8,6 +8,8 @@
 | 4 | Bug | CHANGELOG/SKILL.md 日期错误 | 多个版本的发布日期标注为6月9日-12日等未来日期 | 修正 v0.18.2/v0.18.3/v0.18.4 的日期为6月8日 |
 | 5 | Bug | 流式卡片空转43秒无内容 | AI 加载上下文期间（最长数十秒），卡片创建后只有跑马灯，用户看不到任何内容提示，以为无响应 | 新增上下文加载占位提示：首卡创建后立即 `batch_update` 插入 `⏳ 正在加载上下文...`（`time_outlined` 图标 + i18n 双语），首字即显时在同一批 `batch_update` 中自动删除占位提示（零额外 API 开销）；拆卡新卡不插入占位提示（`_loading_hint_removed` 标志控制）；封卡时兜底删除占位提示。新增 `_loading_hint_element()` / `_LOADING_HINT_ELEMENT_ID` / `_loading_hint_removed` 字段 / `loading_context` i18n 条目 |
 | 6 | Bug | 拆卡封卡失败——第二张卡跑马灯不停、无 footer | `_do_linear_split` 先建新卡再封旧卡，并发操作导致 sequence conflict（300317）被误判为幂等成功（`return True`），`close_streaming` + `batch_update` 静默失败 | ① 调整 `_do_linear_split()` 执行顺序：**先封旧卡再建新卡**，消除并发冲突；② 修复 `_preservative_seal()` 的 sequence conflict 处理：不再直接 `return True`，改为重试（最多 2 次，每次递增 sequence），重试全部失败才降级为全量重建 |
+| 7 | Bug | Clarify 卡片回调无事件循环时 `resolve_gateway_clarify` 不调用 | `_handle_clarify_card_action` 的 retry/select/input/button 路径在 `adapter._loop is None` 时跳过 resolve 调用，导致 Clarify 回调在无事件循环环境下无法完成 resolve | 为所有四个回调路径（retry_submit、select、input_submit、button_submit）新增 `else` 分支：当 `loop is None` 时同步调用 `resolve_gateway_clarify`，确保无事件循环时 Clarify 仍能正常完成 |
+| 8 | Chore | 飞书通知推送缺少版本号 | `scripts/notify_feishu.py` 推送的飞书卡片没有版本号信息，无法区分是哪个版本的推送 | 从 `plugin.yaml` 动态读取版本号，在飞书通知卡片首行显示 `**版本**: v0.19.1` |
 
 ## v0.19.0 (2026-06-08)
 
