@@ -27,10 +27,12 @@ from .cardkit_md import (
 from .feishu import (
     CARDKIT_CONTENT_FAILED,
     CARDKIT_ELEMENT_LIMIT,
+    CARDKIT_ELEMENT_LIMIT_DIRECT,
     CARDKIT_RATE_LIMITED,
     CARDKIT_SEQUENCE_CONFLICT,
     CARDKIT_STREAMING_CLOSED,
     FeishuAPIError,
+    is_element_limit_error,
 )
 from .flush import CARDKIT_MS, PATCH_MS
 from .image import ImageResolver
@@ -193,13 +195,11 @@ class ControllerMixin:
                 _logger.info("streaming mode closed, skipping update: msg=%s", (session.message_id or "?")[:12])
                 return
 
-            if e.code == CARDKIT_CONTENT_FAILED:
-                sub_code = e.extract_sub_code()
-                if sub_code == CARDKIT_ELEMENT_LIMIT:
-                    _logger.warning("card element limit exceeded, disabling CardKit streaming")
-                    session.use_cardkit = False
-                    session.flush.set_throttle(PATCH_MS)
-                    return
+            if is_element_limit_error(e):
+                _logger.warning("card element limit exceeded, disabling CardKit streaming")
+                session.use_cardkit = False
+                session.flush.set_throttle(PATCH_MS)
+                return
 
             _logger.warning("card update failed: %s", e, exc_info=True)
 
