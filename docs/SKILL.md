@@ -107,7 +107,7 @@ CardKit v2 Streaming → CardKit v2 Create+Patch → IM Create+Patch → Hermes 
 
 ## 7. 线性模式
 
-单卡按事件顺序渲染: `[Reasoning] → [Tool] → [Answer] → ...`。Segment 扁平排列，超 150 元素自动拆卡（飞书上限 200），Tool 按 step 拆分，Answer 按文本块拆分。
+单卡按事件顺序渲染: `[Reasoning] → [Tool] → [Answer] → ...`。Segment 扁平排列，仅按元素数量超阈值拆卡（Trigger A），Tool 按 step 拆分，Answer 按文本块拆分。相邻同类型段不再强制拆卡（Trigger B 已移除，修复"秒拆"bug）。
 
 ---
 
@@ -170,7 +170,7 @@ streaming:
 worker 线程必须用 `call_soon_threadsafe()`，`call_soon()` 不唤醒事件循环→flush 永不执行。
 
 ### 10.7 元素估算必须对齐实际渲染
-飞书 200 元素/卡片（含嵌套），阈值 150。估算对齐封卡分块数+图片计数，否则拆卡判断形同虚设。
+拆卡阈值 150（保守预留）。估算对齐封卡分块数+图片计数，否则拆卡判断形同虚设。注意：飞书卡片 2.0 无公开元素上限文档，拆卡仅为防御性措施。
 
 ### 10.8 幂等守卫 = 同步状态转移 + 错误码容错
 COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态。
@@ -266,4 +266,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-03-05 | Version: 1.0.0*
+*Last updated: 2026-06-09 | Version: 1.0.0*

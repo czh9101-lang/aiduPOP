@@ -433,6 +433,37 @@ def apply_patches() -> None:
     # ── Probe Hermes layout ──
     layout = _detect_hermes_layout()
 
+    # ── TEMPORARY: Bridge media_delivery_allow_dirs → HERMES_MEDIA_ALLOW_DIRS ──
+    # Hermes's BasePlatformAdapter reads HERMES_MEDIA_ALLOW_DIRS from os.environ
+    # to validate file paths in <MEDIA> tags, but the gateway startup does NOT
+    # bridge the config.yaml `media_delivery_allow_dirs` setting to this env var.
+    # This means MEDIA file uploads fail after a gateway restart even when the
+    # user has configured the directories correctly.
+    #
+    # This bridge reads the config and sets the env var if it's not already set.
+    # TODO: Remove this block once Hermes fixes this upstream — the gateway
+    # should bridge its own config to the env var on startup.
+    try:
+        _existing_media_dirs = os.environ.get("HERMES_MEDIA_ALLOW_DIRS")
+        if not _existing_media_dirs:
+            from .config import Config as _BridgeConfig
+            _bridge_cfg = _BridgeConfig()
+            _bridge_raw = _bridge_cfg._load()
+            _media_dirs = _bridge_raw.get("media_delivery_allow_dirs")
+            if _media_dirs:
+                if isinstance(_media_dirs, list):
+                    _media_dirs_str = ":".join(str(d) for d in _media_dirs)
+                else:
+                    _media_dirs_str = str(_media_dirs)
+                os.environ["HERMES_MEDIA_ALLOW_DIRS"] = _media_dirs_str
+                _logger.info(
+                    "hermes-lark-streaming: bridged media_delivery_allow_dirs → "
+                    "HERMES_MEDIA_ALLOW_DIRS=%s (temporary fix, remove when Hermes fixes upstream)",
+                    _media_dirs_str,
+                )
+    except Exception:
+        _logger.debug("media_delivery_allow_dirs bridge failed", exc_info=True)
+
     # ── Patch GatewayRunner ──
     # This is the core patch — without it, streaming cards cannot work.
     gw_patched = False

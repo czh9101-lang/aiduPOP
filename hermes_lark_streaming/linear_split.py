@@ -15,7 +15,7 @@ from .linear import Segment
 # 匹配 markdown 图片语法: ![alt](img_xxx) — 与 cardkit._IMG_MD_PATTERN 对齐
 _IMG_MD_PATTERN = re.compile(r"!\[([^\]]*)\]\((img_[^)\s]+)\)")
 
-_ELEMENT_THRESHOLD = 150  # 拆卡阈值（飞书硬上限 200 总元素含嵌套，预留 50 给 footer + 图片 + 波动）
+_ELEMENT_THRESHOLD = 150  # 拆卡阈值（防御性预留；飞书卡片 2.0 无公开元素上限文档，保守取值）
 _FOOTER_RESERVE = 2  # footer 元素预留（hr + markdown）
 
 
