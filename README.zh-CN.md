@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.19.1-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -39,16 +39,17 @@
 
 ### 安装
 
-```bash
-hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
-```
-或
+> 插件会自动读取 `HERMES_HOME` 环境变量定位安装路径（默认 `~/.hermes`），非默认路径下无需额外操作。
 
 ```bash
-hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
-```
-```bash
+# gitee (SSH)
+hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
+
+# github (SSH)
 hermes plugins install git@github.com:Aowen-Nowor/hermes-lark-streaming.git
+
+# github (HTTPS)
+hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
 ```
 
 提示时输入 `Y` 启用插件，然后重启网关：
@@ -78,111 +79,52 @@ hermes plugins uninstall hermes-lark-streaming
 hermes gateway restart
 ```
 
-> **为什么不用 `python3 -m`？** Hermes 运行在自建的虚拟环境中，系统 `python3` 没有插件的依赖（如 `PyYAML`、`lark-oapi`），因此 `python3 -m hermes_lark_streaming` 大概率会失败。请使用 `HERMES_PYTHON`（Hermes 虚拟环境的 Python）。若 Hermes 安装在非默认路径，请相应调整。
+> **为什么不用 `python3 -m`？** Hermes 运行在自建虚拟环境中，系统 `python3` 没有插件依赖。请使用 `HERMES_PYTHON`（Hermes 虚拟环境的 Python）。
 
 ### 验证安装
 
 ```bash
-# 检查插件状态
 hermes plugins list
-
-# 查看日志
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
-
-# 验证插件配置和凭据（使用 Hermes 的 Python）
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
 $HERMES_PYTHON -m hermes_lark_streaming status
 $HERMES_PYTHON -m hermes_lark_streaming verify
 ```
 
-> **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无备份目录干扰（删除 `*.bak` 目录）；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。
+> **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无 `*.bak` 目录干扰；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。
 
 ---
 
 ## 配置说明
 
-所有配置项位于 `~/.hermes/config.yaml` 的 `streaming:` 节下。
+所有配置项位于 `~/.hermes/config.yaml` 的 `streaming:` 节下。插件首次加载时自动注入默认配置；卸载前请先运行 `cleanup` 命令清除。
 
-> **自动注入**：插件首次加载时，会自动在 `config.yaml` 顶层添加 `streaming:` 配置段（使用下方默认值）。卸载时，请先运行 `cleanup` 命令（见[卸载](#卸载)）清除该配置段。
-
-> **注意**：Hermes 原生也有 `display.streaming: false` 配置项，该配置控制 **CLI/TUI 终端**输出（响应是否在终端流式显示），与本插件的流式卡片**无关**。本插件只读取 `streaming:` 节。
-
-### 插件启用配置
-
-在 `~/.hermes/config.yaml` 中启用本插件：
-
-```yaml
-plugins:
-  enabled:
-    - hermes-lark-streaming
-  disabled: []
-```
-
-如果 `plugins` 节不存在，需要手动添加。安装后也可以通过以下命令启用：
-
-```bash
-hermes plugins enable hermes-lark-streaming
-```
-
-禁用插件：
-
-```bash
-hermes plugins disable hermes-lark-streaming
-hermes gateway restart
-```
-
-### 可用配置项
+> **注意**：Hermes 原生的 `display.streaming: false` 控制 CLI/TUI 终端输出，与本插件的流式卡片无关。
 
 ```yaml
 streaming:
-  enabled: true              # 启用流式卡片
-  linear: true               # 线性模式：单卡片原地更新，支持自动拆卡
-  panel_expanded: false      # 完成态卡片中折叠面板是否保持展开
-  streaming_panel_expanded: false  # 流式态卡片中折叠面板是否保持展开
-  print_strategy: delay      # 卡片上屏策略："fast"（即时）或 "delay"（更丝滑的打字机效果，默认）
-  flush_interval_ms: 500     # 流式卡片刷新间隔（毫秒，默认: 500，范围: 100~2000）
-  card_ttl_sec: 600         # 卡片存活检测超时（秒）
-  inject_time: false         # 时间感知模式：在用户消息前注入当前时间（详见下方说明）
+  enabled: true                    # 启用流式卡片
+  linear: true                     # 线性模式：单卡片原地更新，支持自动拆卡
+  panel_expanded: false            # 完成态卡片中面板是否保持展开
+  streaming_panel_expanded: false  # 流式态卡片中面板是否保持展开
+  print_strategy: delay            # "fast"（即时）或 "delay"（更丝滑打字机，默认）
+  flush_interval_ms: 500           # 卡片刷新间隔（毫秒，100~2000，默认 500）
+  card_ttl_sec: 600               # 卡片存活检测超时（秒）
+  inject_time: false               # 时间感知模式（详见下方说明）
 
   footer:
-    show_label: false        # 是否显示字段标签（true/false）
+    show_label: false              # 是否显示字段标签
     fields:
       - [status, elapsed, model, compression_exhausted]
-      # 可用字段说明：
-      #   status      — 回复状态（已完成 / 出错 / 已停止）
-      #   elapsed     — AI 回复耗时
-      #   model       — 使用的模型名称
-      #   compression_exhausted — 上下文已满（⚠ 上下文已满）
-      # 以下字段默认不显示 — 在 fields 列表中添加即可启用：
-      #   cache       — 缓存命中率（缓存命中/总输入 命中率%）
-      #   tokens      — Token 用量（↑ 输入 ↓ 输出）
-      #   context     — 上下文窗口用量（已用/总量 百分比）
-      #   api_calls   — 本轮对话的 API 调用次数
-      #   history_offset — 对话历史偏移量；值越大对话越长，值突然变小说明发生了上下文压缩
-      # 每个内层列表为页脚的一行，字段仅在有值时显示
+      # 可用字段：status, elapsed, model, compression_exhausted,
+      #   cache, tokens, context, api_calls, history_offset
 ```
 
 ### 时间感知模式（`inject_time`）
 
-开启 `streaming.inject_time: true` 后，插件会在每条用户消息前添加当前时间，让 AI 模型无需调用 `date` 工具即可感知当前时间。
-
-**格式**：`<time>HH:MM:SS</time> <原始消息>`（例：`<time>14:30:05</time> 你好`）
-
-**为什么用 XML 标签？**
-- LLM 普遍理解 XML 标签是结构化元数据，不会在回复中模仿该格式
-- 方括号格式（``[14:30:05 CST]``）可能被部分模型忽略，或在回复中学样也加时间前缀
-- 不含日期，因为 Hermes 系统提示词中已包含当前日期
-- 不含时区后缀，因为系统提示词已确定时区上下文
-
-**核心特性**：
-- **Prefix Cache 安全**：时间前缀与原始消息一起写入对话数据库，确保下轮从 DB 加载的历史与上轮 API 收到的一致，从而保证前缀缓存一致性——**所有场景下零额外缓存影响**（全程开启、全程关闭、中途开启/关闭）。
-- **Token 开销**：每条 user message ≈ 6 tokens；N 轮对话累计 ≈ (N-1)×6 tokens。
-- **副作用**：会话查看器（如 Hermes Web UI）中用户消息将显示时间前缀。
-- **边界情况处理**：群聊中 gateway 已设置 `persist_user_message`（observed_group_context）时，时间前缀同时添加到 `persist_user_message`，避免时间前缀丢失。
+开启 `inject_time: true` 后，插件在每条用户消息前添加 `<time>HH:MM:SS</time>` 时间前缀，让 AI 无需调用 `date` 工具即可感知当前时间。使用 XML 标签是因为 LLM 普遍将其理解为结构化元数据，不会在回复中模仿。Prefix Cache 安全（每条约 6 tokens）。详见 [SKILL.md](docs/SKILL.md)。
 
 ### 飞书凭据
-
-插件按以下优先级读取凭据：
 
 | 优先级 | 来源 | 示例 |
 |--------|------|------|
@@ -199,8 +141,6 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ### 推理面板显示
 
-推理面板的可见性由 `display.show_reasoning` 或 `display.platforms.feishu.show_reasoning` 控制：
-
 ```yaml
 display:
   show_reasoning: true  # 在飞书卡片中显示推理面板
@@ -210,18 +150,18 @@ display:
 
 ## 开发者指南
 
-> 📖 **[SKILL.md](SKILL.md)** — LLM 快速上手指南。阅读本文档后，你应能立即理解项目架构、关键设计决策、常见陷阱，并高效地进行代码修改或功能扩展。
+> 📖 **[SKILL.md](docs/SKILL.md)** — LLM 快速上手指南。项目架构、关键设计决策、常见陷阱，高效代码修改指南。
 
 ---
 
 ## 更新日志
 
-### v0.19.1
+### v1.0.0
 
-- **上下文加载提示**：首张卡片创建时立即插入「加载上下文中...」占位符（带 `time_outlined` 图标）。当首段回答文本到达时，该提示在同一个 `batch_update` 调用中自动移除——零额外 API 开销。拆卡不插入提示。封卡操作也会删除提示作为兜底。
-- **拆卡封卡顺序修复**：`_do_linear_split()` 改为先封存旧卡、再创建新卡（原顺序：先创建新卡、再封存旧卡）。同时修复 `_preservative_seal()` 序列冲突处理：不再返回 `True`（将其视为幂等成功），而是重试最多 2 次后回退到完整重建。
+- **代码重构**：拆分大文件为聚焦模块（monkey_patch → 4文件, cardkit → 3+门面, controller → session+split）
+- **文档整理**：创建 `docs/` 文件夹，精简 CHANGELOG & SKILL.md，新增 ISSUES_TEMPLATE.md
 
-> 完整版本历史请查看 [CHANGELOG.md](CHANGELOG.md)
+> 完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
 

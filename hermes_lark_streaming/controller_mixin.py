@@ -39,7 +39,7 @@ from .image import ImageResolver
 
 if TYPE_CHECKING:
     from .config import Config
-    from .controller import CardSession
+    from .session import CardSession
     from .feishu import FeishuClient
 
 _logger = logging.getLogger("hermes_lark_streaming")
