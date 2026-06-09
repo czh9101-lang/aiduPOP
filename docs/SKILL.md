@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 1.0.1 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
+| 版本 | 1.0.0 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
 
 ---
 
@@ -45,7 +45,6 @@ Background: _run_background_task ── [Hook 1/2]
 | `├ gateway.py` | ~890 | GatewayRunner 包装 | 6 个 wrapper + 时间前缀注入 + cron/background |
 | `├ callbacks.py` | ~230 | 回调包装 | 5 个内部 wrapper 防重复消费 |
 | `└ adapter.py` | ~1030 | FeishuAdapter 包装 | send/edit/reaction/clarify 包装 + gateway card 注册 |
-| `monkey_patch.py` | ~7 | 向后兼容 shim | `from .patching import *` |
 | **cardkit/** | | **卡片构建子包** | |
 | `├ __init__.py` | ~5 | 重导出门面 | `from .elements/cards/special import *` |
 | `├ elements.py` | ~680 | 原始元素构建器 | streaming/reasoning/tool/error 面板 + footer |
@@ -53,19 +52,22 @@ Background: _run_background_task ── [Hook 1/2]
 | `├ special.py` | ~410 | 专用卡片类型 | cron/gateway/clarify 三态卡片 |
 | `├ i18n.py` | 58 | 中英双语映射 | `_T` dict + `_i18n()`/`_t()` |
 | `└ md.py` | 121 | Markdown 处理 | 标题/表格降级、图片 key 剥离、长文本分块 |
-| `cardkit.py` | ~7 | 向后兼容 shim | `from .cardkit import *` |
+| **controller/** | | **主控制器子包** | |
+| `├ __init__.py` | ~20 | 重导出门面 | StreamCardController + CardSession + 状态常量 |
+| `├ core.py` | ~720 | 主控制器(单例) | 管理生命周期，导入 CardSession |
+| `├ mixin.py` | ~580 | 异步 API 编排 | 状态机 + CardKit→IM PATCH 降级链 |
+| `└ linear_mixin.py` | ~1250 | 线性模式编排 | 拆卡(阈值185)、渐进降级封卡、segment 管理 |
+| **state/** | | **状态与数据子包** | |
+| `├ __init__.py` | ~20 | 重导出门面 | CardSession + TextState + LinearState + 工具类 |
+| `├ session.py` | ~110 | CardSession 数据类 | 37 字段 `__slots__`，独立于 controller |
+| `├ linear.py` | ~180 | 线性 segment 状态 | `Segment` 数据类 + `LinearState` 扁平管理 |
+| `├ linear_split.py` | ~170 | 拆分/估算逻辑 | 独立函数，预估元素数 + 查找拆分偏移 |
+| `├ text.py` | ~111 | 文本增量追踪 | `<think|thinking|thought>` 标签拆分 |
+| `└ tooluse.py` | ~299 | 工具调用追踪 | `ToolStep`/`ToolSession`，敏感信息脱敏 |
 | `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获 |
-| `controller.py` | ~720 | 主控制器(单例) | 管理生命周期，导入 CardSession |
-| `session.py` | ~110 | CardSession 数据类 | 37 字段 `__slots__`，独立于 controller |
-| `controller_mixin.py` | ~580 | 异步 API 编排 | 状态机 + CardKit→IM PATCH 降级链 |
-| `controller_linear_mixin.py` | ~1250 | 线性模式编排 | 拆卡(阈值185)、渐进降级封卡、segment 管理 |
-| `linear_split.py` | ~170 | 拆分/估算逻辑 | 独立函数，预估元素数 + 查找拆分偏移 |
 | `config.py` | ~270 | 配置读取 | `_plugin_sec()` 惰性加载 + 5秒 TTL 缓存 |
 | `feishu.py` | ~450 | 飞书 API 客户端 | CardKit v1/v2 + IM API，错误码分类 |
 | `flush.py` | ~185 | 节流调度器 | CardKit 500ms / IM PATCH 1.5s，互斥锁 + re-flush |
-| `linear.py` | ~180 | 线性 segment 状态 | `Segment` 数据类 + `LinearState` 扁平管理 |
-| `text.py` | ~111 | 文本增量追踪 | `<think|thinking|thought>` 标签拆分 |
-| `tooluse.py` | ~299 | 工具调用追踪 | `ToolStep`/`ToolSession`，敏感信息脱敏 |
 | `image.py` | ~129 | 异步图片处理 | 下载远程图→上传飞书→替换 img_key |
 | `unavailable_guard.py` | ~144 | 消息不可用保护 | 删除/撤回检测，30分钟 TTL |
 | `plugin.py` | ~250 | 插件注册入口 | `register()`/`unregister()`，自动备份 config |
@@ -270,4 +272,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-09 | Version: 1.0.1*
+*Last updated: 2026-06-09 | Version: 1.0.0*

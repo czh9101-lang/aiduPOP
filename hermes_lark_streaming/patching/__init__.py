@@ -168,9 +168,9 @@ def _get_thread_local_ctx() -> dict | None:
 # These imports must come AFTER shared state is defined to avoid circular
 # import issues (sub-modules import shared state from this module).
 # The sub-modules are:
-#   monkey_patch_gateway   — GatewayRunner wrappers, inject_time, cron
-#   monkey_patch_callbacks — _maybe_wrap_callbacks and inner wrappers
-#   monkey_patch_adapter   — FeishuAdapter wrappers, clarify cards
+#   gateway   — GatewayRunner wrappers, inject_time, cron
+#   callbacks — _maybe_wrap_callbacks and inner wrappers
+#   adapter   — FeishuAdapter wrappers, clarify cards
 
 from .gateway import (  # noqa: E402
     _wrap_handle_message,
@@ -653,7 +653,7 @@ def apply_patches() -> None:
         # Images are now sent as standalone messages (pre-v0.15.3 behavior).
         # The three zombie functions (_try_add_image_to_session,
         # _wrap_feishu_adapter_send_image_file, _wrap_feishu_adapter_send_image)
-        # have been fully removed from monkey_patch.py.
+        # have been fully removed from patching/ sub-package.
 
         # ── Clarify interactive card patches ──
         # Patch send_clarify to render interactive CardKit cards instead of

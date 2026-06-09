@@ -22,11 +22,6 @@ def _get_hermes_config_path() -> Path:
     return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
 
 
-# 向后兼容：保留常量名，但改为使用 getter 函数
-# 注意：这仍然在模块导入时求值，但大多数场景下是正确的
-# 对于多 Profile 场景，请使用 _get_hermes_config_path()
-_HERMES_CONFIG_PATH = _get_hermes_config_path()
-
 _RELOAD_CACHE_TTL = 5.0  # 运行时可变配置的缓存 TTL（秒）
 
 

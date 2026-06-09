@@ -26,14 +26,14 @@ from hermes_lark_streaming.cardkit import (
     build_streaming_card,
     build_streaming_card_v2,
 )
-from hermes_lark_streaming.cardkit_md import (
+from hermes_lark_streaming.cardkit.md import (
     _downgrade_tables,
     _find_tables_outside_code_blocks,
     _split_long_text,
     _strip_invalid_image_keys,
     optimize_markdown_style,
 )
-from hermes_lark_streaming.linear import Segment
+from hermes_lark_streaming.state.linear import Segment
 
 # --- Markdown 优化 ---
 
@@ -1045,7 +1045,7 @@ class TestPartialStatusIndicator:
 
     def test_partial_indicator_in_complete_card(self) -> None:
         """partial=True 时卡片底部出现继续提示."""
-        from hermes_lark_streaming.linear import Segment
+        from hermes_lark_streaming.state.linear import Segment
         seg = Segment("answer", "answer_0")
         seg.text = "部分回答内容"
         card = build_linear_complete_card(
@@ -1060,7 +1060,7 @@ class TestPartialStatusIndicator:
 
     def test_no_partial_indicator_by_default(self) -> None:
         """partial=False (默认) 时无继续提示."""
-        from hermes_lark_streaming.linear import Segment
+        from hermes_lark_streaming.state.linear import Segment
         seg = Segment("answer", "answer_0")
         seg.text = "回答内容"
         card = build_linear_complete_card(
@@ -1073,7 +1073,7 @@ class TestPartialStatusIndicator:
 
     def test_partial_indicator_in_compact_seal_card(self) -> None:
         """compact seal 卡片也支持 partial 提示."""
-        from hermes_lark_streaming.linear import Segment
+        from hermes_lark_streaming.state.linear import Segment
         seg = Segment("answer", "answer_0")
         seg.text = "部分回答"
         card = build_linear_compact_seal_card(
@@ -1105,7 +1105,7 @@ class TestBackgroundReviewPanel:
 
     def test_background_review_in_complete_card(self) -> None:
         """完成态卡片包含后台审查面板."""
-        from hermes_lark_streaming.linear import Segment
+        from hermes_lark_streaming.state.linear import Segment
         seg = Segment("answer", "answer_0")
         seg.text = "回答"
         card = build_linear_complete_card(

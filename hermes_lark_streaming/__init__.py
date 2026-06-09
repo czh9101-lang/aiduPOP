@@ -9,20 +9,22 @@ and progressive card splitting.
 Module Organization
 ──────────────────
 Core Controller:
-  controller.py              StreamCardController (singleton, manages sessions)
-  controller_mixin.py         ControllerMixin (non-linear card API orchestration)
-  controller_linear_mixin.py  LinearControllerMixin (linear mode API orchestration)
-  session.py                  CardSession (per-message state)
+  controller/                 Sub-package
+    __init__.py               Re-exports: StreamCardController, CardSession, states
+    core.py                   StreamCardController (singleton, manages sessions)
+    mixin.py                  ControllerMixin (non-linear card API orchestration)
+    linear_mixin.py           LinearControllerMixin (linear mode API orchestration)
   flush.py                    FlushController (throttle scheduler)
   patch.py                    Hook functions (on_message_started, on_answer_delta, etc.)
 
 Card Building:
-  cardkit.py                  Facade — re-exports from cardkit_*
-  cardkit_elements.py         Primitive element builders (panels, footers, etc.)
-  cardkit_cards.py            Card assemblers (streaming, complete, linear)
-  cardkit_special.py          Specialized cards (cron, gateway, clarify)
-  cardkit_md.py               Markdown processing (downgrade, split, optimize)
-  cardkit_i18n.py             i18n zh/en bilingual text mapping
+  cardkit/                    Sub-package
+    __init__.py               Re-exports from elements/cards/special
+    elements.py               Primitive element builders (panels, footers, etc.)
+    cards.py                  Card assemblers (streaming, complete, linear)
+    special.py                Specialized cards (cron, gateway, clarify)
+    md.py                     Markdown processing (downgrade, split, optimize)
+    i18n.py                   i18n zh/en bilingual text mapping
 
 Feishu API:
   feishu.py                   FeishuClient (Lark SDK wrapper, transient retry)
@@ -30,17 +32,21 @@ Feishu API:
   image.py                    ImageResolver (async image upload)
 
 State & Data:
-  linear.py                   LinearState + Segment (flat segment management)
-  linear_split.py             Element threshold, split estimation helpers
-  text.py                     TextState (incremental text tracking)
-  tooluse.py                  ToolUseTracker (tool call visualization + redaction)
+  state/                      Sub-package
+    __init__.py               Re-exports: CardSession, TextState, LinearState, etc.
+    session.py                CardSession (per-message state)
+    linear.py                 LinearState + Segment (flat segment management)
+    linear_split.py           Element threshold, split estimation helpers
+    text.py                   TextState (incremental text tracking)
+    tooluse.py                ToolUseTracker (tool call visualization + redaction)
   config.py                   Config reader (Hermes config.yaml)
 
-Monkey Patching:
-  monkey_patch.py              Entry point + shared state (apply_patches)
-  monkey_patch_gateway.py      GatewayRunner wrappers, inject_time, cron
-  monkey_patch_callbacks.py    Callback wrapping (answer, thinking, tool, reasoning)
-  monkey_patch_adapter.py      FeishuAdapter interception (send, edit, reactions, clarify)
+Runtime Patching:
+  patching/                   Sub-package
+    __init__.py               Entry point + shared state (apply_patches) + re-exports
+    gateway.py                GatewayRunner wrappers, inject_time, cron
+    callbacks.py              Callback wrapping (answer, thinking, tool, reasoning)
+    adapter.py                FeishuAdapter interception (send, edit, reactions, clarify)
 
 Streaming Mode
 ──────────────

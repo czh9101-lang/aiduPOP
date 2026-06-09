@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hermes_lark_streaming.monkey_patch import (
+from hermes_lark_streaming.patching import (
     _msg_ctx,
     _maybe_wrap_callbacks,
     _thread_local_ctx,

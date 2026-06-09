@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from hermes_lark_streaming.tooluse import (
+from hermes_lark_streaming.state.tooluse import (
     ToolUseTracker,
     _basename_only,
     _build_display_block,

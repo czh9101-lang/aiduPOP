@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from hermes_lark_streaming import linear as linear_module
-from hermes_lark_streaming.linear import LinearState, Segment
+from hermes_lark_streaming.state import linear as linear_module
+from hermes_lark_streaming.state.linear import LinearState, Segment
 
 
 class TestSegmentDefaults:

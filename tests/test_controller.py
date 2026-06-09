@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hermes_lark_streaming.controller import CardSession, StreamCardController
-from hermes_lark_streaming.controller_linear_mixin import _estimate_segment_elements
-from hermes_lark_streaming.controller_mixin import (
+from hermes_lark_streaming.controller.linear_mixin import _estimate_segment_elements
+from hermes_lark_streaming.controller.mixin import (
     ABORTED,
     COMPLETED,
     COMPLETING,
@@ -27,7 +27,7 @@ from hermes_lark_streaming.feishu import (
     FeishuAPIError,
     FeishuClient,
 )
-from hermes_lark_streaming.linear import LinearState, Segment
+from hermes_lark_streaming.state.linear import LinearState, Segment
 
 
 def _enable(ctrl: StreamCardController, *, linear: bool = False) -> None:

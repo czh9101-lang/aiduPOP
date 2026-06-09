@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hermes_lark_streaming.monkey_patch import (
+from hermes_lark_streaming.patching import (
     _inject_time_guard,
     _inject_time_prefix,
 )
@@ -330,7 +330,7 @@ class TestCronDeliveryWrapper:
 
     def test_cron_wrapper_no_adapters_falls_through(self) -> None:
         """When no adapters are provided, cron delivery falls through to original."""
-        from hermes_lark_streaming.monkey_patch import _wrap_cron_deliver
+        from hermes_lark_streaming.patching import _wrap_cron_deliver
 
         orig = MagicMock(return_value="original_result")
         wrapper = _wrap_cron_deliver(orig)
@@ -342,7 +342,7 @@ class TestCronDeliveryWrapper:
 
     def test_cron_wrapper_no_feishu_adapter_falls_through(self) -> None:
         """When adapters exist but no Feishu adapter, falls through to original."""
-        from hermes_lark_streaming.monkey_patch import _wrap_cron_deliver
+        from hermes_lark_streaming.patching import _wrap_cron_deliver
 
         orig = MagicMock(return_value="original_result")
         wrapper = _wrap_cron_deliver(orig)
@@ -367,14 +367,14 @@ class TestMsgCtxCleanup:
 
     def test_msg_ctx_cleared_after_wrap_handle_message(self) -> None:
         """After _wrap_handle_message_with_agent completes, _msg_ctx should be None."""
-        from hermes_lark_streaming.monkey_patch import _msg_ctx
+        from hermes_lark_streaming.patching import _msg_ctx
 
         # _msg_ctx should default to None
         assert _msg_ctx.get() is None
 
     def test_msg_ctx_default_is_none(self) -> None:
         """_msg_ctx default value should be None (no stale context)."""
-        from hermes_lark_streaming.monkey_patch import _msg_ctx
+        from hermes_lark_streaming.patching import _msg_ctx
 
         # Fresh ContextVar should have default None
         assert _msg_ctx.get() is None
@@ -385,7 +385,7 @@ class TestPerMessageContext:
 
     def test_msg_context_is_separate_dict(self) -> None:
         """Each message should use its own context dict, not a shared reference."""
-        from hermes_lark_streaming.monkey_patch import _wrap_handle_message_with_agent
+        from hermes_lark_streaming.patching import _wrap_handle_message_with_agent
         import inspect
 
         source = inspect.getsource(_wrap_handle_message_with_agent)
@@ -394,7 +394,7 @@ class TestPerMessageContext:
 
     def test_card_sent_uses_per_message_context(self) -> None:
         """card_sent check should use per-message context, not _msg_ctx.get()."""
-        from hermes_lark_streaming.monkey_patch import _wrap_handle_message_with_agent
+        from hermes_lark_streaming.patching import _wrap_handle_message_with_agent
         import inspect
 
         source = inspect.getsource(_wrap_handle_message_with_agent)
@@ -416,7 +416,7 @@ class TestRecursiveInterruptContext:
 
     def test_recursive_context_creation(self) -> None:
         """_wrap_run_agent should create a new context for recursive calls."""
-        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        from hermes_lark_streaming.patching import _wrap_run_agent
         import inspect
 
         source = inspect.getsource(_wrap_run_agent)
@@ -426,7 +426,7 @@ class TestRecursiveInterruptContext:
 
     def test_parent_context_restored(self) -> None:
         """After recursive call, parent context should be restored."""
-        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        from hermes_lark_streaming.patching import _wrap_run_agent
         import inspect
 
         source = inspect.getsource(_wrap_run_agent)
@@ -434,7 +434,7 @@ class TestRecursiveInterruptContext:
 
     def test_parent_complete_hook_aborted(self) -> None:
         """Parent COMPLETE hook should fire as ABORTED when in recursive scenario."""
-        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        from hermes_lark_streaming.patching import _wrap_run_agent
         import inspect
 
         source = inspect.getsource(_wrap_run_agent)
@@ -446,7 +446,7 @@ class TestRecursiveInterruptContext:
         Previous bug: only A's ABORTED COMPLETE was fired, leaving B's card stuck
         in STREAMING state, causing duplicate cards and wrong card content.
         """
-        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        from hermes_lark_streaming.patching import _wrap_run_agent
         import inspect
 
         source = inspect.getsource(_wrap_run_agent)
@@ -459,7 +459,7 @@ class TestRecursiveInterruptContext:
 
     def test_child_complete_includes_result(self) -> None:
         """Child COMPLETE hook should use the inner _run_agent's result (B's answer)."""
-        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        from hermes_lark_streaming.patching import _wrap_run_agent
         import inspect
 
         source = inspect.getsource(_wrap_run_agent)
@@ -498,7 +498,7 @@ class TestRecursiveInterruptContext:
         The fix: store a reference to the original msg_context via
         _original_msg_context_ref and propagate card_sent=True to it.
         """
-        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        from hermes_lark_streaming.patching import _wrap_run_agent
         import inspect
 
         source = inspect.getsource(_wrap_run_agent)
@@ -526,13 +526,13 @@ class TestImageInterception:
         """_wrap_feishu_adapter_send_image_file was deleted (2026-06-09 zombie cleanup)."""
         import pytest
         with pytest.raises(ImportError):
-            from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image_file
+            from hermes_lark_streaming.patching import _wrap_feishu_adapter_send_image_file
 
     def test_send_image_wrapper_deleted(self) -> None:
         """_wrap_feishu_adapter_send_image was deleted (2026-06-09 zombie cleanup)."""
         import pytest
         with pytest.raises(ImportError):
-            from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image
+            from hermes_lark_streaming.patching import _wrap_feishu_adapter_send_image
 
     def test_send_image_file_not_monkey_patched(self) -> None:
         """v0.15.4: send_image_file should NOT be monkey-patched anymore.
@@ -543,7 +543,7 @@ class TestImageInterception:
         - _schedule_card_update skipped terminal-state sessions
         - Original standalone send was suppressed → images lost entirely
         """
-        from hermes_lark_streaming.monkey_patch import apply_patches
+        from hermes_lark_streaming.patching import apply_patches
         import inspect
 
         source = inspect.getsource(apply_patches)
@@ -553,7 +553,7 @@ class TestImageInterception:
 
     def test_send_image_not_monkey_patched(self) -> None:
         """v0.15.4: send_image should NOT be monkey-patched anymore."""
-        from hermes_lark_streaming.monkey_patch import apply_patches
+        from hermes_lark_streaming.patching import apply_patches
         import inspect
 
         source = inspect.getsource(apply_patches)
@@ -568,7 +568,7 @@ class TestImageInterception:
         is passed through as standalone messages — the only code path for
         non-string content is to call orig_send directly.
         """
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send
+        from hermes_lark_streaming.patching import _wrap_feishu_adapter_send
         import inspect
 
         source = inspect.getsource(_wrap_feishu_adapter_send)
@@ -611,7 +611,7 @@ class TestCardSessionExistenceCheck:
 
     def test_card_session_existence_check_in_handle_message(self) -> None:
         """_wrap_handle_message_with_agent should check controller._sessions when card_sent=False."""
-        from hermes_lark_streaming.monkey_patch import _wrap_handle_message_with_agent
+        from hermes_lark_streaming.patching import _wrap_handle_message_with_agent
         import inspect
 
         source = inspect.getsource(_wrap_handle_message_with_agent)
@@ -622,7 +622,7 @@ class TestCardSessionExistenceCheck:
 
     def test_card_session_existence_check_in_feishu_adapter_send(self) -> None:
         """_wrap_feishu_adapter_send should check controller._sessions when card_sent=False."""
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send
+        from hermes_lark_streaming.patching import _wrap_feishu_adapter_send
         import inspect
 
         source = inspect.getsource(_wrap_feishu_adapter_send)
@@ -633,7 +633,7 @@ class TestCardSessionExistenceCheck:
 
     def test_feishu_adapter_send_session_check_sets_card_sent(self) -> None:
         """When a card session is found, card_sent should be set to True."""
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send
+        from hermes_lark_streaming.patching import _wrap_feishu_adapter_send
         import inspect
 
         source = inspect.getsource(_wrap_feishu_adapter_send)
@@ -662,7 +662,7 @@ class TestParentAbortedCompleteSetsAlreadySent:
 
     def test_step2_sets_already_sent(self) -> None:
         """Step 2 (parent ABORTED COMPLETE) should set result['already_sent'] = True."""
-        from hermes_lark_streaming.monkey_patch import _wrap_run_agent
+        from hermes_lark_streaming.patching import _wrap_run_agent
         import inspect
 
         source = inspect.getsource(_wrap_run_agent)
@@ -694,7 +694,7 @@ class TestHighFrequencyLoggingDowngrade:
 
     def test_hls_called_is_debug(self) -> None:
         """HLS_CALLED log should use debug level, not info."""
-        from hermes_lark_streaming.monkey_patch import _maybe_wrap_callbacks
+        from hermes_lark_streaming.patching import _maybe_wrap_callbacks
         import inspect
 
         source = inspect.getsource(_maybe_wrap_callbacks)
@@ -708,7 +708,7 @@ class TestHighFrequencyLoggingDowngrade:
 
     def test_hls_wrap_guard_is_debug(self) -> None:
         """HLS_WRAP guard check log should use debug level."""
-        from hermes_lark_streaming.monkey_patch import _maybe_wrap_callbacks
+        from hermes_lark_streaming.patching import _maybe_wrap_callbacks
         import inspect
 
         source = inspect.getsource(_maybe_wrap_callbacks)
@@ -729,7 +729,7 @@ class TestHighFrequencyLoggingDowngrade:
 
     def test_hls_wrap_skip_is_debug(self) -> None:
         """HLS_WRAP guard SKIP log should use debug level."""
-        from hermes_lark_streaming.monkey_patch import _maybe_wrap_callbacks
+        from hermes_lark_streaming.patching import _maybe_wrap_callbacks
         import inspect
 
         source = inspect.getsource(_maybe_wrap_callbacks)
@@ -746,7 +746,7 @@ class TestStartupDelay:
 
     def test_startup_delay_is_2s(self) -> None:
         """_schedule_direct_patch should sleep 2 seconds, not 5."""
-        from hermes_lark_streaming.monkey_patch import _schedule_direct_patch
+        from hermes_lark_streaming.patching import _schedule_direct_patch
         import inspect
 
         source = inspect.getsource(_schedule_direct_patch)
@@ -757,7 +757,7 @@ class TestStartupDelay:
 
     def test_startup_delay_log_says_2s(self) -> None:
         """Log message should reflect the 2s delay."""
-        from hermes_lark_streaming.monkey_patch import _schedule_direct_patch
+        from hermes_lark_streaming.patching import _schedule_direct_patch
         import inspect
 
         source = inspect.getsource(_schedule_direct_patch)
@@ -773,7 +773,7 @@ class TestApplyGatewayRunnerPatches:
 
     def test_apply_gateway_runner_patches_function_exists(self) -> None:
         """_apply_gateway_runner_patches should exist as a callable."""
-        from hermes_lark_streaming.monkey_patch import _apply_gateway_runner_patches
+        from hermes_lark_streaming.patching import _apply_gateway_runner_patches
         assert callable(_apply_gateway_runner_patches)
 
 
@@ -783,7 +783,7 @@ class TestInterceptedEditChatId:
     def test_intercepted_edit_has_chat_id_param(self) -> None:
         """_intercepted_edit should accept chat_id as explicit parameter."""
         import inspect
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_edit
+        from hermes_lark_streaming.patching import _wrap_feishu_adapter_edit
 
         # Create a dummy orig_edit and wrap it
         async def dummy_edit(self, chat_id, message_id, content, **kwargs):

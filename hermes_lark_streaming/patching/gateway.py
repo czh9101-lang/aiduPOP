@@ -537,8 +537,8 @@ def _inject_time_prefix(user_message: str | None, persist_user_message: str | No
         return user_message, persist_user_message
 
     # Lazy imports from patching package for test-mock compatibility.
-    # Tests mock hermes_lark_streaming.monkey_patch._get_config and
-    # hermes_lark_streaming.monkey_patch.datetime; importing at call time
+    # Tests mock hermes_lark_streaming.patching._get_config and
+    # hermes_lark_streaming.patching.datetime; importing at call time
     # ensures the patched objects are picked up.
     from . import _get_config, datetime, timezone, timedelta  # noqa: F811
 
