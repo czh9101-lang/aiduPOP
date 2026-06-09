@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -97,12 +97,12 @@ $HERMES_PYTHON -m hermes_lark_streaming verify
 
 ## Configuration
 
-All settings go under the `streaming:` section in `~/.hermes/config.yaml`. The plugin auto-injects defaults on first load; run `cleanup` before uninstalling to remove them.
+All settings go under the `hermes_lark_streaming:` section in `~/.hermes/config.yaml`. The plugin auto-injects defaults on first load; run `cleanup` before uninstalling to remove them.
 
 > **Note**: Hermes's native `display.streaming: false` controls CLI/TUI output — unrelated to this plugin.
 
 ```yaml
-streaming:
+hermes_lark_streaming:
   enabled: true                    # Enable streaming cards
   linear: true                     # Single-card in-place update with auto-splitting
   panel_expanded: false            # Keep panels expanded in completed cards
@@ -130,7 +130,7 @@ When `inject_time: true`, the plugin prepends `<time>HH:MM:SS</time>` to each us
 |----------|--------|---------|
 | 1 | Environment Variables | `FEISHU_APP_ID`, `FEISHU_APP_SECRET` |
 | 2 | File | `~/.hermes/.env` |
-| 3 | Config File | `streaming.feishu.app_id` |
+| 3 | Config File | `hermes_lark_streaming.feishu.app_id` |
 
 ```bash
 # ~/.hermes/.env example

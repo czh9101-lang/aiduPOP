@@ -20,23 +20,23 @@ def _make_config(raw: dict[str, Any]) -> Config:
 
 class TestEnabled:
     def test_enabled_true(self) -> None:
-        cfg = _make_config({"streaming": {"enabled": True}})
+        cfg = _make_config({"hermes_lark_streaming": {"enabled": True}})
         assert cfg.enabled is True
 
     def test_enabled_false(self) -> None:
-        cfg = _make_config({"streaming": {"enabled": False}})
+        cfg = _make_config({"hermes_lark_streaming": {"enabled": False}})
         assert cfg.enabled is False
 
     def test_enabled_missing(self) -> None:
-        cfg = _make_config({"streaming": {}})
+        cfg = _make_config({"hermes_lark_streaming": {}})
         assert cfg.enabled is False
 
-    def test_no_streaming_section(self) -> None:
+    def test_no_hermes_lark_streaming_section(self) -> None:
         cfg = _make_config({})
         assert cfg.enabled is False
 
-    def test_streaming_section_not_dict(self) -> None:
-        cfg = _make_config({"streaming": "invalid"})
+    def test_hermes_lark_streaming_section_not_dict(self) -> None:
+        cfg = _make_config({"hermes_lark_streaming": "invalid"})
         assert cfg.enabled is False
 
 
@@ -44,63 +44,63 @@ class TestFooterFields:
     _DEFAULT_FIELDS = [["status", "elapsed", "model", "compression_exhausted"]]
 
     def test_normal_2d_fields(self) -> None:
-        cfg = _make_config({"streaming": {"footer": {"fields": [["a", "b"], ["c"]]}}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": {"fields": [["a", "b"], ["c"]]}}})
         assert cfg.footer_fields == [["a", "b"], ["c"]]
 
     def test_1d_auto_wrapped(self) -> None:
-        cfg = _make_config({"streaming": {"footer": {"fields": ["status", "elapsed"]}}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": {"fields": ["status", "elapsed"]}}})
         assert cfg.footer_fields == [["status", "elapsed"]]
 
     def test_empty_fields_returns_default(self) -> None:
-        cfg = _make_config({"streaming": {"footer": {"fields": []}}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": {"fields": []}}})
         assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_no_fields_returns_default(self) -> None:
-        cfg = _make_config({"streaming": {"footer": {}}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": {}}})
         assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_no_footer_returns_default(self) -> None:
-        cfg = _make_config({"streaming": {}})
+        cfg = _make_config({"hermes_lark_streaming": {}})
         assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_footer_not_dict_returns_default(self) -> None:
-        cfg = _make_config({"streaming": {"footer": "invalid"}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": "invalid"}})
         assert cfg.footer_fields == self._DEFAULT_FIELDS
 
-    def test_no_streaming_section_returns_default(self) -> None:
+    def test_no_hermes_lark_streaming_section_returns_default(self) -> None:
         cfg = _make_config({})
         assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_fields_non_list_returns_default(self) -> None:
-        cfg = _make_config({"streaming": {"footer": {"fields": "status"}}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": {"fields": "status"}}})
         assert cfg.footer_fields == self._DEFAULT_FIELDS
 
     def test_fields_int_returns_default(self) -> None:
-        cfg = _make_config({"streaming": {"footer": {"fields": 42}}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": {"fields": 42}}})
         assert cfg.footer_fields == self._DEFAULT_FIELDS
 
 
 class TestFooterShowLabel:
     def test_true(self) -> None:
-        cfg = _make_config({"streaming": {"footer": {"show_label": True}}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": {"show_label": True}}})
         assert cfg.footer_show_label is True
 
     def test_false(self) -> None:
-        cfg = _make_config({"streaming": {"footer": {"show_label": False}}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": {"show_label": False}}})
         assert cfg.footer_show_label is False
 
     def test_missing_defaults_false(self) -> None:
-        cfg = _make_config({"streaming": {"footer": {}}})
+        cfg = _make_config({"hermes_lark_streaming": {"footer": {}}})
         assert cfg.footer_show_label is False
 
 
 class TestCardDurationSec:
     def test_custom(self) -> None:
-        cfg = _make_config({"streaming": {"card_ttl_sec": 300}})
+        cfg = _make_config({"hermes_lark_streaming": {"card_ttl_sec": 300}})
         assert cfg.card_duration_sec == 300
 
     def test_default(self) -> None:
-        cfg = _make_config({"streaming": {}})
+        cfg = _make_config({"hermes_lark_streaming": {}})
         assert cfg.card_duration_sec == 600
 
 
@@ -189,7 +189,7 @@ class TestShowReasoning:
         assert cfg.show_reasoning is False
 
     def test_no_display_section(self) -> None:
-        cfg = self._make_reasoning_config({"streaming": {"enabled": True}})
+        cfg = self._make_reasoning_config({"hermes_lark_streaming": {"enabled": True}})
         assert cfg.show_reasoning is False
 
 
@@ -231,83 +231,83 @@ class TestInjectTime:
         return cfg
 
     def test_inject_time_true(self) -> None:
-        cfg = self._make_inject_time_config({"streaming": {"inject_time": True}})
+        cfg = self._make_inject_time_config({"hermes_lark_streaming": {"inject_time": True}})
         assert cfg.inject_time is True
 
     def test_inject_time_false(self) -> None:
-        cfg = self._make_inject_time_config({"streaming": {"inject_time": False}})
+        cfg = self._make_inject_time_config({"hermes_lark_streaming": {"inject_time": False}})
         assert cfg.inject_time is False
 
     def test_inject_time_missing_defaults_false(self) -> None:
-        cfg = self._make_inject_time_config({"streaming": {}})
+        cfg = self._make_inject_time_config({"hermes_lark_streaming": {}})
         assert cfg.inject_time is False
 
-    def test_inject_time_no_streaming_section(self) -> None:
+    def test_inject_time_no_hermes_lark_streaming_section(self) -> None:
         cfg = self._make_inject_time_config({})
         assert cfg.inject_time is False
 
-    def test_inject_time_streaming_not_dict(self) -> None:
-        cfg = self._make_inject_time_config({"streaming": "invalid"})
+    def test_inject_time_hermes_lark_streaming_not_dict(self) -> None:
+        cfg = self._make_inject_time_config({"hermes_lark_streaming": "invalid"})
         assert cfg.inject_time is False
 
 
 class TestLinear:
     def test_linear_true(self) -> None:
-        cfg = _make_config({"streaming": {"linear": True}})
+        cfg = _make_config({"hermes_lark_streaming": {"linear": True}})
         assert cfg.linear is True
 
     def test_linear_false(self) -> None:
-        cfg = _make_config({"streaming": {"linear": False}})
+        cfg = _make_config({"hermes_lark_streaming": {"linear": False}})
         assert cfg.linear is False
 
     def test_linear_missing_defaults_true(self) -> None:
-        cfg = _make_config({"streaming": {}})
+        cfg = _make_config({"hermes_lark_streaming": {}})
         assert cfg.linear is True
 
 
 class TestPanelExpanded:
     def test_panel_expanded_true(self) -> None:
-        cfg = _make_config({"streaming": {"panel_expanded": True}})
+        cfg = _make_config({"hermes_lark_streaming": {"panel_expanded": True}})
         assert cfg.panel_expanded is True
 
     def test_panel_expanded_false(self) -> None:
-        cfg = _make_config({"streaming": {"panel_expanded": False}})
+        cfg = _make_config({"hermes_lark_streaming": {"panel_expanded": False}})
         assert cfg.panel_expanded is False
 
     def test_panel_expanded_missing_defaults_false(self) -> None:
-        cfg = _make_config({"streaming": {}})
+        cfg = _make_config({"hermes_lark_streaming": {}})
         assert cfg.panel_expanded is False
 
 
 class TestStreamingPanelExpanded:
     def test_streaming_panel_expanded_true(self) -> None:
-        cfg = _make_config({"streaming": {"streaming_panel_expanded": True}})
+        cfg = _make_config({"hermes_lark_streaming": {"streaming_panel_expanded": True}})
         assert cfg.streaming_panel_expanded is True
 
     def test_streaming_panel_expanded_false(self) -> None:
-        cfg = _make_config({"streaming": {"streaming_panel_expanded": False}})
+        cfg = _make_config({"hermes_lark_streaming": {"streaming_panel_expanded": False}})
         assert cfg.streaming_panel_expanded is False
 
     def test_streaming_panel_expanded_missing_defaults_false(self) -> None:
-        cfg = _make_config({"streaming": {}})
+        cfg = _make_config({"hermes_lark_streaming": {}})
         assert cfg.streaming_panel_expanded is False
 
 
 class TestPrintStrategy:
     def test_print_strategy_fast(self) -> None:
-        cfg = _make_config({"streaming": {"print_strategy": "fast"}})
+        cfg = _make_config({"hermes_lark_streaming": {"print_strategy": "fast"}})
         assert cfg.print_strategy == "fast"
 
     def test_print_strategy_delay(self) -> None:
-        cfg = _make_config({"streaming": {"print_strategy": "delay"}})
+        cfg = _make_config({"hermes_lark_streaming": {"print_strategy": "delay"}})
         assert cfg.print_strategy == "delay"
 
     def test_print_strategy_missing_defaults_delay(self) -> None:
-        cfg = _make_config({"streaming": {}})
+        cfg = _make_config({"hermes_lark_streaming": {}})
         assert cfg.print_strategy == "delay"
 
     def test_print_strategy_invalid_defaults_delay(self) -> None:
-        cfg = _make_config({"streaming": {"print_strategy": "invalid"}})
+        cfg = _make_config({"hermes_lark_streaming": {"print_strategy": "invalid"}})
         assert cfg.print_strategy == "delay"
 
 
@@ -317,8 +317,8 @@ class TestReloadCached:
     def test_returns_cached_result_within_ttl(self) -> None:
         """在 TTL 窗口内，多次调用返回同一缓存结果，不重复读磁盘."""
         cfg = Config()
-        raw1 = {"streaming": {"inject_time": True}}
-        raw2 = {"streaming": {"inject_time": False}}
+        raw1 = {"hermes_lark_streaming": {"inject_time": True}}
+        raw2 = {"hermes_lark_streaming": {"inject_time": False}}
 
         call_count = 0
         original_reload_cached = cfg._reload_cached
@@ -340,8 +340,8 @@ class TestReloadCached:
     def test_reloads_after_ttl_expires(self) -> None:
         """TTL 过期后，_reload_cached 重新读取磁盘（不再返回旧缓存）."""
         cfg = Config()
-        raw_old = {"streaming": {"inject_time": False}}
-        raw_new = {"streaming": {"inject_time": True}}
+        raw_old = {"hermes_lark_streaming": {"inject_time": False}}
+        raw_new = {"hermes_lark_streaming": {"inject_time": True}}
 
         # Pre-populate the cache with the old value
         cfg._reload_cache = raw_old
@@ -355,7 +355,7 @@ class TestReloadCached:
     def test_cache_is_populated_on_first_call(self) -> None:
         """首次调用后 _reload_cache 和 _reload_cache_at 被设置."""
         cfg = Config()
-        raw = {"streaming": {"inject_time": True}}
+        raw = {"hermes_lark_streaming": {"inject_time": True}}
 
         assert cfg._reload_cache is None
         assert cfg._reload_cache_at == 0.0
@@ -376,7 +376,7 @@ class TestReloadCached:
     def test_ttl_boundary_returns_cached(self) -> None:
         """刚好在 TTL 边界内（小于 TTL），返回缓存."""
         cfg = Config()
-        raw = {"streaming": {"inject_time": True}}
+        raw = {"hermes_lark_streaming": {"inject_time": True}}
         now = time.monotonic()
 
         cfg._reload_cache = raw
@@ -389,8 +389,8 @@ class TestReloadCached:
     def test_ttl_boundary_reloads_after_expiry(self) -> None:
         """刚好超过 TTL 边界，重新读取."""
         cfg = Config()
-        raw_old = {"streaming": {"inject_time": False}}
-        raw_new = {"streaming": {"inject_time": True}}
+        raw_old = {"hermes_lark_streaming": {"inject_time": False}}
+        raw_new = {"hermes_lark_streaming": {"inject_time": True}}
 
         cfg._reload_cache = raw_old
         cfg._reload_cache_at = time.monotonic() - 5.01  # Just over TTL
@@ -399,7 +399,7 @@ class TestReloadCached:
         # Now uses _get_hermes_config_path() for multi-Profile support
         mock_path = MagicMock()
         mock_path.exists.return_value = True
-        mock_path.read_text.return_value = "streaming:\n  inject_time: true\n"
+        mock_path.read_text.return_value = "hermes_lark_streaming:\n  inject_time: true\n"
         with patch("hermes_lark_streaming.config._get_hermes_config_path", return_value=mock_path), \
              patch("hermes_lark_streaming.config.yaml") as mock_yaml:
             mock_yaml.safe_load.return_value = raw_new
@@ -440,7 +440,7 @@ class TestReloadCached:
         cfg = Config()
         reload_cached_calls = 0
         reload_calls = 0
-        raw = {"streaming": {"inject_time": True}}
+        raw = {"hermes_lark_streaming": {"inject_time": True}}
 
         def counting_reload_cached() -> dict[str, Any]:
             nonlocal reload_cached_calls
@@ -510,7 +510,7 @@ class TestGetHermesConfigPath:
         from pathlib import Path
         config_path = Path(str(tmp_path)) / "config.yaml"
         config_path.write_text(yaml.dump({
-            "streaming": {"enabled": True, "flush_interval_ms": 300},
+            "hermes_lark_streaming": {"enabled": True, "flush_interval_ms": 300},
         }))
         # Override config path
         from unittest.mock import patch
@@ -526,14 +526,14 @@ class TestGetHermesConfigPath:
         from unittest.mock import patch
         config_path = Path(str(tmp_path)) / "config.yaml"
         config_path.write_text(yaml.dump({
-            "streaming": {"enabled": True, "flush_interval_ms": 50},
+            "hermes_lark_streaming": {"enabled": True, "flush_interval_ms": 50},
         }))
         with patch("hermes_lark_streaming.config._get_hermes_config_path", return_value=config_path):
             cfg = Config()
             assert cfg.flush_interval_ms == 100.0  # clamped to min
 
         config_path.write_text(yaml.dump({
-            "streaming": {"enabled": True, "flush_interval_ms": 5000},
+            "hermes_lark_streaming": {"enabled": True, "flush_interval_ms": 5000},
         }))
         with patch("hermes_lark_streaming.config._get_hermes_config_path", return_value=config_path):
             cfg2 = Config()

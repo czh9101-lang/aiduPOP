@@ -90,8 +90,8 @@ def _cmd_status() -> int:
         from .config import Config
 
         cfg = Config()
-        print(f"Config streaming.enabled: {cfg.enabled}")
-        print(f"Config streaming.linear: {cfg.linear}")
+        print(f"Config hermes_lark_streaming.enabled: {cfg.enabled}")
+        print(f"Config hermes_lark_streaming.linear: {cfg.linear}")
         print(f"Feishu credentials: {'configured' if (cfg.env_app_id or cfg.feishu_app_id) else 'MISSING'}")
         print()
         print("Plugin uses runtime monkey patching — no source files are modified.")
@@ -108,7 +108,7 @@ def _cmd_verify() -> int:
         from .config import Config
 
         cfg = Config()
-        print(f"Config streaming.enabled: {cfg.enabled}")
+        print(f"Config hermes_lark_streaming.enabled: {cfg.enabled}")
         print(f"Feishu credentials: {'configured' if (cfg.env_app_id or cfg.feishu_app_id) else 'MISSING'}")
 
         # Verify that gateway modules are importable
@@ -135,7 +135,7 @@ def _cmd_cleanup() -> int:
     """Remove plugin-injected config entries from config.yaml.
 
     Run this after ``hermes plugins uninstall hermes-lark-streaming``
-    to clean up the ``streaming`` config section and ``plugins.enabled`` entry.
+    to clean up the ``hermes_lark_streaming`` config section and ``plugins.enabled`` entry.
     """
     try:
         from .plugin import _cleanup_config

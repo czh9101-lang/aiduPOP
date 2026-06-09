@@ -106,7 +106,7 @@ def _extract_images_from_markdown(text: str) -> tuple[str, list[dict]]:
     return cleaned, images
 
 if TYPE_CHECKING:
-    from ..linear import Segment
+    from ..state.linear import Segment
 
 STREAMING_ELEMENT_ID = "streaming_content"
 REASONING_ELEMENT_ID = "reasoning_content"

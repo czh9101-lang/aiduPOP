@@ -5,7 +5,7 @@
   <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -97,12 +97,12 @@ $HERMES_PYTHON -m hermes_lark_streaming verify
 
 ## 配置说明
 
-所有配置项位于 `~/.hermes/config.yaml` 的 `streaming:` 节下。插件首次加载时自动注入默认配置；卸载前请先运行 `cleanup` 命令清除。
+所有配置项位于 `~/.hermes/config.yaml` 的 `hermes_lark_streaming:` 节下。插件首次加载时自动注入默认配置；卸载前请先运行 `cleanup` 命令清除。
 
 > **注意**：Hermes 原生的 `display.streaming: false` 控制 CLI/TUI 终端输出，与本插件的流式卡片无关。
 
 ```yaml
-streaming:
+hermes_lark_streaming:
   enabled: true                    # 启用流式卡片
   linear: true                     # 线性模式：单卡片原地更新，支持自动拆卡
   panel_expanded: false            # 完成态卡片中面板是否保持展开
@@ -130,7 +130,7 @@ streaming:
 |--------|------|------|
 | 1 | 环境变量 | `FEISHU_APP_ID`、`FEISHU_APP_SECRET` |
 | 2 | 文件 | `~/.hermes/.env` |
-| 3 | 配置文件 | `streaming.feishu.app_id` |
+| 3 | 配置文件 | `hermes_lark_streaming.feishu.app_id` |
 
 ```bash
 # ~/.hermes/.env 示例

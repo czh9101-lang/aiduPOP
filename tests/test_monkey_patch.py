@@ -33,8 +33,8 @@ class TestInjectTimePrefix:
         cfg = self._make_config(inject_time=True)
 
         with (
-            patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg),
-            patch("hermes_lark_streaming.monkey_patch.datetime") as mock_dt,
+            patch("hermes_lark_streaming.patching._get_config", return_value=cfg),
+            patch("hermes_lark_streaming.patching.datetime") as mock_dt,
         ):
             # Mock datetime.now() to return a fixed time
             _cst = timezone(timedelta(hours=8))
@@ -55,7 +55,7 @@ class TestInjectTimePrefix:
 
         cfg = self._make_config(inject_time=False)
 
-        with patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg):
+        with patch("hermes_lark_streaming.patching._get_config", return_value=cfg):
             user_msg, persist_msg = _inject_time_prefix("你好", "persist")
 
         assert user_msg == "你好"
@@ -67,7 +67,7 @@ class TestInjectTimePrefix:
         """When config read fails, return messages unchanged."""
         _inject_time_guard.active = False
 
-        with patch("hermes_lark_streaming.monkey_patch._get_config", side_effect=RuntimeError("boom")):
+        with patch("hermes_lark_streaming.patching._get_config", side_effect=RuntimeError("boom")):
             user_msg, persist_msg = _inject_time_prefix("你好", None)
 
         assert user_msg == "你好"
@@ -82,8 +82,8 @@ class TestInjectTimePrefix:
         cfg = self._make_config(inject_time=True)
 
         with (
-            patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg),
-            patch("hermes_lark_streaming.monkey_patch.datetime") as mock_dt,
+            patch("hermes_lark_streaming.patching._get_config", return_value=cfg),
+            patch("hermes_lark_streaming.patching.datetime") as mock_dt,
         ):
             _cst = timezone(timedelta(hours=8))
             mock_dt.now.return_value = datetime(2026, 5, 28, 9, 15, 0, tzinfo=_cst)
@@ -103,8 +103,8 @@ class TestInjectTimePrefix:
         cfg = self._make_config(inject_time=True)
 
         with (
-            patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg),
-            patch("hermes_lark_streaming.monkey_patch.datetime") as mock_dt,
+            patch("hermes_lark_streaming.patching._get_config", return_value=cfg),
+            patch("hermes_lark_streaming.patching.datetime") as mock_dt,
         ):
             _cst = timezone(timedelta(hours=8))
             mock_dt.now.return_value = datetime(2026, 5, 28, 14, 30, 5, tzinfo=_cst)
@@ -124,8 +124,8 @@ class TestInjectTimePrefix:
         cfg = self._make_config(inject_time=True)
 
         with (
-            patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg),
-            patch("hermes_lark_streaming.monkey_patch.datetime") as mock_dt,
+            patch("hermes_lark_streaming.patching._get_config", return_value=cfg),
+            patch("hermes_lark_streaming.patching.datetime") as mock_dt,
         ):
             # Simulate UTC 06:30:05 → CST 14:30:05
             _cst = timezone(timedelta(hours=8))
@@ -145,8 +145,8 @@ class TestInjectTimePrefix:
         cfg = self._make_config(inject_time=True)
 
         with (
-            patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg),
-            patch("hermes_lark_streaming.monkey_patch.datetime") as mock_dt,
+            patch("hermes_lark_streaming.patching._get_config", return_value=cfg),
+            patch("hermes_lark_streaming.patching.datetime") as mock_dt,
         ):
             _cst = timezone(timedelta(hours=8))
             mock_dt.now.return_value = datetime(2026, 5, 28, 14, 30, 5, tzinfo=_cst)
@@ -170,8 +170,8 @@ class TestInjectTimePrefix:
         cfg = self._make_config(inject_time=True)
 
         with (
-            patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg),
-            patch("hermes_lark_streaming.monkey_patch.datetime") as mock_dt,
+            patch("hermes_lark_streaming.patching._get_config", return_value=cfg),
+            patch("hermes_lark_streaming.patching.datetime") as mock_dt,
         ):
             _cst = timezone(timedelta(hours=8))
             mock_dt.now.return_value = datetime(2026, 5, 28, 14, 30, 5, tzinfo=_cst)
@@ -212,8 +212,8 @@ class TestInjectTimeReentrancyGuard:
         cfg = self._make_config(inject_time=True)
 
         with (
-            patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg),
-            patch("hermes_lark_streaming.monkey_patch.datetime") as mock_dt,
+            patch("hermes_lark_streaming.patching._get_config", return_value=cfg),
+            patch("hermes_lark_streaming.patching.datetime") as mock_dt,
         ):
             _cst = timezone(timedelta(hours=8))
             mock_dt.now.return_value = datetime(2026, 5, 28, 14, 30, 5, tzinfo=_cst)
@@ -230,8 +230,8 @@ class TestInjectTimeReentrancyGuard:
         cfg = self._make_config(inject_time=True)
 
         with (
-            patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg),
-            patch("hermes_lark_streaming.monkey_patch.datetime") as mock_dt,
+            patch("hermes_lark_streaming.patching._get_config", return_value=cfg),
+            patch("hermes_lark_streaming.patching.datetime") as mock_dt,
         ):
             _cst = timezone(timedelta(hours=8))
             mock_dt.now.return_value = datetime(2026, 5, 28, 14, 30, 5, tzinfo=_cst)
@@ -264,8 +264,8 @@ class TestInjectTimeGuardReset:
         cfg.inject_time = True
 
         with (
-            patch("hermes_lark_streaming.monkey_patch._get_config", return_value=cfg),
-            patch("hermes_lark_streaming.monkey_patch.datetime") as mock_dt,
+            patch("hermes_lark_streaming.patching._get_config", return_value=cfg),
+            patch("hermes_lark_streaming.patching.datetime") as mock_dt,
         ):
             _cst = timezone(timedelta(hours=8))
             mock_dt.now.return_value = datetime(2026, 5, 28, 14, 30, 5, tzinfo=_cst)
@@ -305,7 +305,7 @@ class TestVersionLogging:
         mock_ctx = MagicMock()
         with (
             patch("hermes_lark_streaming.plugin._ensure_streaming_config"),
-            patch("hermes_lark_streaming.monkey_patch.apply_patches"),
+            patch("hermes_lark_streaming.patching.apply_patches"),
             patch("hermes_lark_streaming.plugin._logger") as mock_logger,
         ):
             register(mock_ctx)
@@ -316,8 +316,8 @@ class TestVersionLogging:
         assert version_logged, f"Version {__version__} not found in log calls: {info_calls}"
 
     def test_monkey_patch_module_imports_version(self) -> None:
-        """monkey_patch.py should import __version__ from the package."""
-        from hermes_lark_streaming.monkey_patch import __version__ as mp_version
+        """patching module should import __version__ from the package."""
+        from hermes_lark_streaming.patching import __version__ as mp_version
         from hermes_lark_streaming import __version__ as pkg_version
         assert mp_version == pkg_version
 

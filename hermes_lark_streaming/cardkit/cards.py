@@ -29,7 +29,7 @@ from .md import (
 )
 
 if TYPE_CHECKING:
-    from ..linear import Segment
+    from ..state.linear import Segment
 
 
 
