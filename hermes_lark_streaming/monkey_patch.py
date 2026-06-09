@@ -1181,60 +1181,7 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
 # ── FeishuAdapter interception layer (Phase 1: gateway message cards) ─
 
 
-def _try_add_image_to_session(message_id: str, content: Any) -> bool:
-    """Try to add an image from FeishuAdapter.send() to the card session.
 
-    When Hermes sends an image via FeishuAdapter.send() with non-string
-    content (e.g. a dict with image_key or a file:// URL string wrapped
-    in a non-str type), we attempt to add it to the active card session
-    so it appears inside the card instead of as a standalone message.
-
-    Returns True if the image was added to the session, False otherwise.
-    """
-    try:
-        from .controller import get_controller
-        ctrl = get_controller()
-        if not ctrl.enabled:
-            return False
-
-        session = ctrl._get_active_session(message_id)
-        if session is None:
-            return False
-
-        # Extract image_key from Hermes's content format
-        img_key = None
-        if isinstance(content, dict):
-            # Hermes may send a dict with image_key
-            img_key = content.get("image_key") or content.get("img_key")
-        elif isinstance(content, str):
-            # Sometimes Hermes sends a file:// URL or MEDIA tag
-            if content.startswith("file://") or "image" in content.lower():
-                # We can't directly use file:// URLs in cards,
-                # but the ImageResolver handles markdown image syntax
-                return False
-
-        if not img_key:
-            return False
-
-        # Add the image key to the session's image_resolver cache
-        # so it gets included in the next card update
-        if session.image_resolver:
-            # Create a fake URL→img_key mapping so resolve_images
-            # will replace markdown image refs with the img_key
-            _fake_url = f"hermes_image://{img_key}"
-            session.image_resolver._cache[_fake_url] = img_key
-            _logger.info(
-                "image added to session: msg=%s img_key=%s",
-                message_id[:12], img_key[:12] if img_key else "?",
-            )
-            # Schedule a card update to include the image
-            ctrl._schedule_card_update(session)
-            return True
-
-        return False
-    except Exception:
-        _logger.debug("_try_add_image_to_session failed", exc_info=True)
-        return False
 
 
 def _classify_gateway_message(content: str) -> str:
@@ -2210,153 +2157,10 @@ def _handle_clarify_card_action(
     return _empty_response()
 
 
-def _wrap_feishu_adapter_send_image_file(orig_send_image_file: Callable) -> Callable:
-    """Intercept ``FeishuAdapter.send_image_file()`` — add image to card session.
-
-    When Hermes sends a local image via ``send_image_file()`` during the
-    agent pipeline, we upload it to Feishu first (to get an img_key), then
-    add the img_key to the card session's image resolver and inject a
-    markdown image reference into the session text. This renders the image
-    inside the card instead of as a standalone image message.
-
-    When not in an agent pipeline, or if the upload/interception fails,
-    the original method is called as fallback.
-    """
-
-    async def _intercepted_send_image_file(
-        self_feishu, chat_id, image_path, caption=None, reply_to=None, metadata=None, **kwargs
-    ):
-        ctx = _msg_ctx.get(None)
-        if ctx is not None:
-            eid = ctx.get("event_message_id", "")
-            if eid:
-                # Inside agent pipeline — try to add image to card session
-                try:
-                    from .controller import get_controller
-                    ctrl = get_controller()
-                    if ctrl.enabled:
-                        session = ctrl._get_active_session(eid)
-                        if session is not None and ctrl._client is not None:
-                            _logger.info(
-                                "feishu_adapter_send_image_file: intercepting image for "
-                                "card session, eid=%s path=%s",
-                                eid[:12],
-                                image_path[:40] if image_path else "?",
-                            )
-                            # Upload the image file to Feishu to get img_key
-                            import os as _os
-                            img_key = None
-                            if _os.path.exists(image_path):
-                                try:
-                                    img_key = await ctrl._client.upload_local_image(image_path)
-                                except Exception:
-                                    _logger.debug(
-                                        "feishu_adapter_send_image_file: upload failed",
-                                        exc_info=True,
-                                    )
-
-                            if img_key:
-                                # Register the img_key in the image resolver cache
-                                _fake_url = f"file://{image_path}"
-                                if session.image_resolver:
-                                    session.image_resolver._cache[_fake_url] = img_key
-                                # Inject a markdown image reference into the session text
-                                _img_md = f"![{caption or 'image'}]({_fake_url})"
-                                session.text.on_partial(_img_md)
-                                ctrl._schedule_card_update(session)
-                                _logger.info(
-                                    "feishu_adapter_send_image_file: image added to card, "
-                                    "eid=%s img_key=%s",
-                                    eid[:12], img_key[:12],
-                                )
-                                try:
-                                    from gateway.platforms.base import SendResult
-                                    return SendResult(success=True)
-                                except (ImportError, AttributeError):
-                                    return None
-                            else:
-                                _logger.debug(
-                                    "feishu_adapter_send_image_file: upload failed, "
-                                    "falling back to standalone send, eid=%s",
-                                    eid[:12],
-                                )
-                except Exception:
-                    _logger.debug(
-                        "feishu_adapter_send_image_file: interception failed, "
-                        "falling back to standalone send",
-                        exc_info=True,
-                    )
-
-        # Fallback: original send_image_file
-        return await orig_send_image_file(
-            self_feishu, chat_id, image_path,
-            caption=caption, reply_to=reply_to, metadata=metadata, **kwargs
-        )
-
-    return _intercepted_send_image_file
 
 
-def _wrap_feishu_adapter_send_image(orig_send_image: Callable) -> Callable:
-    """Intercept ``FeishuAdapter.send_image()`` — add image to card session.
 
-    When Hermes sends a remote image via ``send_image()`` during the agent
-    pipeline, we add it to the active card session's image resolver instead
-    of sending it as a standalone image message.
 
-    When not in an agent pipeline, the original method is called unchanged.
-    """
-
-    async def _intercepted_send_image(
-        self_feishu, chat_id, image_url, caption=None, reply_to=None, metadata=None, **kwargs
-    ):
-        ctx = _msg_ctx.get(None)
-        if ctx is not None:
-            eid = ctx.get("event_message_id", "")
-            if eid:
-                # Inside agent pipeline — try to add image to card session
-                try:
-                    from .controller import get_controller
-                    ctrl = get_controller()
-                    if ctrl.enabled:
-                        session = ctrl._get_active_session(eid)
-                        if session is not None:
-                            _logger.info(
-                                "feishu_adapter_send_image: intercepting remote image for "
-                                "card session, eid=%s url=%s",
-                                eid[:12],
-                                image_url[:40] if image_url else "?",
-                            )
-                            # If image_resolver exists, it will handle the URL
-                            # via resolve_images on next card update
-                            # Inject a markdown image reference into the session text
-                            _img_md = f"![{caption or 'image'}]({image_url})"
-                            session.text.on_partial(_img_md)
-                            ctrl._schedule_card_update(session)
-                            _logger.info(
-                                "feishu_adapter_send_image: image added to card session, "
-                                "eid=%s url=%s",
-                                eid[:12],
-                                image_url[:40] if image_url else "?",
-                            )
-                            try:
-                                from gateway.platforms.base import SendResult
-                                return SendResult(success=True)
-                            except (ImportError, AttributeError):
-                                return None
-                except Exception:
-                    _logger.debug(
-                        "feishu_adapter_send_image: interception failed, "
-                        "falling back to standalone send",
-                        exc_info=True,
-                    )
-
-        # Fallback: original send_image
-        return await orig_send_image(
-            self_feishu, chat_id, image_url,
-            caption=caption, reply_to=reply_to, metadata=metadata, **kwargs
-        )
-
-    return _intercepted_send_image
 
 
 # ── Namespace-collision-safe module resolver ────────────────────────
@@ -2768,13 +2572,15 @@ def apply_patches() -> None:
             FeishuAdapter.delete_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter.delete_reaction)
         except AttributeError:
             _logger.debug("hermes-lark-streaming: FeishuAdapter.delete_reaction not found, reaction interception skipped")
-        # NOTE(v0.15.4): send_image_file / send_image interception REMOVED.
-        # The interception was fundamentally broken — it injected file:// URLs
+        # NOTE(v0.15.4): send_image_file / send_image interceptors DELETED (2026-06-09).
+        # The v0.15.3 interception was fundamentally broken — it injected file:// URLs
         # into session.text.on_partial() which were then stripped by
         # _strip_invalid_image_keys(), and suppressed the original standalone
         # send, causing images to disappear entirely.
         # Images are now sent as standalone messages (pre-v0.15.3 behavior).
-        # See: issue-v0.15.3-image-card-wrapping
+        # The three zombie functions (_try_add_image_to_session,
+        # _wrap_feishu_adapter_send_image_file, _wrap_feishu_adapter_send_image)
+        # have been fully removed from monkey_patch.py.
 
         # ── Clarify interactive card patches ──
         # Patch send_clarify to render interactive CardKit cards instead of
