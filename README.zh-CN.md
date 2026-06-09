@@ -148,20 +148,11 @@ display:
 
 ---
 
-## 开发者指南
+## 开发者指南与更新日志
 
 > 📖 **[SKILL.md](docs/SKILL.md)** — LLM 快速上手指南。项目架构、关键设计决策、常见陷阱，高效代码修改指南。
 
----
-
-## 更新日志
-
-### v1.0.0
-
-- **代码重构**：拆分大文件为聚焦模块（monkey_patch → 4文件, cardkit → 3+门面, controller → session+split）
-- **文档整理**：创建 `docs/` 文件夹，精简 CHANGELOG & SKILL.md，新增 ISSUES_TEMPLATE.md
-
-> 完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
+完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
 

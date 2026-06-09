@@ -676,7 +676,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             # 限制长度避免过长
             if len(text) > 4000:
                 text = text[:4000] + "..."
-            from .cardkit_md import optimize_markdown_style
+            from .cardkit.md import optimize_markdown_style
             content = optimize_markdown_style(text) or text
             reply_id = session.anchor_id or session.message_id
             await self._client.reply_text(reply_id, content)

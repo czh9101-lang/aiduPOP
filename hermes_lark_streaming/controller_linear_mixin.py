@@ -25,8 +25,8 @@ from .cardkit import (
     build_streaming_card_v2,
 )
 
-from .cardkit_i18n import _T, _i18n
-from .cardkit_md import (
+from .cardkit.i18n import _T, _i18n
+from .cardkit.md import (
     _downgrade_tables,
     optimize_markdown_style,
 )
@@ -156,6 +156,7 @@ class LinearControllerMixin:
                     show_streaming_element=False,
                     streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                     print_strategy=self._cfg.print_strategy,
+                    header_enabled=self._cfg.header_enabled,
                 )
                 card_id = await self._client.cardkit_create(card)
                 card_msg_id = await self._client.reply_card_by_id(
@@ -406,28 +407,14 @@ class LinearControllerMixin:
                     })
                     session._loading_hint_removed = True
                     session.element_count -= 1  # 占位提示被删除
-                if (
-                    seg.type == "tool"
-                    and i + 1 < len(segments)
-                    and segments[i + 1].type == "tool"
-                    and segments[i + 1].tool_offset == seg.tool_end_offset
-                    and not session.split_disabled
-                ) or (
-                    seg.type == "answer"
-                    and i + 1 < len(segments)
-                    and segments[i + 1].type == "answer"
-                    and not session.split_disabled
-                ):
-                    split_ok = await self._do_linear_split(
-                        session, i + 1, actions, new_el_ids, new_el_estimates, updated_tool_segs,
-                    )
-                    if not split_ok:
-                        return
-                    actions = []
-                    new_el_ids = set()
-                    new_el_estimates = {}
-                    updated_tool_segs = []
-                    new_el_total = 0
+                # ── Trigger B removed (2026-06-09) ──
+                # Previously, adjacent same-type segments (answer→answer, tool→tool)
+                # triggered an unconditional split regardless of element count,
+                # causing "秒拆" (premature split). Card 2.0 has no documented
+                # element limit, so splitting should ONLY be triggered by actual
+                # element count exceeding the threshold (Trigger A above).
+                # The tool→tool adjacent split was also redundant because
+                # tool internal splits are handled by _find_tool_split_offset().
             elif seg.type == "reasoning" and seg.elapsed_ms > 0 and not seg.reasoning_finalized:
                 _logger.info(
                     "linear reasoning finalize: msg=%s el=%s elapsed=%.0fms seq=%d",
@@ -872,6 +859,7 @@ class LinearControllerMixin:
             panel_expanded=self._cfg.panel_expanded,
             partial=True,
             bg_review_messages=linear_state.bg_review_messages if linear_state else None,
+            header_enabled=self._cfg.header_enabled,
         )
 
         # ── Step 1: 封旧卡（先封！避免并发 sequence conflict）──
@@ -921,6 +909,7 @@ class LinearControllerMixin:
                             panel_expanded=False,
                             partial=True,
                             bg_review_messages=linear_state.bg_review_messages if linear_state else None,
+                            header_enabled=self._cfg.header_enabled,
                         )
                         session.sequence += 1
                         await self._client.cardkit_update(old_card_id, minimal_seal, sequence=session.sequence)
@@ -950,6 +939,7 @@ class LinearControllerMixin:
                 show_streaming_element=False,
                 streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                 print_strategy=self._cfg.print_strategy,
+                header_enabled=self._cfg.header_enabled,
             )
             new_card_id = await self._client.cardkit_create(card)
             new_msg_id = await self._client.reply_card_by_id(session.anchor_id or session.message_id, new_card_id)
@@ -1126,6 +1116,7 @@ class LinearControllerMixin:
             footer_show_label=self._cfg.footer_show_label,
             panel_expanded=self._cfg.panel_expanded,
             bg_review_messages=linear_state.bg_review_messages if linear_state else None,
+            header_enabled=self._cfg.header_enabled,
         )
 
         # ── Try preservative seal first (no element explosion) ──
@@ -1219,6 +1210,7 @@ class LinearControllerMixin:
                         footer_show_label=self._cfg.footer_show_label,
                         panel_expanded=self._cfg.panel_expanded,
                         bg_review_messages=linear_state.bg_review_messages if linear_state else None,
+                        header_enabled=self._cfg.header_enabled,
                     )
                     continue  # 立即用简化卡片重试，不等待
 

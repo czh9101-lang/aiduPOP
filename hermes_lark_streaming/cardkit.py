@@ -1,5 +1,7 @@
-"""CardKit v2.0 卡片构建器 — facade module, re-exports from sub-modules."""
+"""Backward-compatibility shim — re-exports from cardkit sub-package.
 
-from .cardkit_elements import *  # noqa: F401,F403
-from .cardkit_cards import *  # noqa: F401,F403
-from .cardkit_special import *  # noqa: F401,F403
+.. deprecated:: 1.0.0
+   Use ``hermes_lark_streaming.cardkit`` (the sub-package) instead.
+"""
+
+from .cardkit import *  # noqa: F401,F403

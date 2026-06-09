@@ -83,7 +83,7 @@ class Config:
     def flush_interval_ms(self) -> float:
         """流式卡片刷新间隔（毫秒），用于诊断日志."""
         sec = self._streaming_sec()
-        ms = float(sec.get("flush_interval_ms", 500))
+        ms = float(sec.get("flush_interval_ms", 100))
         return max(100.0, min(2000.0, ms))
 
     @property
@@ -170,6 +170,15 @@ class Config:
         sec = self._streaming_sec()
         footer = sec.get("footer", {})
         return bool(footer.get("show_label", False))
+
+    @property
+    def header_enabled(self) -> bool:
+        """流式卡片和完成态卡片是否显示 header."""
+        sec = self._streaming_sec()
+        header = sec.get("header", {})
+        if not isinstance(header, dict):
+            return False
+        return bool(header.get("enabled", False))
 
     @property
     def gateway_cards(self) -> bool:

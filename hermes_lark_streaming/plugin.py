@@ -56,7 +56,7 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "panel_expanded": False,
     "streaming_panel_expanded": False,
     "print_strategy": "delay",
-    "flush_interval_ms": 500,
+    "flush_interval_ms": 100,
     "card_ttl_sec": 600,
     "inject_time": False,
     "footer": {
@@ -234,7 +234,7 @@ def register(ctx: "PluginContext") -> None:
 
     _logger.info("hermes-lark-streaming v%s: applying runtime patches...", __version__)
     try:
-        from .monkey_patch import apply_patches
+        from .patching import apply_patches
 
         apply_patches()
         _logger.info("hermes-lark-streaming v%s: patches applied (check logs for per-module status)", __version__)

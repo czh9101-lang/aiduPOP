@@ -148,20 +148,11 @@ display:
 
 ---
 
-## Developer Guide
+## Developer Guide & Changelog
 
-> 📖 **[SKILL.md](docs/SKILL.md)** — Quick-start knowledge card for LLMs. Architecture, key design decisions, common pitfalls, and efficient code change guide.
+> 📖 **[SKILL.md](docs/SKILL.md)** — LLM quick-start guide. Architecture, key design decisions, common pitfalls, efficient code modification guide.
 
----
-
-## Changelog
-
-### v1.0.0
-
-- **Code refactoring**: Split large files into focused modules (monkey_patch → 4 files, cardkit → 3+facade, controller → session+split)
-- **Documentation restructure**: Created `docs/` folder, simplified CHANGELOG - **Split card seal order fix**: Seal old card before creating new card; fixed `_preservative_seal()` sequence conflict handling with retry logic. SKILL.md, added ISSUES_TEMPLATE.md
-
-> See [CHANGELOG.md](docs/CHANGELOG.md) for full version history.
+完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
 

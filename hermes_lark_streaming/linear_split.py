@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .cardkit_md import (
+from .cardkit.md import (
     _downgrade_tables,
     _split_long_text,
     optimize_markdown_style,
@@ -15,8 +15,8 @@ from .linear import Segment
 # 匹配 markdown 图片语法: ![alt](img_xxx) — 与 cardkit._IMG_MD_PATTERN 对齐
 _IMG_MD_PATTERN = re.compile(r"!\[([^\]]*)\]\((img_[^)\s]+)\)")
 
-_ELEMENT_THRESHOLD = 150  # 拆卡阈值（飞书硬上限 200 总元素含嵌套，预留 50 给 footer + 图片 + 波动）
-_FOOTER_RESERVE = 2  # footer 元素预留（hr + markdown）
+_ELEMENT_THRESHOLD = 185  # 拆卡阈值（飞书卡片 2.0 硬上限 200 元素+组件，预留 15 给 footer + 图片 + 封卡波动）
+_FOOTER_RESERVE = 15  # footer 元素预留（hr + markdown + 图片 + 封卡降级新增元素等）
 
 
 def _count_images_in_text(text: str) -> int:

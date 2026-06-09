@@ -48,7 +48,7 @@ Background: _run_background_task ── [Hook 1/2]
 | `controller.py` | ~720 | 主控制器(单例) | 管理生命周期，导入 CardSession |
 | `session.py` | ~110 | CardSession 数据类 | 37 字段 `__slots__`，独立于 controller |
 | `controller_mixin.py` | 386 | 异步 API 编排 | 状态机 + CardKit→IM PATCH 降级链 |
-| `controller_linear_mixin.py` | ~1260 | 线性模式编排 | 拆卡(阈值150)、渐进降级封卡、segment 管理 |
+| `controller_linear_mixin.py` | ~1260 | 线性模式编排 | 拆卡(阈值185)、渐进降级封卡、segment 管理 |
 | `linear_split.py` | ~170 | 拆分/估算逻辑 | 独立函数，预估元素数 + 查找拆分偏移 |
 | `cardkit.py` | ~5 | 重导出门面 | `from .cardkit_elements/cards/special import *` |
 | `cardkit_elements.py` | ~650 | 原始元素构建器 | streaming/reasoning/tool/error 面板 + footer |
@@ -107,7 +107,7 @@ CardKit v2 Streaming → CardKit v2 Create+Patch → IM Create+Patch → Hermes 
 
 ## 7. 线性模式
 
-单卡按事件顺序渲染: `[Reasoning] → [Tool] → [Answer] → ...`。Segment 扁平排列，超 150 元素自动拆卡（飞书上限 200），Tool 按 step 拆分，Answer 按文本块拆分。
+单卡按事件顺序渲染: `[Reasoning] → [Tool] → [Answer] → ...`。Segment 扁平排列，仅按元素数量超阈值拆卡（Trigger A，阈值 185/200），Tool 按 step 拆分，Answer 按文本块拆分。相邻同类型段不再强制拆卡（Trigger B 已移除，修复"秒拆"bug）。
 
 ---
 
@@ -170,7 +170,7 @@ streaming:
 worker 线程必须用 `call_soon_threadsafe()`，`call_soon()` 不唤醒事件循环→flush 永不执行。
 
 ### 10.7 元素估算必须对齐实际渲染
-飞书 200 元素/卡片（含嵌套），阈值 150。估算对齐封卡分块数+图片计数，否则拆卡判断形同虚设。
+飞书卡片 2.0 硬上限 200 元素+组件（API 错误码 300307/300305），拆卡阈值 185（预留 15 给 footer+图片+封卡波动）。估算对齐封卡分块数+图片计数，否则拆卡判断形同虚设。
 
 ### 10.8 幂等守卫 = 同步状态转移 + 错误码容错
 COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态。
@@ -266,4 +266,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-03-05 | Version: 1.0.0*
+*Last updated: 2026-06-09 | Version: 1.0.0*

@@ -20,7 +20,7 @@ from .cardkit import (
     build_streaming_card,
     build_streaming_card_v2,
 )
-from .cardkit_md import (
+from .cardkit.md import (
     _downgrade_tables,
     optimize_markdown_style,
 )
@@ -85,6 +85,7 @@ class ControllerMixin:
                     show_tool_use=False, show_reasoning=self._cfg.show_reasoning,
                     streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                     print_strategy=self._cfg.print_strategy,
+                    header_enabled=self._cfg.header_enabled,
                 )
                 card_id = await self._client.cardkit_create(card)
                 card_msg_id = await self._client.reply_card_by_id(
@@ -353,6 +354,7 @@ class ControllerMixin:
             footer_fields=self._cfg.footer_fields,
             footer_show_label=self._cfg.footer_show_label,
             panel_expanded=self._cfg.panel_expanded,
+            header_enabled=self._cfg.header_enabled,
         )
 
         for attempt in range(3):
