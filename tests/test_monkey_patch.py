@@ -522,15 +522,17 @@ class TestImageInterception:
     images through as standalone messages instead of suppressing them.
     """
 
-    def test_send_image_file_wrapper_exists(self) -> None:
-        """_wrap_feishu_adapter_send_image_file should still be importable (kept for reference)."""
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image_file
-        assert callable(_wrap_feishu_adapter_send_image_file)
+    def test_send_image_file_wrapper_deleted(self) -> None:
+        """_wrap_feishu_adapter_send_image_file was deleted (2026-06-09 zombie cleanup)."""
+        import pytest
+        with pytest.raises(ImportError):
+            from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image_file
 
-    def test_send_image_wrapper_exists(self) -> None:
-        """_wrap_feishu_adapter_send_image should still be importable (kept for reference)."""
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image
-        assert callable(_wrap_feishu_adapter_send_image)
+    def test_send_image_wrapper_deleted(self) -> None:
+        """_wrap_feishu_adapter_send_image was deleted (2026-06-09 zombie cleanup)."""
+        import pytest
+        with pytest.raises(ImportError):
+            from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_image
 
     def test_send_image_file_not_monkey_patched(self) -> None:
         """v0.15.4: send_image_file should NOT be monkey-patched anymore.
