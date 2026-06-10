@@ -26,14 +26,14 @@ from hermes_lark_streaming.cardkit import (
     build_streaming_card,
     build_streaming_card_v2,
 )
-from hermes_lark_streaming.cardkit_md import (
+from hermes_lark_streaming.cardkit.md import (
     _downgrade_tables,
     _find_tables_outside_code_blocks,
     _split_long_text,
     _strip_invalid_image_keys,
     optimize_markdown_style,
 )
-from hermes_lark_streaming.linear import Segment
+from hermes_lark_streaming.state.linear import Segment
 
 # --- Markdown 优化 ---
 
@@ -278,6 +278,63 @@ class TestBuildFooterElements:
         )
         assert len(result) >= 2
         assert "10" in result[1]["content"]
+
+    def test_cost_estimated_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"estimated_cost_usd": 0.023, "cost_status": "estimated"},
+            fields=[["cost"]],
+        )
+        assert len(result) >= 2
+        assert "$" in result[1]["content"]
+        assert "est." in result[1]["content"]
+
+    def test_cost_actual_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"estimated_cost_usd": 1.50, "cost_status": "actual"},
+            fields=[["cost"]],
+        )
+        assert len(result) >= 2
+        assert "$" in result[1]["content"]
+        assert "actual" in result[1]["content"]
+
+    def test_cost_included_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"cost_status": "included"},
+            fields=[["cost"]],
+        )
+        assert len(result) >= 2
+        content = result[1]["content"]
+        assert "Free" in content or "免费" in content
+
+    def test_cost_unknown_not_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"cost_status": "unknown"},
+            fields=[["cost"]],
+        )
+        assert result == []
+
+    def test_cost_zero_not_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"estimated_cost_usd": 0, "cost_status": "estimated"},
+            fields=[["cost"]],
+        )
+        assert result == []
+
+    def test_tokens_with_reasoning_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"input_tokens": 2100, "output_tokens": 850, "reasoning_tokens": 3200},
+            fields=[["tokens"]],
+        )
+        assert len(result) >= 2
+        assert "💭" in result[1]["content"]
+
+    def test_tokens_without_reasoning_no_thinking_icon(self) -> None:
+        result = _build_footer_elements(
+            {"input_tokens": 2100, "output_tokens": 850},
+            fields=[["tokens"]],
+        )
+        assert len(result) >= 2
+        assert "💭" not in result[1]["content"]
 
 
 # --- 错误面板 ---
@@ -1045,7 +1102,7 @@ class TestPartialStatusIndicator:
 
     def test_partial_indicator_in_complete_card(self) -> None:
         """partial=True 时卡片底部出现继续提示."""
-        from hermes_lark_streaming.linear import Segment
+        from hermes_lark_streaming.state.linear import Segment
         seg = Segment("answer", "answer_0")
         seg.text = "部分回答内容"
         card = build_linear_complete_card(
@@ -1060,7 +1117,7 @@ class TestPartialStatusIndicator:
 
     def test_no_partial_indicator_by_default(self) -> None:
         """partial=False (默认) 时无继续提示."""
-        from hermes_lark_streaming.linear import Segment
+        from hermes_lark_streaming.state.linear import Segment
         seg = Segment("answer", "answer_0")
         seg.text = "回答内容"
         card = build_linear_complete_card(
@@ -1073,7 +1130,7 @@ class TestPartialStatusIndicator:
 
     def test_partial_indicator_in_compact_seal_card(self) -> None:
         """compact seal 卡片也支持 partial 提示."""
-        from hermes_lark_streaming.linear import Segment
+        from hermes_lark_streaming.state.linear import Segment
         seg = Segment("answer", "answer_0")
         seg.text = "部分回答"
         card = build_linear_compact_seal_card(
@@ -1105,7 +1162,7 @@ class TestBackgroundReviewPanel:
 
     def test_background_review_in_complete_card(self) -> None:
         """完成态卡片包含后台审查面板."""
-        from hermes_lark_streaming.linear import Segment
+        from hermes_lark_streaming.state.linear import Segment
         seg = Segment("answer", "answer_0")
         seg.text = "回答"
         card = build_linear_complete_card(

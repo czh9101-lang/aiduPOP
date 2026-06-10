@@ -1,4 +1,4 @@
-"""Tests for gateway message card interception (v0.14.0 Phase 1-4)."""
+"""Tests for gateway message card interception (v0.14.0 Phase 1-3)."""
 
 from __future__ import annotations
 
@@ -137,115 +137,47 @@ class TestBuildGatewayCardStatusIndicator:
         assert elements[0]["text"]["content"] == "⏳ Processing"
 
 
-class TestBuildGatewayCardMedia:
-    """Test Phase 4: media elements in build_gateway_card()."""
-
-    def test_image_media_element(self):
-        """Image media parts are rendered as Card 2.0 img elements in the card."""
-        card = build_gateway_card(
-            "Here is an image",
-            media_parts=[{"type": "image", "key": "img_v3_test123"}],
-        )
-        elements = card["body"]["elements"]
-        # Should have: img + markdown
-        assert len(elements) >= 2
-        # Find the img element
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 1
-        assert img_elements[0]["img_key"] == "img_v3_test123"
-        # Card 2.0 fields
-        assert img_elements[0]["scale_type"] == "fit_horizontal"
-        assert img_elements[0]["preview"] is True
-        assert img_elements[0]["corner_radius"] == "8px"
-        assert "alt" in img_elements[0]
-        # Legacy fields should NOT be present
-        assert "mode" not in img_elements[0]
-        assert "compact_width" not in img_elements[0]
-
-    def test_file_media_element(self):
-        """File media parts are rendered as text links in the card (wrapped in div.text)."""
-        card = build_gateway_card(
-            "Here is a file",
-            media_parts=[{"type": "file", "key": "file_v3_test456", "name": "report.pdf"}],
-        )
-        elements = card["body"]["elements"]
-        # Find the file element (wrapped in div.text)
-        file_elements = [e for e in elements if e.get("tag") == "div" and "📎" in e.get("text", {}).get("content", "")]
-        assert len(file_elements) == 1
-        assert "report.pdf" in file_elements[0]["text"]["content"]
-
-    def test_multiple_media_parts(self):
-        """Multiple media parts are all included in the card."""
-        card = build_gateway_card(
-            "Multiple files",
-            media_parts=[
-                {"type": "image", "key": "img_v3_1"},
-                {"type": "image", "key": "img_v3_2"},
-                {"type": "file", "key": "file_v3_1", "name": "doc.pdf"},
-            ],
-        )
-        elements = card["body"]["elements"]
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 2
-        file_elements = [e for e in elements if e.get("tag") == "div" and "📎" in e.get("text", {}).get("content", "")]
-        assert len(file_elements) == 1
-
-    def test_no_media_parts(self):
-        """When media_parts is None, no media elements are added."""
-        card = build_gateway_card("Just text", media_parts=None)
-        elements = card["body"]["elements"]
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 0
-
-    def test_empty_media_parts_list(self):
-        """When media_parts is an empty list, no media elements are added."""
-        card = build_gateway_card("Just text", media_parts=[])
-        elements = card["body"]["elements"]
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 0
-
-
 class TestClassifyGatewayMessage:
     """Test the _classify_gateway_message() function."""
 
     def test_import(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert callable(_classify_gateway_message)
 
     def test_auth_pairing_code(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert _classify_gateway_message("Here's your pairing code: ABC123") == "auth"
 
     def test_auth_dont_recognize(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert _classify_gateway_message("I don't recognize you yet!") == "auth"
 
     def test_error_warning(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert _classify_gateway_message("⚠️ Provider authentication failed") == "error"
 
     def test_error_failed(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert _classify_gateway_message("Something failed after retries") == "error"
 
     def test_session_reset(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert _classify_gateway_message("Session automatically reset") == "session"
 
     def test_slash_help(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert _classify_gateway_message("/help shows available commands") == "slash"
 
     def test_slash_status(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert _classify_gateway_message("/status output here") == "slash"
 
     def test_system_default(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert _classify_gateway_message("Just a regular message") == "system"
 
     def test_non_string_returns_system(self):
-        from hermes_lark_streaming.monkey_patch import _classify_gateway_message
+        from hermes_lark_streaming.patching import _classify_gateway_message
         assert _classify_gateway_message(12345) == "system"
 
 
@@ -268,7 +200,7 @@ class TestGatewayCardRegistry:
     """Test Phase 2: gateway card registry for edit_message support."""
 
     def test_register_and_lookup(self):
-        from hermes_lark_streaming.monkey_patch import _register_gateway_card, _gateway_cards, _gateway_cards_lock
+        from hermes_lark_streaming.patching import _register_gateway_card, _gateway_cards, _gateway_cards_lock
         # Register a card
         _register_gateway_card("msg_test_123", chat_id="chat_abc", card_id="card_xyz", category="error")
         # Look it up
@@ -279,18 +211,18 @@ class TestGatewayCardRegistry:
         assert info["card_id"] == "card_xyz"
         assert info["category"] == "error"
         # Cleanup
-        from hermes_lark_streaming.monkey_patch import _unregister_gateway_card
+        from hermes_lark_streaming.patching import _unregister_gateway_card
         _unregister_gateway_card("msg_test_123")
 
     def test_unregister_removes_entry(self):
-        from hermes_lark_streaming.monkey_patch import _register_gateway_card, _unregister_gateway_card, _gateway_cards, _gateway_cards_lock
+        from hermes_lark_streaming.patching import _register_gateway_card, _unregister_gateway_card, _gateway_cards, _gateway_cards_lock
         _register_gateway_card("msg_test_456", chat_id="chat_def", card_id=None, category="system")
         _unregister_gateway_card("msg_test_456")
         with _gateway_cards_lock:
             assert _gateway_cards.get("msg_test_456") is None
 
     def test_register_empty_id_is_noop(self):
-        from hermes_lark_streaming.monkey_patch import _register_gateway_card, _gateway_cards, _gateway_cards_lock
+        from hermes_lark_streaming.patching import _register_gateway_card, _gateway_cards, _gateway_cards_lock
         _register_gateway_card("", chat_id="chat_ghi", card_id=None, category="system")
         with _gateway_cards_lock:
             assert "" not in _gateway_cards
@@ -300,18 +232,18 @@ class TestReactionStatusMap:
     """Test Phase 3: reaction emoji to status label mapping."""
 
     def test_reaction_map_exists(self):
-        from hermes_lark_streaming.monkey_patch import _REACTION_STATUS_MAP
+        from hermes_lark_streaming.patching import _REACTION_STATUS_MAP
         assert isinstance(_REACTION_STATUS_MAP, dict)
         assert len(_REACTION_STATUS_MAP) > 0
 
     def test_common_reactions_mapped(self):
-        from hermes_lark_streaming.monkey_patch import _REACTION_STATUS_MAP
+        from hermes_lark_streaming.patching import _REACTION_STATUS_MAP
         assert "👀" in _REACTION_STATUS_MAP
         assert "👍" in _REACTION_STATUS_MAP
         assert "🤔" in _REACTION_STATUS_MAP
 
     def test_reaction_values_are_strings(self):
-        from hermes_lark_streaming.monkey_patch import _REACTION_STATUS_MAP
+        from hermes_lark_streaming.patching import _REACTION_STATUS_MAP
         for emoji, label in _REACTION_STATUS_MAP.items():
             assert isinstance(emoji, str)
             assert isinstance(label, str)

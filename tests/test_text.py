@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hermes_lark_streaming.text import (
+from hermes_lark_streaming.state.text import (
     TextState,
     extract_thinking_content,
     split_reasoning_text,

@@ -24,13 +24,22 @@ dev = [
     "ruff>=0.1.0",
 ]
 
+# The plugin code lives at the repo root (alongside plugin.yaml).
+# When loaded as a Hermes directory plugin, the plugin loader imports
+# __init__.py directly from this directory.
+# For pip installs, the repo root is mapped as "hermes_lark_streaming".
+[tool.setuptools.package-dir]
+hermes_lark_streaming = "."
+
 [tool.setuptools.packages.find]
-include = ["hermes_lark_streaming*"]
+where = ["."]
+include = ["controller*", "cardkit*", "patching*", "state*"]
 
 [tool.setuptools.package-data]
-hermes_lark_streaming = ["../plugin.yaml"]
+hermes_lark_streaming = ["plugin.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+# NOTE: no pythonpath needed — conftest.py registers the repo root
+# as the hermes_lark_streaming package via importlib.
 asyncio_mode = "auto"

@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
-from .cardkit import (
+from ..cardkit import (
     REASONING_TEXT_ELEMENT_ID,
     STREAMING_ELEMENT_ID,
     TOOL_PANEL_ELEMENT_ID,
@@ -20,11 +20,11 @@ from .cardkit import (
     build_streaming_card,
     build_streaming_card_v2,
 )
-from .cardkit_md import (
+from ..cardkit.md import (
     _downgrade_tables,
     optimize_markdown_style,
 )
-from .feishu import (
+from ..feishu import (
     CARDKIT_CONTENT_FAILED,
     CARDKIT_ELEMENT_LIMIT,
     CARDKIT_ELEMENT_LIMIT_DIRECT,
@@ -34,13 +34,12 @@ from .feishu import (
     FeishuAPIError,
     is_element_limit_error,
 )
-from .flush import CARDKIT_MS, PATCH_MS
-from .image import ImageResolver
+from ..flush import CARDKIT_MS, PATCH_MS
 
 if TYPE_CHECKING:
-    from .config import Config
-    from .controller import CardSession
-    from .feishu import FeishuClient
+    from ..config import Config
+    from ..state.session import CardSession
+    from ..feishu import FeishuClient
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
@@ -53,6 +52,18 @@ FAILED = "failed"
 ABORTED = "aborted"
 
 _TERMINAL = {COMPLETING, COMPLETED, FAILED, ABORTED}
+
+__all__ = [
+    "ControllerMixin",
+    "IDLE",
+    "CREATING",
+    "STREAMING",
+    "COMPLETING",
+    "COMPLETED",
+    "FAILED",
+    "ABORTED",
+    "_TERMINAL",
+]
 
 
 class ControllerMixin:
@@ -73,11 +84,6 @@ class ControllerMixin:
         try:
             await self._ensure_init()
             assert self._client is not None
-            if session.image_resolver is None and self._client:
-                session.image_resolver = ImageResolver(
-                    client=self._client,
-                    on_image_resolved=lambda: self._schedule_card_update(session),
-                )
 
             try:
                 reply_to_message_id = session.anchor_id or session.message_id
@@ -85,6 +91,7 @@ class ControllerMixin:
                     show_tool_use=False, show_reasoning=self._cfg.show_reasoning,
                     streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                     print_strategy=self._cfg.print_strategy,
+                    header_enabled=self._cfg.header_enabled,
                 )
                 card_id = await self._client.cardkit_create(card)
                 card_msg_id = await self._client.reply_card_by_id(
@@ -138,9 +145,6 @@ class ControllerMixin:
                 len(display),
             )
             return
-
-        if session.image_resolver:
-            display = session.image_resolver.resolve_images(display)
 
         _logger.info(
             "update_card: msg=%s seq=%d len=%d cardkit=%s",
@@ -325,12 +329,6 @@ class ControllerMixin:
             session.use_cardkit,
             session.sequence,
         )
-        if session.image_resolver:
-            try:
-                display = await session.image_resolver.resolve_await(display)
-            except Exception:
-                _logger.debug("image resolve failed", exc_info=True)
-
         reasoning_elapsed_ms = 0.0
         if session.reasoning_start:
             reasoning_elapsed_ms = (time.time() - session.reasoning_start) * 1000
@@ -353,6 +351,7 @@ class ControllerMixin:
             footer_fields=self._cfg.footer_fields,
             footer_show_label=self._cfg.footer_show_label,
             panel_expanded=self._cfg.panel_expanded,
+            header_enabled=self._cfg.header_enabled,
         )
 
         for attempt in range(3):
@@ -438,7 +437,6 @@ class ControllerMixin:
         content: str,
         *,
         category: str = "",
-        media_parts: list[dict] | None = None,
     ) -> tuple[str | None, str | None]:
         """Send a gateway-internal message as a card.
 
@@ -447,9 +445,6 @@ class ControllerMixin:
 
         ``card_id`` is the CardKit container ID (for streaming updates),
         ``card_msg_id`` is the Feishu message ID (for edit_message routing).
-
-        ``media_parts`` is an optional list of media dicts extracted from
-        Hermes's MEDIA tags (Phase 4: media message card wrapping).
         """
         try:
             await self._ensure_init()
@@ -457,17 +452,15 @@ class ControllerMixin:
             card = build_gateway_card(
                 content,
                 category=category,
-                media_parts=media_parts,
             )
             # Use send_card_to_chat which returns card_msg_id
             card_msg_id = await self._client.send_card_to_chat(chat_id, card)
             _logger.info(
                 "gateway card delivered: chat=%s category=%s card_msg_id=%s "
-                "has_media=%s content_len=%d",
+                "content_len=%d",
                 chat_id[:12],
                 category or "system",
                 card_msg_id[:12] if card_msg_id else None,
-                bool(media_parts),
                 len(content),
             )
             return card_msg_id, None  # No card_id for static gateway cards

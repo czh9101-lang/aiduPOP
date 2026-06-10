@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from hermes_lark_streaming.feishu import MSG_NOT_FOUND
-from hermes_lark_streaming import unavailable_guard
-from hermes_lark_streaming.unavailable_guard import (
+from hermes_lark_streaming.feishu import guard as _guard_module
+from hermes_lark_streaming.feishu import (
     UnavailableGuard,
     extract_api_code,
     is_terminal_api_code,
@@ -25,9 +25,9 @@ from hermes_lark_streaming.unavailable_guard import (
 @pytest.fixture(autouse=True)
 def _clear_cache():
     """Ensure the global unavailable cache is empty before and after each test."""
-    unavailable_guard._unavailable_cache.clear()
+    _guard_module._unavailable_cache.clear()
     yield
-    unavailable_guard._unavailable_cache.clear()
+    _guard_module._unavailable_cache.clear()
 
 
 # ===========================================================================
@@ -66,21 +66,21 @@ class TestIsUnavailable:
 
     def test_cache_ttl_expiry(self) -> None:
         """Entries older than _UNENHANCED_CACHE_TTL_SEC should be pruned."""
-        ttl = unavailable_guard._UNENHANCED_CACHE_TTL_SEC
+        ttl = _guard_module._UNENHANCED_CACHE_TTL_SEC
 
         # Manually inject an expired entry
-        unavailable_guard._unavailable_cache["msg_old"] = {
+        _guard_module._unavailable_cache["msg_old"] = {
             "code": 231003,
             "operation": "",
             "at": time.time() - ttl - 1,  # 1 second past TTL
         }
 
         # Before pruning, the raw key exists
-        assert "msg_old" in unavailable_guard._unavailable_cache
+        assert "msg_old" in _guard_module._unavailable_cache
 
         # is_unavailable triggers _prune_cache, which removes expired entries
         assert is_unavailable("msg_old") is False
-        assert "msg_old" not in unavailable_guard._unavailable_cache
+        assert "msg_old" not in _guard_module._unavailable_cache
 
     def test_cache_ttl_not_yet_expired(self) -> None:
         """Entries within TTL should still be present after pruning."""
@@ -91,10 +91,10 @@ class TestIsUnavailable:
         assert is_unavailable("msg_fresh") is True
 
     def test_prune_removes_only_expired(self) -> None:
-        ttl = unavailable_guard._UNENHANCED_CACHE_TTL_SEC
+        ttl = _guard_module._UNENHANCED_CACHE_TTL_SEC
 
         # One expired, one fresh
-        unavailable_guard._unavailable_cache["msg_expired"] = {
+        _guard_module._unavailable_cache["msg_expired"] = {
             "code": 231003,
             "operation": "",
             "at": time.time() - ttl - 10,
@@ -104,8 +104,8 @@ class TestIsUnavailable:
         # Trigger prune via is_unavailable
         is_unavailable("msg_expired")
 
-        assert "msg_expired" not in unavailable_guard._unavailable_cache
-        assert "msg_fresh" in unavailable_guard._unavailable_cache
+        assert "msg_expired" not in _guard_module._unavailable_cache
+        assert "msg_fresh" in _guard_module._unavailable_cache
 
 
 # ===========================================================================

@@ -1,15 +1,15 @@
 <h1 align="center">hermes-lark-streaming</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
-  <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
+  <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-0.19.1-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
-<a href="https://applink.feishu.cn/client/message/link/open?token=AmoQJk5dwczIahKlW78ADLU%3D"><img src="https://img.shields.io/badge/官方唯一交流群-中国-red" alt="Official Group"></a>
+<a href="https://applink.feishu.cn/client/message/link/open?token=AmoQJk5dwczIahKlW78ADLU%3D"><img src="https://img.shields.io/badge/The_Only_Official_Group-China-red" alt="The Only Official Group"></a>
+<a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-Knowledge_Base-3370FF?logo=feishu&logoColor=white" alt="Knowledge Base"></a>
 </p>
 
 <p align="center">
@@ -26,7 +26,10 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 
 ## Effect Preview
 
-<img src="assets/img1.png" width="45%" /> <img src="assets/img2.png" width="25%" /> <img src="assets/img3.png" width="25%" />
+<img src="assets/img1.png" width="22%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img2.png" width="22%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img3.png" width="22%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img4.png" width="22%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
 
 ---
 
@@ -38,19 +41,23 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 - Hermes CLI with plugin system support (`hermes plugins` command available)
 
 ### Installation
+> The plugin automatically reads the `HERMES_HOME` environment variable to locate the installation path (`~/.hermes` by default). No extra steps are needed for non-default paths.
 
-> 插件会自动读取 Hermes 的 `HERMES_HOME` 环境变量定位安装路径（默认 `~/.hermes`），非默认路径下无需额外操作。
-
+**Gitee**
+> Choose either SSH or HTTPS:
 ```bash
+# Gitee (SSH)
 hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
+# Gitee (HTTPS)
+hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
 ```
-or
-
+**GitHub**
+> Choose either SSH or HTTPS:
 ```bash
-hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
-```
-```bash
+# GitHub (SSH)
 hermes plugins install git@github.com:Aowen-Nowor/hermes-lark-streaming.git
+# GitHub (HTTPS)
+hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
 ```
 
 Enter `Y` when prompted to enable the plugin, then restart the gateway:
@@ -80,84 +87,52 @@ hermes plugins uninstall hermes-lark-streaming
 hermes gateway restart
 ```
 
-> **Why not `python3 -m`?** Hermes runs in its own virtual environment. The system `python3` does not have the plugin's dependencies (e.g. `PyYAML`, `lark-oapi`), so `python3 -m hermes_lark_streaming` will likely fail. Use `HERMES_PYTHON` (Hermes venv's Python) instead. If Hermes is installed in a non-default path, adjust accordingly.
+> **Why not `python3 -m`?** Hermes runs in its own venv; the system `python3` lacks plugin dependencies. Use `HERMES_PYTHON` instead.
 
 ### Verify Installation
 
 ```bash
-# Check plugin status
 hermes plugins list
-
-# View gateway logs
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
-
-# Verify plugin config & credentials (uses Hermes's Python)
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
 $HERMES_PYTHON -m hermes_lark_streaming status
 $HERMES_PYTHON -m hermes_lark_streaming verify
 ```
 
-> **Troubleshooting**: If no card effect appears after installation, check: (1) `hermes plugins list` shows the plugin as enabled; (2) no backup directory exists under `~/.hermes/plugins/` (remove any `*.bak` directories); (3) Feishu credentials are configured (see [Feishu Credentials](#feishu-credentials)).
+> **Troubleshooting**: If no card effect appears, check: (1) `hermes plugins list` shows enabled; (2) no `*.bak` directories under `~/.hermes/plugins/`; (3) Feishu credentials are configured.
 
 ---
 
 ## Configuration
 
-All configuration items are located under the `streaming:` section in `~/.hermes/config.yaml`.
+All settings go under the `hermes_lark_streaming:` section in `~/.hermes/config.yaml`. The plugin auto-injects defaults on first load; run `cleanup` before uninstalling to remove them.
 
-> **Auto-injection**: When this plugin is first loaded, it automatically adds the `streaming:` section to your `config.yaml` top-level with the defaults below. On uninstall, run the `cleanup` command (see [Uninstallation](#uninstallation)) first to remove this section.
-
-> **Note**: Hermes also has a native `display.streaming: false` config which controls **CLI/TUI terminal** output. This is unrelated to this plugin's streaming cards.
-
-### Plugin Enable Configuration
-
-Enable this plugin in `~/.hermes/config.yaml`:
+> **Note**: Hermes's native `display.streaming: false` controls CLI/TUI output — unrelated to this plugin.
 
 ```yaml
-plugins:
-  enabled:
-    - hermes-lark-streaming
-  disabled: []
-```
-
-If the `plugins` section doesn't exist, add it manually. You can also enable via command after installation:
-
-```bash
-hermes plugins enable hermes-lark-streaming
-```
-
-To disable:
-
-```bash
-hermes plugins disable hermes-lark-streaming
-hermes gateway restart
-```
-
-### Available Configuration Options
-
-```yaml
-streaming:
-  enabled: true              # Enable streaming cards
-  linear: true               # Linear mode: single card in-place update with auto card splitting
-  panel_expanded: false      # Keep panels (tools, reasoning) expanded in completed cards
+hermes_lark_streaming:
+  enabled: true                    # Enable streaming cards
+  linear: true                     # Single-card in-place update with auto-splitting
+  panel_expanded: false            # Keep panels expanded in completed cards
   streaming_panel_expanded: false  # Keep panels expanded during streaming
-  print_strategy: delay      # Card streaming strategy: "fast" (instant) or "delay" (smoother typewriter, default)
-  flush_interval_ms: 500     # Streaming card refresh interval in ms (default: 500, range: 100-2000)
-  card_ttl_sec: 600         # Card alive detection timeout (seconds)
-  inject_time: false         # Time awareness mode: inject current time before user messages (see below)
+  print_strategy: delay            # "fast" (instant) or "delay" (smoother typewriter, default)
+  flush_interval_ms: 500           # Card refresh interval in ms (100–2000, default 500)
+  card_ttl_sec: 600               # Card alive detection timeout (seconds)
+  inject_time: false               # Time awareness mode (see below)
 
   footer:
-    show_label: false        # Show field labels (true/false)
+    show_label: false              # Show field labels
     fields:
-      - [status, elapsed, model, compression_exhausted]
+      - [status, elapsed, model, cost, compression_exhausted]
       # Available fields:
       #   status      — Reply status (Completed / Error / Stopped)
       #   elapsed     — AI response elapsed time
       #   model       — Model name used
+      #   cost        — Estimated cost with trust indicator ($0.023 est. / $0.023 actual / Free)
       #   compression_exhausted — Context window is full (⚠ Context Full)
       # Fields below are not shown by default — add them to the fields list to enable:
       #   cache       — Cache hit rate (cache_read/total_input hit%)
-      #   tokens      — Token usage (↑ input ↓ output)
+      #   tokens      — Token usage (↑ input ↓ output 💭 reasoning)
       #   context     — Context window usage (used/total percentage)
       #   api_calls   — Number of API calls in this session
       #   history_offset — Conversation history offset; larger = longer history, sudden decrease = context compression
@@ -166,31 +141,15 @@ streaming:
 
 ### Time Awareness Mode (`inject_time`)
 
-When `streaming.inject_time: true`, the plugin prepends the current time to each user message so the AI model can perceive the current time without calling the `date` tool.
-
-**Format**: `<time>HH:MM:SS</time> <original message>` (e.g., `<time>14:30:05</time> Hello`)
-
-**Why XML-style tags?**
-- LLMs universally understand XML tags as structured metadata — they won't mimic the format in their responses
-- Bracket-prefixed time (``[14:30:05 CST]``) can be ignored as noise by some models, or worse, mimicked in their output
-- Date is omitted because Hermes's system prompt already contains the current date
-- Timezone suffix is omitted because the system prompt establishes timezone context
-
-**Key characteristics**:
-- **Prefix cache safe**: The time prefix is written to the conversation database along with the original message, ensuring that the history loaded from the DB in the next turn matches what the API received. This preserves prefix cache consistency — **zero extra cache impact** in all scenarios (always-on, always-off, mid-session enable/disable).
-- **Token overhead**: ~6 tokens per user message; cumulative ~(N-1)×6 tokens for an N-turn conversation.
-- **Side effect**: Conversation viewer (e.g., Hermes web UI) will show the time prefix in user messages.
-- **Edge case handling**: In group chats where `persist_user_message` is already set by the gateway (observed_group_context), the time prefix is also added to `persist_user_message` to avoid losing it.
+When `inject_time: true`, the plugin prepends `<time>HH:MM:SS</time>` to each user message so the AI can perceive the current time without calling `date`. XML tags are used because LLMs understand them as metadata and won't mimic them in output. Prefix-cache safe (~6 tokens/message). See [SKILL.md](docs/SKILL.md) for full details.
 
 ### Feishu Credentials
-
-The plugin reads credentials in the following priority order:
 
 | Priority | Source | Example |
 |----------|--------|---------|
 | 1 | Environment Variables | `FEISHU_APP_ID`, `FEISHU_APP_SECRET` |
 | 2 | File | `~/.hermes/.env` |
-| 3 | Config File | `streaming.feishu.app_id` |
+| 3 | Config File | `hermes_lark_streaming.feishu.app_id` |
 
 ```bash
 # ~/.hermes/.env example
@@ -201,8 +160,6 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ### Reasoning Panel Display
 
-The reasoning panel visibility is controlled by `display.show_reasoning` or `display.platforms.feishu.show_reasoning`:
-
 ```yaml
 display:
   show_reasoning: true  # Show reasoning panel in Feishu cards
@@ -210,22 +167,19 @@ display:
 
 ---
 
-## Developer Guide
+## Developer Guide & Changelog
 
-> 📖 **[SKILL.md](SKILL.md)** — LLM 快速上手指南 / Quick-start knowledge card for LLMs. Read this document to immediately understand the project architecture, key design decisions, common pitfalls, and efficiently make code changes or extend features.
+> 📖 **[SKILL.md](docs/SKILL.md)** — LLM quick-start guide. Architecture, key design decisions, common pitfalls, efficient code modification guide.
 
----
+> For the full version history, see [CHANGELOG.md](docs/CHANGELOG.md)
 
-## Changelog
-
-### v0.19.1
-
-- **Context loading hint**: When the first card is created, a "Loading context..." placeholder (with `time_outlined` icon) is immediately inserted. When the first answer text arrives, the hint is automatically removed in the same `batch_update` call — zero extra API overhead. Split cards don't insert the hint. Seal operations also delete the hint as a fallback.
-- **Split card seal order fix**: Changed `_do_linear_split()` to seal the old card **before** creating the new card (was: create new card first, then seal old card). Also fixed `_preservative_seal()` sequence conflict handling: instead of returning `True` (treating it as idempotent success), it now retries up to 2 times before falling back to full rebuild.
-
-> See [CHANGELOG.md](CHANGELOG.md) for full version history.
+> ⚠️ **Important Notice:** The current version is a deeply refactored release (V1.0.0) and is incompatible with older versions (V0.19.1 and below). Please upgrade with caution!
+> If you still wish to upgrade, please follow the uninstallation process to remove the old version and freshly install the new one. Do NOT upgrade via the update command!
 
 ---
+
+## How to Submit Issues
+> Please refer to the template [ISSUES_TEMPLATE.md](docs/ISSUES_TEMPLATE.md)
 
 ## Acknowledgments
 
