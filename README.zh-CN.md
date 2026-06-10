@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -123,15 +123,16 @@ hermes_lark_streaming:
   footer:
     show_label: false              # 是否显示字段标签
     fields:
-      - [status, elapsed, model, compression_exhausted]
+      - [status, elapsed, model, cost, compression_exhausted]
       # 可用字段说明：
       #   status      — 回复状态（已完成 / 出错 / 已停止）
       #   elapsed     — AI 回复耗时
       #   model       — 使用的模型名称
+      #   cost        — 预估费用及可信度（$0.023 估算 / $0.023 实报 / 免费）
       #   compression_exhausted — 上下文已满（⚠ 上下文已满）
       # 以下字段默认不显示 — 在 fields 列表中添加即可启用：
       #   cache       — 缓存命中率（缓存命中/总输入 命中率%）
-      #   tokens      — Token 用量（↑ 输入 ↓ 输出）
+      #   tokens      — Token 用量（↑ 输入 ↓ 输出 💭 推理）
       #   context     — 上下文窗口用量（已用/总量 百分比）
       #   api_calls   — 本轮对话的 API 调用次数
       #   history_offset — 对话历史偏移量；值越大对话越长，值突然变小说明发生了上下文压缩

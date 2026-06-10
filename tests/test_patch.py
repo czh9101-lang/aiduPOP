@@ -224,6 +224,9 @@ class TestOnMessageCompleted:
                 compression_exhausted=True,
                 aborted=True,
                 error_message="timeout",
+                reasoning_tokens=100,
+                estimated_cost_usd=0.05,
+                cost_status="estimated",
             )
 
         assert result is True
@@ -239,6 +242,9 @@ class TestOnMessageCompleted:
             compression_exhausted=True,
             aborted=True,
             error_message="timeout",
+            reasoning_tokens=100,
+            estimated_cost_usd=0.05,
+            cost_status="estimated",
         )
 
     def test_returns_bool_of_result(self) -> None:

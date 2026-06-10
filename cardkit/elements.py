@@ -607,8 +607,11 @@ def _render_footer_field(
     if name == "tokens":
         input_t = data.get("input_tokens", 0) or 0
         output_t = data.get("output_tokens", 0) or 0
+        reasoning_t = data.get("reasoning_tokens", 0) or 0
         if input_t or output_t:
             v = f"↑ {_compact(input_t)} ↓ {_compact(output_t)}"
+            if reasoning_t:
+                v += f" 💭 {_compact(reasoning_t)}"
             return v, v
         return None, None
 
@@ -657,6 +660,26 @@ def _render_footer_field(
             if show_label:
                 return _T["cache"][0].format(v), _T["cache"][1].format(v)
             return v, v
+        return None, None
+
+    if name == "cost":
+        cost_usd = data.get("estimated_cost_usd", 0) or 0
+        cost_status = data.get("cost_status", "unknown")
+        if cost_status == "included":
+            return _T["cost_included"]
+        if cost_status in ("actual", "estimated") and cost_usd:
+            # Format: $0.023 for small values, $1.50 for larger
+            if cost_usd < 0.01:
+                val = f"${cost_usd:.4f}"
+            elif cost_usd < 1:
+                val = f"${cost_usd:.3f}"
+            else:
+                val = f"${cost_usd:.2f}"
+            key = "cost_actual" if cost_status == "actual" else "cost_estimated"
+            en_val, zh_val = _T[key]
+            if show_label:
+                return f"Cost {en_val.format(val.lstrip('$'))}", f"费用 {zh_val.format(val.lstrip('$'))}"
+            return en_val.format(val.lstrip('$')), zh_val.format(val.lstrip('$'))
         return None, None
 
     return None, None

@@ -1,3 +1,13 @@
+## v1.0.1 (2026-06-10)
+
+| # | 类型 | 问题/功能 | 原因 | 修复/说明 |
+|---|------|-----------|------|-----------|
+| 1 | Feature | **页脚新增 `cost` 字段** | 用户需要直观看到每次对话花了多少钱，以及这个数字的可信度 | 新增 `cost` 页脚字段，显示预估费用 + 可信度后缀：`$0.023 (est.)`（估算）、`$0.023 (actual)`（实报）、`Free`（免费）；费用未知时不显示。数据来源：`agent.session_estimated_cost_usd` + `agent.session_cost_status` |
+| 2 | Feature | **`tokens` 字段增强：显示推理 token** | 使用 DeepSeek/Claude thinking 等思考型模型时，推理 token 可能占大部分消耗，但现有 `tokens` 字段只显示输入/输出，推理消耗完全不可见 | 当 `reasoning_tokens > 0` 时，`tokens` 字段显示 `↑ 2.1K ↓ 850 💭 3.2K`；普通模型（推理 token 为 0）显示不变。数据来源：`agent.session_reasoning_tokens` |
+| 3 | Feature | **默认页脚字段更新** | 新增 `cost` 字段对用户有价值，应默认展示 | 默认页脚从 `[status, elapsed, model, compression_exhausted]` 变更为 `[status, elapsed, model, cost, compression_exhausted]` |
+
+---
+
 ## v1.0.0 (2026-06-10)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
