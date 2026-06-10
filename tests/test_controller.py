@@ -97,12 +97,10 @@ def test_prune_stale_sessions_ignores_none_key_and_prunes_valid_key() -> None:
     stale_session = SimpleNamespace(
         created_at=time.time() - ctrl._session_ttl - 1,
         flush=_DummyFlush(),
-        image_resolver=None,
     )
     valid_stale_session = SimpleNamespace(
         created_at=time.time() - ctrl._session_ttl - 1,
         flush=_DummyFlush(),
-        image_resolver=None,
     )
     ctrl._sessions[None] = stale_session  # type: ignore[index,assignment]
     ctrl._sessions["msg"] = valid_stale_session  # type: ignore[assignment]
@@ -1042,27 +1040,6 @@ class TestDoLinearComplete:
         assert session.state == FAILED
         ctrl._client.cardkit_close_streaming.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_image_resolve_per_segment(self) -> None:
-        """单个 segment resolve 失败不影响后续."""
-        from unittest.mock import MagicMock
-
-        ctrl = _setup_ctrl()
-        session = _make_session("msg_img", linear=True)
-        session.state = STREAMING
-        session.card_id = "card_img"
-        session.linear_state.on_answer_delta("![a](http://x.com/img.png)")
-        session.linear_state.on_reasoning_delta("mid")
-        session.linear_state.on_answer_delta("![b](http://y.com/img2.png)")
-
-        resolver = MagicMock()
-        resolver.resolve_await = AsyncMock(side_effect=[RuntimeError("timeout"), "ok"])
-        session.image_resolver = resolver
-        ctrl._sessions["msg_img"] = session
-
-        await ctrl._do_linear_complete(session)
-
-        assert resolver.resolve_await.call_count == 2
 
 
 # ── _linear_on_thinking 集成测试 ──

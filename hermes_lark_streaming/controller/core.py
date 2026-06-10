@@ -4,7 +4,6 @@
 - UnavailableGuard 消息不可用保护
 - 修复的 FlushController（wait_for_flush, card_message_ready）
 - TextState 回复边界检测 + reasoning 处理
-- ImageResolver 同步 strip + re-flush
 - 工具状态预回答更新
 """
 
@@ -34,9 +33,6 @@ from ..feishu import (
 )
 from ..state.text import TextState, split_reasoning_text, strip_reasoning_tags
 from ..state.tooluse import ToolUseTracker
-
-if TYPE_CHECKING:
-    from ..image import ImageResolver
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
@@ -320,7 +316,13 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         chat_id: str,
         anchor_id: str | None = None,
     ) -> None:
-        """用户发送新消息导致前一条消息被中断 — abort A + create B."""
+        """用户发送新消息导致前一条消息被中断 — abort A + create B.
+
+        竞态保护：如果旧 session 正在 _do_linear_flush/_do_linear_split
+        中（flush_in_progress=True），先异步等待当前 flush 完成（带超时），
+        再标记 ABORTED 并封卡，避免并发操作 session.card_id 导致
+        旧卡被封两次或新卡变成孤儿。
+        """
         if not self.enabled:
             return
 
@@ -328,13 +330,51 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         if old_session is not None:
             old_session._was_aborted = True
             old_session.error_message = "Interrupted by new message"
-            old_session.state = ABORTED
-            old_session.flush.mark_completed()
-            _logger.info(
-                "on_interrupted: abort old msg=%s",
-                old_message_id[:12],
-            )
-            self._complete_session(old_session)
+
+            # ── 竞态保护：等待当前 flush 完成 ──
+            # 如果 session 正在 _do_linear_split 中（已封旧卡、正在创建新卡），
+            # 需要等 split 完成后再标记 ABORTED，否则并发操作 session.card_id
+            # 可能导致：旧卡被封两次 / 新卡变成孤儿 / sequence conflict。
+            if old_session.flush._flush_in_progress:
+                loop = self._get_loop()
+                if loop is not None:
+                    async def _wait_and_abort():
+                        try:
+                            await asyncio.wait_for(
+                                old_session.flush.wait_for_flush(),
+                                timeout=3.0,
+                            )
+                        except (asyncio.TimeoutError, Exception):
+                            _logger.debug(
+                                "on_interrupted: flush wait timed out, proceeding with abort: msg=%s",
+                                old_message_id[:12],
+                            )
+                        old_session.state = ABORTED
+                        old_session.flush.mark_completed()
+                        _logger.info(
+                            "on_interrupted: abort old msg=%s (after flush wait)",
+                            old_message_id[:12],
+                        )
+                        self._complete_session(old_session)
+                    self._fire_and_forget(_wait_and_abort(), loop)
+                else:
+                    # No loop — immediate abort (best effort)
+                    old_session.state = ABORTED
+                    old_session.flush.mark_completed()
+                    _logger.info(
+                        "on_interrupted: abort old msg=%s (no loop, immediate)",
+                        old_message_id[:12],
+                    )
+                    self._complete_session(old_session)
+            else:
+                # No flush in progress — immediate abort
+                old_session.state = ABORTED
+                old_session.flush.mark_completed()
+                _logger.info(
+                    "on_interrupted: abort old msg=%s",
+                    old_message_id[:12],
+                )
+                self._complete_session(old_session)
 
         if new_message_id not in self._sessions:
             loop = self._get_loop()
@@ -603,23 +643,18 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         for k in stale_keys:
             del self._interrupt_map[k]
         session.flush.mark_completed()
-        if session.image_resolver:
-            session.image_resolver.cancel_pending()
 
     def _release_session_data(self, session: CardSession) -> None:
         """完成后释放重数据，仅保留最小元数据供 TTL 追踪.
 
-        在 complete 流程完成后调用，释放 segments、text、tool_use、
-        image_resolver 等占用的内存。session 仍保留 message_id、
+        在 complete 流程完成后调用，释放 segments、text、tool_use
+        等占用的内存。session 仍保留 message_id、
         state、created_at 等元数据直到 _cleanup 清除。
         """
         session.linear_state = None
         if session.text is not None:
             session.text = TextState()  # type: ignore[assignment]
         session.tool_use = ToolUseTracker()  # type: ignore[assignment]
-        if session.image_resolver is not None:
-            session.image_resolver.cancel_pending()
-            session.image_resolver = None
         session.reasoning_text = ""
         session.reasoning_dirty = False
         session.footer = {}

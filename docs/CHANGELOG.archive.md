@@ -27,7 +27,7 @@
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |---|------|-----------|------|-----------|
 | 1 | Perf | 首字即显（First-Token Immediate Flush） | 流式回答首字到达时仍需等待 500ms 节流间隔才刷新卡片，用户感知延迟 0~500ms | `_schedule_linear_flush()` 检测首次内容（`element_count <= 1` + dirty segments），跳过节流直接调用 `flush.flush_now()` 立即刷新；CardSession 新增 `_first_flush_done` 标志，首次后恢复正常节流 |
-| 2 | Perf | 完成后释放重数据（Post-Completion Memory Release） | 会话完成后 `linear_state`、`text`、`tool_use`、`image_resolver` 等重数据仍留在内存中，TTL 期间（默认 600s）持续占用；高并发场景下累积可达数百 MB | 新增 `_release_session_data()` 方法：完成后清空 `linear_state`、`text`、`tool_use`、`image_resolver`、`reasoning_text`、`footer` 等重数据，仅保留 `message_id`/`state`/`created_at` 等元数据供 TTL 追踪；在 `_do_linear_complete` 和 `_do_complete` 的 finally 块中调用（`_cleanup` 之前） |
+| 2 | Perf | 完成后释放重数据（Post-Completion Memory Release） | 会话完成后 `linear_state`、`text`、`tool_use` 等重数据仍留在内存中，TTL 期间（默认 600s）持续占用；高并发场景下累积可达数百 MB | 新增 `_release_session_data()` 方法：完成后清空 `linear_state`、`text`、`tool_use`、`reasoning_text`、`footer` 等重数据，仅保留 `message_id`/`state`/`created_at` 等元数据供 TTL 追踪；在 `_do_linear_complete` 和 `_do_complete` 的 finally 块中调用（`_cleanup` 之前） |
 | 3 | Perf | 性能指标采集（Performance Telemetry） | 关键路径（卡片创建、flush、stream_element、complete）无计时日志，性能瓶颈无法定位 | 在 `controller_linear_mixin.py` 的 `_do_create_linear_card`/`_do_linear_flush`/`stream_element` 调用/`_do_linear_complete_inner` 中添加 `time.monotonic()` 计时 + `debug` 级别日志；在 `feishu.py` 的 `cardkit_create`/`cardkit_stream_element`/`cardkit_batch_update` 中添加 API 调用计时；在 `controller.py` 的 `on_answer()` 中记录首字到达时间 `_first_answer_time` + TTFB 日志 |
 | 4 | Perf | stream_element 异步优化 | `cardkit_stream_element` 使用 `asyncio.to_thread` 包装同步 SDK 调用，增加线程切换开销；lark-oapi 新版已提供 `acontent` 异步方法 | `FeishuClient.__init__` 中探测 `card_element.acontent` 是否存在，缓存为 `_use_async_stream_element`；`cardkit_stream_element` 优先使用原生异步方法，回退到 `asyncio.to_thread` |
 
@@ -85,7 +85,7 @@
 
 ## v0.15.4 (2026-06-05)
 
-- 图片独立 MEDIA 发送恢复不拦截（v0.15.3 图片拦截器因 `file://` 不匹配等缺陷回退，AI 流式图片仍走 ImageResolver）
+- 图片独立 MEDIA 发送恢复不拦截（v0.15.3 图片拦截器因 `file://` 不匹配等缺陷回退）
 
 ## v0.15.3 (2026-06-05)
 

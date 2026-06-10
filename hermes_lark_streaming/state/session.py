@@ -17,7 +17,6 @@ from .tooluse import ToolUseTracker
 from ..unavailable_guard import UnavailableGuard
 
 if TYPE_CHECKING:
-    from ..image import ImageResolver
     from .linear import LinearState
 
 
@@ -45,7 +44,6 @@ class CardSession:
         "flush",
         "footer",
         "guard",
-        "image_resolver",
         "last_tool_use_update",
         "linear",
         "linear_state",
@@ -99,7 +97,6 @@ class CardSession:
             on_terminate=lambda: setattr(self, "state", FAILED),
         )
 
-        self.image_resolver: ImageResolver | None = None
         self.tool_panel_added = False
         self.linear = False
         self.linear_state: LinearState | None = None

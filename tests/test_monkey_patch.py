@@ -539,7 +539,6 @@ class TestImageInterception:
 
         The interception was removed because it caused images to disappear:
         - Injected file:// URLs were stripped by _strip_invalid_image_keys()
-        - ImageResolver._IMG_PATTERN only matches http(s):// URLs
         - _schedule_card_update skipped terminal-state sessions
         - Original standalone send was suppressed → images lost entirely
         """

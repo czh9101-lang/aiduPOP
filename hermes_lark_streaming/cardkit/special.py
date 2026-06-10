@@ -47,7 +47,6 @@ def build_gateway_card(
     category: str = "",
     status_label: str = "",
     status_emoji: str = "",
-    media_parts: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Gateway-internal message card — lightweight, static, no streaming.
 
@@ -65,8 +64,6 @@ def build_gateway_card(
         status_label: Optional status indicator text (e.g. "Reading",
             "Processing"). When set, shows a status line with emoji + label.
         status_emoji: Optional emoji for the status indicator.
-        media_parts: Optional list of media dicts extracted from Hermes's
-            MEDIA tags.
     """
     elements: list[dict] = []
 
@@ -81,32 +78,6 @@ def build_gateway_card(
                 "text_size": "notation",
             },
         })
-
-    # ── Media elements ──
-    if media_parts:
-        for part in media_parts:
-            media_type = part.get("type", "")
-            media_key = part.get("key", "")
-            if media_type == "image" and media_key:
-                elements.append({
-                    "tag": "img",
-                    "img_key": media_key,
-                    "scale_type": "fit_horizontal",
-                    "alt": {"tag": "plain_text", "content": ""},
-                    "corner_radius": "8px",
-                    "preview": True,
-                })
-            elif media_type == "file" and media_key:
-                file_name = part.get("name", "File")
-                elements.append({
-                    "tag": "div",
-                    "text": {
-                        "tag": "plain_text",
-                        "content": f"📎 {file_name}",
-                        "text_color": "blue",
-                        "text_size": "notation",
-                    },
-                })
 
     if content.strip():
         for chunk in _split_long_text(_downgrade_tables(optimize_markdown_style(content))):

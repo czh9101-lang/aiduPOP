@@ -173,7 +173,7 @@ grep -E "controller_linear|flush|cardkit" ~/.hermes/logs/agent.log | tail -100
 | 内容重复 | 回调是否被双重包装 | `_maybe_wrap_callbacks`、`consumed` |
 | 跑马灯不停 | 元素超限 / flush 失败 | `element_limit`、`300305`、`_handle_linear_flush_error` |
 | Cron 推送纯文本 | Cron 补丁是否生效 | `cron`、`_wrap_cron_deliver` |
-| 图片不显示 | ImageResolver 状态 | `image`、`img_key`、`ImageResolver` |
+| 图片不显示 | hermes 原生图片处理配置 | hermes 配置、`media_delivery` |
 | 封卡失败 | 序列冲突 / 元素超限 | `300317`、`300305`、`_preservative_seal` |
 | 中断后卡片异常 | card_sent 传播 | `_wrap_run_agent`、`ABORTED`、`card_sent` |
 | 配置不生效 | config.yaml 路径 | `config`、`HERMES_HOME`、`_get_hermes_config_path` |

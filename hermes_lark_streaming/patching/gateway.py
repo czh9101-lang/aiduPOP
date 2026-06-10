@@ -262,13 +262,19 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 # This ensures the old card is marked as ABORTED before the
                 # child starts processing, so the old card shows "Interrupted"
                 # state instead of staying in streaming/marquee animation.
+                #
+                # anchor_id fix: use event_message_id as the new card's
+                # anchor (the new message's reply anchor), NOT the parent
+                # message's anchor_id.  Hermes passes the pending_event's
+                # reply_anchor as event_message_id in the recursive call,
+                # so this is the correct anchor for the new card.
                 try:
                     from ..patch import on_message_interrupted
                     on_message_interrupted(
                         message_id=_saved_parent_ctx.get("message_id", ""),
                         new_message_id=event_message_id,
                         chat_id=ctx["chat_id"],
-                        anchor_id=ctx.get("anchor_id"),
+                        anchor_id=event_message_id,
                     )
                 except Exception:
                     _logger.debug("run_agent: interrupt hook failed", exc_info=True)
@@ -279,7 +285,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     on_message_started(
                         message_id=event_message_id,
                         chat_id=ctx["chat_id"],
-                        anchor_id=ctx.get("anchor_id"),
+                        anchor_id=event_message_id,
                     )
                 except Exception:
                     pass
@@ -841,13 +847,7 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
                     len(content_text) if content_text else 0,
                 )
                 if ctrl.enabled and content_text:
-                    # Try to strip MEDIA tags for cleaner card content
                     cleaned = content_text
-                    try:
-                        from gateway.platforms.base import BasePlatformAdapter
-                        _, cleaned = BasePlatformAdapter.extract_media(content_text)
-                    except (ImportError, AttributeError):
-                        pass
                     if not cleaned.strip():
                         cleaned = content_text
 

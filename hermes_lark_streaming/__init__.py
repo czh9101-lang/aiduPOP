@@ -29,7 +29,6 @@ Card Building:
 Feishu API:
   feishu.py                   FeishuClient (Lark SDK wrapper, transient retry)
   unavailable_guard.py        UnavailableGuard (message-deleted protection)
-  image.py                    ImageResolver (async image upload)
 
 State & Data:
   state/                      Sub-package

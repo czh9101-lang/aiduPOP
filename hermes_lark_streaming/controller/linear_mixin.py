@@ -61,7 +61,6 @@ from ..feishu import (
     is_element_limit_error,
 )
 from ..flush import CARDKIT_MS, PATCH_MS
-from ..image import ImageResolver
 from ..state.linear import LinearState, Segment
 from ..state.text import split_reasoning_text
 
@@ -218,16 +217,6 @@ class LinearControllerMixin:
                 session.linear_state = None
                 session.flush.set_throttle(PATCH_MS)
 
-            if session.image_resolver is None and self._client:
-                session.image_resolver = ImageResolver(
-                    client=self._client,
-                    on_image_resolved=(
-                        lambda: self._schedule_linear_flush(session)
-                        if session.linear
-                        else self._schedule_card_update(session)
-                    ),
-                )
-
             session.flush.set_card_message_ready(True)
             if session.state == CREATING:
                 session.state = STREAMING
@@ -383,10 +372,7 @@ class LinearControllerMixin:
                 elif seg.type == "answer":
                     # 预填充文本：避免 batch_update 后再调一次 stream_element，
                     # 减少首次文字出现的 API 调用次数（省 ~100-200ms）
-                    _ans_content = seg.text or ""
-                    if session.image_resolver:
-                        _ans_content = session.image_resolver.resolve_images(_ans_content)
-                    _ans_content = _downgrade_tables(optimize_markdown_style(_ans_content)) or " "
+                    _ans_content = _downgrade_tables(optimize_markdown_style(seg.text or "")) or " "
                     el = _streaming_element(content=_ans_content, element_id=seg.el_id)
                     if seg.text:
                         seg.dirty = False  # 文本已在 batch_update 中发送
@@ -558,10 +544,7 @@ class LinearControllerMixin:
                     _logger.debug("perf: stream_element msg=%s type=%s elapsed=%.0fms", (session.message_id or "?")[:12], seg.type, (_time.monotonic()-t_se)*1000)
                     seg.dirty = False
                 elif seg.type == "answer":
-                    content = seg.text
-                    if session.image_resolver:
-                        content = session.image_resolver.resolve_images(content)
-                    content = _downgrade_tables(optimize_markdown_style(content)) or " "
+                    content = _downgrade_tables(optimize_markdown_style(seg.text)) or " "
                     session.sequence += 1
                     _logger.info(
                         "linear stream: msg=%s seq=%d type=answer len=%d",
@@ -855,13 +838,6 @@ class LinearControllerMixin:
 
         # 准备封卡数据
         seal_segments = [s for s in segments[:split_idx] if s.created]
-        if session.image_resolver:
-            for seg in seal_segments:
-                if seg.type == "answer" and seg.text:
-                    try:
-                        seg.text = await session.image_resolver.resolve_await(seg.text)
-                    except Exception:
-                        _logger.debug("linear seal image resolve failed: el=%s", seg.el_id, exc_info=True)
 
         seal_card = build_linear_complete_card(
             segments=seal_segments,
@@ -1108,14 +1084,6 @@ class LinearControllerMixin:
         active_segments = (
             linear_state.segments[session.split_index:] if linear_state is not None else []
         )
-
-        if session.image_resolver:
-            for seg in active_segments:
-                if seg.type == "answer" and seg.text:
-                    try:
-                        seg.text = await session.image_resolver.resolve_await(seg.text)
-                    except Exception:
-                        _logger.debug("linear image resolve failed: el=%s", seg.el_id, exc_info=True)
 
         card = build_linear_complete_card(
             segments=active_segments,

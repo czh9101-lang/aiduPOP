@@ -81,16 +81,9 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
     and should be converted to a card.
     """
     async def _intercepted_send(self_feishu, chat_id, content, reply_to=None, metadata=None, **kwargs):
-        # ── Agent path: handle image sends during agent pipeline ──
-        # When Hermes sends an image (non-string content like a dict with
-        # image_key) during the agent pipeline, we let it through as a
-        # standalone image message. Previously (v0.15.3) we tried to suppress
-        # standalone images and inject them into the card, but this caused
-        # images to disappear entirely (see issue-v0.15.3-image-card-wrapping).
-        # Images from the AI's markdown response are already handled by the
-        # card streaming pipeline (ImageResolver). Standalone MEDIA sends
-        # (send_message tool with <MEDIA>) should go through as independent
-        # messages — they are NOT part of the streaming card content.
+        # ── Agent path: handle non-string sends ──
+        # Non-string content (e.g. dicts with image_key) is passed through
+        # to the original adapter — we only intercept string text messages.
         if not isinstance(content, str):
             return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
@@ -98,17 +91,7 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
         if not content.strip():
             return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
-        # ── Phase 4: Media message card wrapping ──
-        # When content contains MEDIA tags (Hermes wraps images/files in
-        # <MEDIA>...</MEDIA> tags), extract the media and text parts, then
-        # build a card with both the media and the text content.
-        _media_parts: list[dict] | None = None
         _text_content = content
-        try:
-            from gateway.platforms.base import BasePlatformAdapter
-            _media_parts, _text_content = BasePlatformAdapter.extract_media(content)
-        except (ImportError, AttributeError):
-            pass
 
         # ── Guard: check if this is a cron/background fallback send ──
         # When cron's _card_sending_send or background task's
@@ -120,13 +103,6 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
             return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
         # ── Agent path: suppress duplicate text reply ──
-        # MEDIA FIX: When _media_parts is non-empty, the content contains
-        # standalone media files (images/files from <MEDIA> tags). These are
-        # NOT part of the streaming card content and MUST be delivered via
-        # the original adapter — suppressing them causes media to silently
-        # disappear. Only suppress pure-text sends when the card already
-        # shows the answer text.
-        _has_media = bool(_media_parts)
         ctx = _msg_ctx.get(None)
         if ctx is not None:
             eid = ctx.get("event_message_id", "")
@@ -134,20 +110,6 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                 # We're inside an agent message pipeline.
                 # If card was already sent, suppress the gateway's text reply.
                 if ctx.get("card_sent"):
-                    if _has_media:
-                        # ── MEDIA FIX: pass through media sends ──
-                        # Media files are standalone content that must be
-                        # delivered independently of the card. The original
-                        # FeishuAdapter knows how to handle <MEDIA> tags
-                        # (upload files, send as rich text with images).
-                        _logger.info(
-                            "feishu_adapter_send: card already sent but has "
-                            "media parts, passing through to orig_send: "
-                            "chat=%s media_count=%d",
-                            chat_id[:12] if chat_id else "?",
-                            len(_media_parts or []),
-                        )
-                        return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
                     _logger.debug(
                         "feishu_adapter_send: suppressing gateway text reply "
                         "(card already sent), chat=%s content_len=%d",
@@ -170,16 +132,6 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                         if _ctrl and _ctrl.enabled:
                             _sess = _ctrl._sessions.get(eid)
                             if _sess and _sess.card_msg_id:
-                                if _has_media:
-                                    # ── MEDIA FIX: pass through media sends ──
-                                    _logger.info(
-                                        "feishu_adapter_send: card exists but has "
-                                        "media parts, passing through to orig_send: "
-                                        "msg=%s state=%s media_count=%d",
-                                        eid[:12], _sess.state,
-                                        len(_media_parts or []),
-                                    )
-                                    return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
                                 _logger.info(
                                     "feishu_adapter_send: suppressing text reply "
                                     "(card exists for msg=%s, state=%s, card_sent=%s)",
@@ -198,10 +150,9 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
 
         # ── Gateway-internal path: convert to card ──
         _logger.info(
-            "gateway_send: entering gateway-internal path, chat=%s content_len=%d has_media=%s",
+            "gateway_send: entering gateway-internal path, chat=%s content_len=%d",
             chat_id[:12] if chat_id else "?",
             len(content),
-            bool(_media_parts),
         )
         try:
             from ..controller import get_controller
@@ -213,19 +164,16 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                     _logger.info("gateway_send: gateway_cards disabled, falling back to plain text")
                     return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
-                # Phase 4: Media-aware card building
-                has_media = bool(_media_parts)
                 cleaned = _text_content
-                if not cleaned.strip() and not has_media:
+                if not cleaned.strip():
                     cleaned = content
-                if not cleaned.strip() and not has_media:
+                if not cleaned.strip():
                     return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
                 category = _classify_gateway_message(cleaned or content)
                 card_msg_id, card_id = await ctrl._do_gateway_deliver(
                     chat_id, cleaned.strip() if cleaned.strip() else content,
                     category=category,
-                    media_parts=_media_parts if has_media else None,
                 )
                 if card_msg_id:
                     # Register the card so edit_message can update it later
@@ -327,13 +275,7 @@ def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
                     # Check if gateway_cards feature is enabled
                     cfg = _get_config()
                     if cfg.gateway_cards:
-                        # Strip MEDIA tags for cleaner card content
                         cleaned = content
-                        try:
-                            from gateway.platforms.base import BasePlatformAdapter
-                            _, cleaned = BasePlatformAdapter.extract_media(content)
-                        except (ImportError, AttributeError):
-                            pass
                         if not cleaned.strip():
                             cleaned = content
 

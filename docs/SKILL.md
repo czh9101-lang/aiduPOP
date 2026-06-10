@@ -51,7 +51,7 @@ Background: _run_background_task ── [Hook 1/2]
 | `├ cards.py` | ~440 | 卡片组装器 | streaming/complete/linear/IM-fallback 卡片 |
 | `├ special.py` | ~410 | 专用卡片类型 | cron/gateway/clarify 三态卡片 |
 | `├ i18n.py` | 58 | 中英双语映射 | `_T` dict + `_i18n()`/`_t()` |
-| `└ md.py` | 121 | Markdown 处理 | 标题/表格降级、图片 key 剥离、长文本分块 |
+| `└ md.py` | 121 | Markdown 处理 | 标题/表格降级、长文本分块 |
 | **controller/** | | **主控制器子包** | |
 | `├ __init__.py` | ~20 | 重导出门面 | StreamCardController + CardSession + 状态常量 |
 | `├ core.py` | ~720 | 主控制器(单例) | 管理生命周期，导入 CardSession |
@@ -68,7 +68,6 @@ Background: _run_background_task ── [Hook 1/2]
 | `config.py` | ~270 | 配置读取 | `_plugin_sec()` 惰性加载 + 5秒 TTL 缓存 |
 | `feishu.py` | ~450 | 飞书 API 客户端 | CardKit v1/v2 + IM API，错误码分类 |
 | `flush.py` | ~185 | 节流调度器 | CardKit 500ms / IM PATCH 1.5s，互斥锁 + re-flush |
-| `image.py` | ~129 | 异步图片处理 | 下载远程图→上传飞书→替换 img_key |
 | `unavailable_guard.py` | ~144 | 消息不可用保护 | 删除/撤回检测，30分钟 TTL |
 | `plugin.py` | ~250 | 插件注册入口 | `register()`/`unregister()`，自动备份 config |
 
@@ -176,7 +175,7 @@ hermes_lark_streaming:
 worker 线程必须用 `call_soon_threadsafe()`，`call_soon()` 不唤醒事件循环→flush 永不执行。
 
 ### 10.7 元素估算必须对齐实际渲染
-飞书卡片 2.0 硬上限 200 元素+组件（API 错误码 300307/300305），拆卡阈值 185（预留 15 给 footer+图片+封卡波动）。估算对齐封卡分块数+图片计数，否则拆卡判断形同虚设。
+飞书卡片 2.0 硬上限 200 元素+组件（API 错误码 300307/300305），拆卡阈值 185（预留 15 给 footer+封卡波动）。估算对齐封卡分块数，否则拆卡判断形同虚设。
 
 ### 10.8 幂等守卫 = 同步状态转移 + 错误码容错
 COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态。
@@ -209,7 +208,6 @@ tests/
   test_config.py               — 配置读取
   test_flush.py                — 节流调度器
   test_text.py                 — 文本增量追踪
-  test_image.py                — 图片解析
   test_linear.py               — 线性 segment 管理
   test_tooluse.py              — 工具调用追踪
   test_monkey_patch.py         — 时间感知/重入守卫/cron 降级
@@ -272,4 +270,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-09 | Version: 1.0.0*
+*Last updated: 2026-06-10 | Version: 1.0.0*

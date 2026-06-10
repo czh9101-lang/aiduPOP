@@ -1,4 +1,4 @@
-"""Tests for gateway message card interception (v0.14.0 Phase 1-4)."""
+"""Tests for gateway message card interception (v0.14.0 Phase 1-3)."""
 
 from __future__ import annotations
 
@@ -135,74 +135,6 @@ class TestBuildGatewayCardStatusIndicator:
         card = build_gateway_card("Working...", status_label="Processing", status_emoji="⏳")
         elements = card["body"]["elements"]
         assert elements[0]["text"]["content"] == "⏳ Processing"
-
-
-class TestBuildGatewayCardMedia:
-    """Test Phase 4: media elements in build_gateway_card()."""
-
-    def test_image_media_element(self):
-        """Image media parts are rendered as Card 2.0 img elements in the card."""
-        card = build_gateway_card(
-            "Here is an image",
-            media_parts=[{"type": "image", "key": "img_v3_test123"}],
-        )
-        elements = card["body"]["elements"]
-        # Should have: img + markdown
-        assert len(elements) >= 2
-        # Find the img element
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 1
-        assert img_elements[0]["img_key"] == "img_v3_test123"
-        # Card 2.0 fields
-        assert img_elements[0]["scale_type"] == "fit_horizontal"
-        assert img_elements[0]["preview"] is True
-        assert img_elements[0]["corner_radius"] == "8px"
-        assert "alt" in img_elements[0]
-        # Legacy fields should NOT be present
-        assert "mode" not in img_elements[0]
-        assert "compact_width" not in img_elements[0]
-
-    def test_file_media_element(self):
-        """File media parts are rendered as text links in the card (wrapped in div.text)."""
-        card = build_gateway_card(
-            "Here is a file",
-            media_parts=[{"type": "file", "key": "file_v3_test456", "name": "report.pdf"}],
-        )
-        elements = card["body"]["elements"]
-        # Find the file element (wrapped in div.text)
-        file_elements = [e for e in elements if e.get("tag") == "div" and "📎" in e.get("text", {}).get("content", "")]
-        assert len(file_elements) == 1
-        assert "report.pdf" in file_elements[0]["text"]["content"]
-
-    def test_multiple_media_parts(self):
-        """Multiple media parts are all included in the card."""
-        card = build_gateway_card(
-            "Multiple files",
-            media_parts=[
-                {"type": "image", "key": "img_v3_1"},
-                {"type": "image", "key": "img_v3_2"},
-                {"type": "file", "key": "file_v3_1", "name": "doc.pdf"},
-            ],
-        )
-        elements = card["body"]["elements"]
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 2
-        file_elements = [e for e in elements if e.get("tag") == "div" and "📎" in e.get("text", {}).get("content", "")]
-        assert len(file_elements) == 1
-
-    def test_no_media_parts(self):
-        """When media_parts is None, no media elements are added."""
-        card = build_gateway_card("Just text", media_parts=None)
-        elements = card["body"]["elements"]
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 0
-
-    def test_empty_media_parts_list(self):
-        """When media_parts is an empty list, no media elements are added."""
-        card = build_gateway_card("Just text", media_parts=[])
-        elements = card["body"]["elements"]
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 0
 
 
 class TestClassifyGatewayMessage:
