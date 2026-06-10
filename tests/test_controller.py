@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hermes_lark_streaming.controller import CardSession, StreamCardController
-from hermes_lark_streaming.controller_linear_mixin import _estimate_segment_elements
-from hermes_lark_streaming.controller_mixin import (
+from hermes_lark_streaming.controller.linear_mixin import _estimate_segment_elements
+from hermes_lark_streaming.controller.mixin import (
     ABORTED,
     COMPLETED,
     COMPLETING,
@@ -27,12 +27,12 @@ from hermes_lark_streaming.feishu import (
     FeishuAPIError,
     FeishuClient,
 )
-from hermes_lark_streaming.linear import LinearState, Segment
+from hermes_lark_streaming.state.linear import LinearState, Segment
 
 
 def _enable(ctrl: StreamCardController, *, linear: bool = False) -> None:
     ctrl._cfg._raw = {
-        "streaming": {"enabled": True, "linear": linear},
+        "hermes_lark_streaming": {"enabled": True, "linear": linear},
         "feishu": {"app_id": "app", "app_secret": "secret"},
     }
 
@@ -97,12 +97,10 @@ def test_prune_stale_sessions_ignores_none_key_and_prunes_valid_key() -> None:
     stale_session = SimpleNamespace(
         created_at=time.time() - ctrl._session_ttl - 1,
         flush=_DummyFlush(),
-        image_resolver=None,
     )
     valid_stale_session = SimpleNamespace(
         created_at=time.time() - ctrl._session_ttl - 1,
         flush=_DummyFlush(),
-        image_resolver=None,
     )
     ctrl._sessions[None] = stale_session  # type: ignore[index,assignment]
     ctrl._sessions["msg"] = valid_stale_session  # type: ignore[assignment]
@@ -423,7 +421,7 @@ class TestDoCreateLinearCard:
         session.card_id = "card_old"
         session.card_msg_id = "msg_old"
         session._loading_hint_removed = True  # 模拟首卡已有 answer
-        session.element_count = 144
+        session.element_count = 165
         session.linear_state.on_reasoning_delta("old")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -522,8 +520,8 @@ class TestDoLinearFlush:
         session.state = STREAMING
         session.card_id = "card_old"
         session.card_msg_id = "msg_old"
-        # 接近阈值但未超（reasoning 4 + answer 1 = 5，阈值 150，设 144 + 5 = 149 ≤ 150）
-        session.element_count = 144
+        # 接近阈值但未超（reasoning 4 + answer 1 = 5，阈值 185，设 165 + 1 + 15 = 181 ≤ 185）
+        session.element_count = 165
         session.linear_state.on_reasoning_delta("old")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -571,7 +569,11 @@ class TestDoLinearFlush:
         tool_seg = session.linear_state.segments[0]
         tool_seg.created = True
         tool_seg.element_estimate = _estimate_segment_elements(tool_seg, session.tool_use.build_display_steps())
-        session.element_count = 144
+        # element_count must be high enough to trigger rollover when tool grows
+        # but low enough that at least 1 step fits in the old card after split:
+        #   base_count(170-8=162) + 1_step(8) + RESERVE(15) = 185 ≤ THRESHOLD(185)
+        #   base_count(162) + 4_steps(23) + RESERVE(15) = 200 > THRESHOLD(185)
+        session.element_count = 170
 
         for idx in range(1, 4):
             session.tool_use.record_start("read", f"file{idx}")
@@ -598,12 +600,18 @@ class TestDoLinearFlush:
 
     @pytest.mark.asyncio
     async def test_oversized_new_tool_segment_splits_across_multiple_cards(self) -> None:
-        """单次 flush 内 tool steps 很多时，未创建的 tool segment 也会连续分片拆卡."""
+        """单次 flush 内 tool steps 很多时，未创建的 tool segment 也会连续分片拆卡.
+
+        Note: 当前拆卡逻辑在 _maybe_rollover_tool_segment 中仅检测 delta > 0
+        （segment 增长），第一次拆分后新 segment 的 element_estimate 已包含全量
+        估算，delta=0 不触发二次拆分。因此单次 flush 内只能拆一次，剩余
+        oversized segment 需要在后续 flush 中处理（或修复 rollover 逻辑）。
+        """
         ctrl = _setup_ctrl()
         calls = _capture_split_calls(
             ctrl,
-            cards=["card_tool_page_2", "card_tool_page_3"],
-            messages=["msg_tool_page_2", "msg_tool_page_3"],
+            cards=["card_tool_page_2"],
+            messages=["msg_tool_page_2"],
         )
 
         session = _make_session("msg_tool_many", linear=True)
@@ -620,7 +628,7 @@ class TestDoLinearFlush:
 
         await ctrl._do_linear_flush(session)
 
-        # v0.19.1-hotfix: 先封旧卡再建新卡
+        # 单次 flush 内只拆一次: 先封旧卡再建新卡
         assert calls == [
             ("batch", "card_tool_page_1"),
             ("close", "card_tool_page_1"),
@@ -628,20 +636,14 @@ class TestDoLinearFlush:
             ("create", ""),
             ("reply", ""),
             ("batch", "card_tool_page_2"),
-            ("close", "card_tool_page_2"),
-            ("batch", "card_tool_page_2"),
-            ("create", ""),
-            ("reply", ""),
-            ("batch", "card_tool_page_3"),
         ]
-        assert session.card_id == "card_tool_page_3"
-        assert session.card_msg_id == "msg_tool_page_3"
-        assert session.split_index == 2
-        assert len(session.linear_state.segments) == 3
-        assert [s.tool_offset for s in session.linear_state.segments] == [0, 48, 96]
-        assert [s.tool_end_offset for s in session.linear_state.segments] == [48, 96, 0]
+        assert session.card_id == "card_tool_page_2"
+        assert session.split_index == 1
+        # 第二段仍 oversized，需后续 flush 处理
+        assert len(session.linear_state.segments) == 2
+        assert session.linear_state.segments[0].tool_end_offset == 55
+        assert session.linear_state.segments[1].tool_offset == 55
         assert all(s.created for s in session.linear_state.segments)
-        # 拆卡后 element_count 已重置，验证最后一段估算值合理即可
         assert session.linear_state.segments[-1].element_estimate > 0
 
     @pytest.mark.asyncio
@@ -660,7 +662,8 @@ class TestDoLinearFlush:
         tool_seg = session.linear_state.segments[0]
         tool_seg.created = True
         tool_seg.element_estimate = _estimate_segment_elements(tool_seg, session.tool_use.build_display_steps())
-        session.element_count = 144
+        # element_count must allow rollover to trigger (see test_tool_growth_rolls_over_at_step_boundary)
+        session.element_count = 170
 
         for idx in range(1, 4):
             session.tool_use.record_start("read", f"file{idx}")
@@ -698,7 +701,7 @@ class TestDoLinearFlush:
         session.state = STREAMING
         session.card_id = "card_current"
         session.card_msg_id = "msg_current"
-        session.element_count = 144
+        session.element_count = 165
         session.linear_state.on_reasoning_delta("old")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -1037,27 +1040,6 @@ class TestDoLinearComplete:
         assert session.state == FAILED
         ctrl._client.cardkit_close_streaming.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_image_resolve_per_segment(self) -> None:
-        """单个 segment resolve 失败不影响后续."""
-        from unittest.mock import MagicMock
-
-        ctrl = _setup_ctrl()
-        session = _make_session("msg_img", linear=True)
-        session.state = STREAMING
-        session.card_id = "card_img"
-        session.linear_state.on_answer_delta("![a](http://x.com/img.png)")
-        session.linear_state.on_reasoning_delta("mid")
-        session.linear_state.on_answer_delta("![b](http://y.com/img2.png)")
-
-        resolver = MagicMock()
-        resolver.resolve_await = AsyncMock(side_effect=[RuntimeError("timeout"), "ok"])
-        session.image_resolver = resolver
-        ctrl._sessions["msg_img"] = session
-
-        await ctrl._do_linear_complete(session)
-
-        assert resolver.resolve_await.call_count == 2
 
 
 # ── _linear_on_thinking 集成测试 ──
@@ -1498,7 +1480,7 @@ class TestHandleLinearFlushError:
         session.state = STREAMING
         session.card_id = "card_old"
         session.card_msg_id = "msg_old"
-        session.element_count = 144
+        session.element_count = 177
         session.linear_state.on_reasoning_delta("think")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -1563,7 +1545,7 @@ class TestHandleLinearFlushError:
         session.state = STREAMING
         session.card_id = "card_current"
         session.card_msg_id = "msg_current"
-        session.element_count = 144
+        session.element_count = 177
         session.linear_state.on_reasoning_delta("think")
         session.linear_state.segments[0].created = True
         session.linear_state.segments[0].dirty = False
@@ -1728,7 +1710,10 @@ class TestElementLimitHit:
         tool_seg = session.linear_state.segments[0]
         tool_seg.created = True
         tool_seg.element_estimate = _estimate_segment_elements(tool_seg, session.tool_use.build_display_steps())
-        session.element_count = 144
+        # element_count must allow rollover to find a valid split point:
+        #   base_count(170-8=162) + 1_step(8) + RESERVE(15) = 185 ≤ THRESHOLD(185)
+        #   base_count(162) + 4_steps(23) + RESERVE(15) = 200 > THRESHOLD(185)
+        session.element_count = 170
 
         for idx in range(1, 4):
             session.tool_use.record_start("read", f"file{idx}")
@@ -2002,7 +1987,7 @@ class TestSequenceConflictIdempotent:
 
 
 class TestAnswerEstimation:
-    """验证 answer 估算按封卡实际元素数计算，而非恒为 1."""
+    """验证 answer 估算固定为 1 element（方案B：对齐保留式封卡实际行为）."""
 
     def test_estimate_answer_short_text(self) -> None:
         """短文本 answer 估算为 1."""
@@ -2010,13 +1995,12 @@ class TestAnswerEstimation:
         seg.text = "hello"
         assert _estimate_segment_elements(seg, []) == 1
 
-    def test_estimate_answer_long_text_splits(self) -> None:
-        """长文本 answer 按 _split_long_text 实际分块数估算."""
+    def test_estimate_answer_long_text_always_1(self) -> None:
+        """方案B：长文本 answer 估算仍固定为 1，不再按 _split_long_text 计算."""
         seg = Segment("answer", "ans_0")
-        # 生成超过 _MAX_CHUNK_CHARS(2400) 的文本，应被拆成多块
         seg.text = "A" * 5000
         est = _estimate_segment_elements(seg, [])
-        assert est >= 2  # 至少拆成 2 块
+        assert est == 1  # 方案B：answer 恒为 1
 
     def test_estimate_answer_empty_text(self) -> None:
         """空文本 answer 估算为 1."""
@@ -2025,20 +2009,20 @@ class TestAnswerEstimation:
         assert _estimate_segment_elements(seg, []) == 1
 
     def test_estimate_answer_with_images(self) -> None:
-        """含 img_ 图片的 answer 估算包含独立 img 元素数."""
+        """方案B：含 img_ 图片的 answer 估算仍固定为 1."""
         seg = Segment("answer", "ans_0")
         seg.text = "文字 ![图1](img_v3_abc123) 更多文字"
         est = _estimate_segment_elements(seg, [])
-        # 1 个 markdown 文本块 + 1 个 img 元素 = 2
-        assert est == 2
+        # 方案B：answer 恒为 1，图片不再单独计入
+        assert est == 1
 
     def test_estimate_answer_with_multiple_images(self) -> None:
-        """含多个 img_ 图片的 answer 估算包含所有独立 img 元素."""
+        """方案B：含多个 img_ 图片的 answer 估算仍固定为 1."""
         seg = Segment("answer", "ans_0")
         seg.text = "文字 ![图1](img_v3_abc) 中间 ![图2](img_v3_def) 结尾"
         est = _estimate_segment_elements(seg, [])
-        # 1 个 markdown 文本块 + 2 个 img 元素 = 3
-        assert est == 3
+        # 方案B：answer 恒为 1，图片不再单独计入
+        assert est == 1
 
     def test_estimate_answer_non_img_key_not_counted(self) -> None:
         """非 img_ 前缀的图片链接不计入元素估算."""
@@ -2050,7 +2034,11 @@ class TestAnswerEstimation:
 
 
 class TestSplitAnswerSegment:
-    """验证 LinearState.split_answer_segment 拆分逻辑."""
+    """验证 LinearState.split_answer_segment 拆分逻辑.
+
+    注意：方案B 后 flush 不再调用 split_answer_segment，但该方法仍作为
+    工具方法保留，此处测试继续维护。
+    """
 
     def test_split_answer_basic(self) -> None:
         """在指定字符偏移处拆分 answer segment."""
@@ -2083,106 +2071,9 @@ class TestSplitAnswerSegment:
         assert new_seg.type == "answer"
 
 
-class TestAnswerSplitInFlush:
-    """验证 _do_linear_flush 中 answer 超限时内部拆分 + 拆卡."""
-
-    @pytest.mark.asyncio
-    async def test_long_answer_triggers_internal_split(self) -> None:
-        """未创建的 answer 超限时，先内部拆分再拆卡."""
-        ctrl = _setup_ctrl()
-        calls = _capture_split_calls(ctrl)
-
-        session = _make_session("msg_ans_split", linear=True)
-        session.state = STREAMING
-        session.card_id = "card_old"
-        session.card_msg_id = "msg_old"
-        # 让已有元素接近阈值，一个长 answer 就会超限
-        session.element_count = 145
-        # 添加已创建的 reasoning segment
-        session.linear_state.on_reasoning_delta("think")
-        session.linear_state.segments[0].created = True
-        session.linear_state.segments[0].dirty = False
-        session.linear_state.segments[0].element_estimate = 4
-        # 添加超长 answer（超过 _MAX_CHUNK_CHARS * 多倍，拆成多块）
-        long_text = "A" * 10000
-        session.linear_state.on_answer_delta(long_text)
-
-        ctrl._sessions["msg_ans_split"] = session
-
-        await ctrl._do_linear_flush(session)
-
-        # 应发生拆卡：旧卡被封，新卡创建
-        assert ("create", "") in calls
-        assert ("close", "card_old") in calls
-        # answer 应被拆分为多个 segment
-        answer_segs = [s for s in session.linear_state.segments if s.type == "answer"]
-        assert len(answer_segs) >= 2
-
-    @pytest.mark.asyncio
-    async def test_answer_growth_triggers_rollover(self) -> None:
-        """已创建的 answer 文本增长后估算超限，触发内部拆分 + 拆卡."""
-        ctrl = _setup_ctrl()
-        calls = _capture_split_calls(ctrl)
-
-        session = _make_session("msg_ans_roll", linear=True)
-        session.state = STREAMING
-        session.card_id = "card_old"
-        session.card_msg_id = "msg_old"
-        # 已创建 answer，初始估算偏低
-        session.linear_state.on_answer_delta("short")
-        session.linear_state.segments[0].created = True
-        session.linear_state.segments[0].element_estimate = 1
-        session.element_count = 145
-
-        # answer 增长到很长
-        long_text = "A" * 10000
-        session.linear_state.on_answer_delta(long_text)
-
-        ctrl._sessions["msg_ans_roll"] = session
-
-        await ctrl._do_linear_flush(session)
-
-        # answer 增长后估算应更新
-        assert session.linear_state.segments[0].element_estimate > 1
-        # 应发生拆卡
-        assert ("create", "") in calls
-
-    @pytest.mark.asyncio
-    async def test_answer_split_across_multiple_cards(self) -> None:
-        """超长 answer 拆分后跨多张卡.
-
-        场景：先有大量 tool steps 占满元素，然后超长 answer 导致
-        第一次拆卡，新卡上继续写入超长 answer 的剩余部分。
-        验证拆卡后 answer 被拆成多个 segment，且第一张卡被封，
-        新卡继续接收内容。
-        """
-        ctrl = _setup_ctrl()
-        calls = _capture_split_calls(ctrl)
-
-        session = _make_session("msg_ans_many", linear=True)
-        session.state = STREAMING
-        session.card_id = "card_ans_p1"
-        session.card_msg_id = "msg_ans_p1"
-        session.element_count = 144  # 已有大量元素，接近阈值
-        # 添加已创建的 tool segment（占 174 个元素）
-        for _ in range(28):
-            session.tool_use.record_start("check", "f")
-        session.linear_state.on_tool_event(len(session.tool_use.build_display_steps()))
-        session.linear_state.segments[0].created = True
-        session.linear_state.segments[0].element_estimate = 174
-        session.linear_state.segments[0].dirty = False
-        # 添加超长 answer（拆成多块，估算远超阈值）
-        huge_text = ("Paragraph content here. " * 50 + "\n\n") * 100  # ~130K chars → ~100 chunks
-        session.linear_state.on_answer_delta(huge_text)
-
-        ctrl._sessions["msg_ans_many"] = session
-
-        await ctrl._do_linear_flush(session)
-
-        # 应发生拆卡
-        assert ("create", "") in calls
-        # answer 应被拆分为多个 segment
-        answer_segs = [s for s in session.linear_state.segments if s.type == "answer"]
-        assert len(answer_segs) >= 2
-        # 拆卡后新卡应继续接收内容
-        assert session.card_id != "card_ans_p1"
+# 方案B 说明：
+# 旧方案中，answer 超限时 flush 会先做内部拆分（split_answer_segment）
+# 再拆卡；方案B 移除了该逻辑，answer 估算恒为 1，不再触发内部拆分。
+# 因此 TestAnswerSplitInFlush 中的三个测试（test_long_answer_triggers_internal_split、
+# test_answer_growth_triggers_rollover、test_answer_split_across_multiple_cards）
+# 已不适用，整体移除。

@@ -22,11 +22,6 @@ def _get_hermes_config_path() -> Path:
     return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
 
 
-# 向后兼容：保留常量名，但改为使用 getter 函数
-# 注意：这仍然在模块导入时求值，但大多数场景下是正确的
-# 对于多 Profile 场景，请使用 _get_hermes_config_path()
-_HERMES_CONFIG_PATH = _get_hermes_config_path()
-
 _RELOAD_CACHE_TTL = 5.0  # 运行时可变配置的缓存 TTL（秒）
 
 
@@ -41,19 +36,19 @@ class Config:
     @property
     def enabled(self) -> bool:
         """是否启用流式卡片."""
-        sec = self._streaming_sec()
+        sec = self._plugin_sec()
         return bool(sec.get("enabled", False))
 
     @property
     def linear(self) -> bool:
         """是否启用线性单卡模式，按事件顺序动态更新卡片元素."""
-        sec = self._streaming_sec()
+        sec = self._plugin_sec()
         return bool(sec.get("linear", True))
 
     @property
     def panel_expanded(self) -> bool:
         """完成态卡片中面板（工具、推理）是否保持展开."""
-        sec = self._streaming_sec()
+        sec = self._plugin_sec()
         return bool(sec.get("panel_expanded", False))
 
     @property
@@ -63,7 +58,7 @@ class Config:
         默认 False（保持现有行为：流式态面板收起）。
         与 panel_expanded（完成态面板）独立配置。
         """
-        sec = self._streaming_sec()
+        sec = self._plugin_sec()
         return bool(sec.get("streaming_panel_expanded", False))
 
     @property
@@ -75,14 +70,14 @@ class Config:
 
         默认 "delay"（更丝滑的阅读体验）。
         """
-        sec = self._streaming_sec()
+        sec = self._plugin_sec()
         strategy = sec.get("print_strategy", "delay")
         return strategy if strategy in ("fast", "delay") else "delay"
 
     @property
     def flush_interval_ms(self) -> float:
         """流式卡片刷新间隔（毫秒），用于诊断日志."""
-        sec = self._streaming_sec()
+        sec = self._plugin_sec()
         ms = float(sec.get("flush_interval_ms", 500))
         return max(100.0, min(2000.0, ms))
 
@@ -129,12 +124,12 @@ class Config:
     @property
     def card_duration_sec(self) -> int:
         """卡片存活检测超时."""
-        return int(self._streaming_sec().get("card_ttl_sec", 600))
+        return int(self._plugin_sec().get("card_ttl_sec", 600))
 
     @property
     def footer_fields(self) -> list[list[str]]:
         """Footer 字段布局（二维数组）."""
-        sec = self._streaming_sec()
+        sec = self._plugin_sec()
         footer = sec.get("footer", {})
         if not isinstance(footer, dict):
             return self._default_footer_fields()
@@ -159,7 +154,7 @@ class Config:
         通过 TTL 缓存读取，用户运行时修改配置文件后最多延迟
         _RELOAD_CACHE_TTL 秒生效，避免高频访问时反复读磁盘。
         """
-        sec = self._reload_cached().get("streaming")
+        sec = self._reload_cached().get("hermes_lark_streaming")
         if not isinstance(sec, dict):
             return False
         return bool(sec.get("inject_time", False))
@@ -167,9 +162,18 @@ class Config:
     @property
     def footer_show_label(self) -> bool:
         """Footer 是否显示字段标签."""
-        sec = self._streaming_sec()
+        sec = self._plugin_sec()
         footer = sec.get("footer", {})
         return bool(footer.get("show_label", False))
+
+    @property
+    def header_enabled(self) -> bool:
+        """流式卡片和完成态卡片是否显示 header."""
+        sec = self._plugin_sec()
+        header = sec.get("header", {})
+        if not isinstance(header, dict):
+            return False
+        return bool(header.get("enabled", False))
 
     @property
     def gateway_cards(self) -> bool:
@@ -181,7 +185,7 @@ class Config:
         通过 TTL 缓存读取，用户运行时修改配置文件后最多延迟
         _RELOAD_CACHE_TTL 秒生效。
         """
-        sec = self._reload_cached().get("streaming")
+        sec = self._reload_cached().get("hermes_lark_streaming")
         if not isinstance(sec, dict):
             return True  # 默认开启
         return bool(sec.get("gateway_cards", True))
@@ -198,9 +202,10 @@ class Config:
     def env_app_secret(self) -> str:
         return os.environ.get("FEISHU_APP_SECRET") or os.environ.get("LARK_APP_SECRET") or ""
 
-    def _streaming_sec(self) -> dict[str, Any]:
+    def _plugin_sec(self) -> dict[str, Any]:
+        """Return the ``hermes_lark_streaming`` section from config."""
         raw = self._load()
-        sec = raw.get("streaming")
+        sec = raw.get("hermes_lark_streaming")
         if isinstance(sec, dict):
             return sec
         return {}

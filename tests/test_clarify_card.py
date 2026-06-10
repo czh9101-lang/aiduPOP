@@ -17,7 +17,7 @@ from hermes_lark_streaming.cardkit import (
     build_clarify_confirmed_card,
     build_clarify_submitted_card,
 )
-from hermes_lark_streaming.cardkit_i18n import _T
+from hermes_lark_streaming.cardkit.i18n import _T
 
 
 # ── build_clarify_card (Pending state) ──
@@ -319,11 +319,11 @@ class TestWrapFeishuAdapterSendClarify:
     """Test _wrap_feishu_adapter_send_clarify wrapper logic."""
 
     def test_wrapper_is_callable(self) -> None:
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_clarify
+        from hermes_lark_streaming.patching import _wrap_feishu_adapter_send_clarify
         assert callable(_wrap_feishu_adapter_send_clarify)
 
     def test_wrapper_returns_callable(self) -> None:
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_clarify
+        from hermes_lark_streaming.patching import _wrap_feishu_adapter_send_clarify
         async def orig(*args, **kwargs):
             pass
         wrapped = _wrap_feishu_adapter_send_clarify(orig)
@@ -331,7 +331,7 @@ class TestWrapFeishuAdapterSendClarify:
 
     def test_falls_back_to_original_when_controller_disabled(self) -> None:
         """When controller is disabled, should fall back to original send_clarify."""
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_adapter_send_clarify
+        from hermes_lark_streaming.patching import _wrap_feishu_adapter_send_clarify
 
         orig = AsyncMock(return_value="original_result")
         wrapped = _wrap_feishu_adapter_send_clarify(orig)
@@ -352,7 +352,7 @@ class TestWrapFeishuAdapterSendClarify:
 
     def test_stores_choices_for_callback(self) -> None:
         """When card is sent, choices should be stored in _clarify_choices."""
-        from hermes_lark_streaming.monkey_patch import _clarify_choices, _clarify_questions, _wrap_feishu_adapter_send_clarify
+        from hermes_lark_streaming.patching import _clarify_choices, _clarify_questions, _wrap_feishu_adapter_send_clarify
 
         orig = AsyncMock()
         wrapped = _wrap_feishu_adapter_send_clarify(orig)
@@ -371,7 +371,7 @@ class TestWrapFeishuAdapterSendClarify:
 
         with (
             patch("hermes_lark_streaming.controller.get_controller", return_value=mock_ctrl),
-            patch("hermes_lark_streaming.monkey_patch._register_gateway_card"),
+            patch("hermes_lark_streaming.patching._register_gateway_card"),
         ):
             import asyncio
             try:
@@ -398,12 +398,12 @@ class TestWrapFeishuCardActionTrigger:
     """Test _wrap_feishu_card_action_trigger wrapper."""
 
     def test_wrapper_is_callable(self) -> None:
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_card_action_trigger
+        from hermes_lark_streaming.patching import _wrap_feishu_card_action_trigger
         assert callable(_wrap_feishu_card_action_trigger)
 
     def test_passthrough_for_non_clarify_action(self) -> None:
         """When action is not a clarify action, original method should be called."""
-        from hermes_lark_streaming.monkey_patch import _wrap_feishu_card_action_trigger
+        from hermes_lark_streaming.patching import _wrap_feishu_card_action_trigger
 
         original = MagicMock(return_value="original_response")
         wrapped = _wrap_feishu_card_action_trigger(original)
@@ -422,7 +422,7 @@ class TestWrapFeishuCardActionTrigger:
 
     def test_intercepts_clarify_select_action(self) -> None:
         """When hermes_clarify_action='select', should return submitted card."""
-        from hermes_lark_streaming.monkey_patch import (
+        from hermes_lark_streaming.patching import (
             _clarify_choices,
             _clarify_questions,
             _clarify_answers,
@@ -475,7 +475,7 @@ class TestWrapFeishuCardActionTrigger:
 
     def test_intercepts_input_submit_action(self) -> None:
         """When hermes_clarify_action='input_submit', should resolve with input text."""
-        from hermes_lark_streaming.monkey_patch import (
+        from hermes_lark_streaming.patching import (
             _clarify_questions,
             _clarify_answers,
             _handle_clarify_card_action,
@@ -525,7 +525,7 @@ class TestWrapFeishuCardActionTrigger:
 
     def test_intercepts_retry_submit_action(self) -> None:
         """When hermes_clarify_action='retry_submit', should re-resolve with stored answer."""
-        from hermes_lark_streaming.monkey_patch import (
+        from hermes_lark_streaming.patching import (
             _clarify_questions,
             _clarify_answers,
             _handle_clarify_card_action,
@@ -578,24 +578,24 @@ class TestClarifyCardRegistry:
     """Test the _clarify_choices, _clarify_questions, _clarify_answers, _clarify_card_info module-level dicts."""
 
     def test_choices_registry_exists(self) -> None:
-        from hermes_lark_streaming.monkey_patch import _clarify_choices
+        from hermes_lark_streaming.patching import _clarify_choices
         assert isinstance(_clarify_choices, dict)
 
     def test_questions_registry_exists(self) -> None:
-        from hermes_lark_streaming.monkey_patch import _clarify_questions
+        from hermes_lark_streaming.patching import _clarify_questions
         assert isinstance(_clarify_questions, dict)
 
     def test_selections_registry_exists(self) -> None:
-        from hermes_lark_streaming.monkey_patch import _clarify_selections
+        from hermes_lark_streaming.patching import _clarify_selections
         assert isinstance(_clarify_selections, dict)
 
     def test_card_msg_ids_registry_exists(self) -> None:
-        from hermes_lark_streaming.monkey_patch import _clarify_card_msg_ids
+        from hermes_lark_streaming.patching import _clarify_card_msg_ids
         assert isinstance(_clarify_card_msg_ids, dict)
 
     def test_choices_cleanup_after_resolve(self) -> None:
         """After resolving a clarify, the choices should be cleaned up."""
-        from hermes_lark_streaming.monkey_patch import _clarify_choices, _clarify_questions
+        from hermes_lark_streaming.patching import _clarify_choices, _clarify_questions
 
         _clarify_choices["cleanup_test"] = ["A", "B"]
         _clarify_questions["cleanup_test"] = "Q"

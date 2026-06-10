@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import time as _time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import URLError
@@ -75,6 +76,19 @@ CARDKIT_STREAMING_CLOSED = 300309  # 卡片流式模式已关闭
 CARDKIT_SEQUENCE_CONFLICT = 300317  # sequence 冲突
 MSG_NOT_FOUND = 1000023  # 消息不存在/已删除
 
+# ── CardKit 瞬态错误码 — 可自动重试 ──
+# 参考 Cheerwhy / openclaw-lark: 这三个错误码是飞书 CardKit 的瞬态错误，
+# 通常由服务端内部超时或并发冲突引起，重试后大概率成功。
+CARDKIT_TRANSIENT_CODES = {
+    2200,   # CardKit 内部超时
+    1663,   # CardKit 服务端瞬态错误
+    300000, # CardKit 通用内部错误
+}
+
+# 瞬态错误重试策略 — 指数退避
+_TRANSIENT_RETRY_DELAYS = (0.15, 0.5, 1.0)  # 3 次重试，递增延迟
+_TRANSIENT_MAX_RETRIES = len(_TRANSIENT_RETRY_DELAYS)
+
 
 def is_element_limit_error(e: "FeishuAPIError") -> bool:
     """判断 FeishuAPIError 是否为元素超限错误。
@@ -102,10 +116,27 @@ class FeishuClientConfig:
             raise ValueError("app_secret is required")
 
 
+def _is_transient_error(e: FeishuAPIError) -> bool:
+    """判断 FeishuAPIError 是否为 CardKit 瞬态错误（可重试）.
+
+    瞬态错误通常由飞书服务端内部超时或并发冲突引起，
+    重试后大概率成功。非瞬态错误（频控、元素超限、消息不存在等）
+    不应重试。
+    """
+    if e.code in CARDKIT_TRANSIENT_CODES:
+        return True
+    # 230099 是通用码，需检查子错误码：11310(元素超限)不可重试
+    if e.code == CARDKIT_CONTENT_FAILED:
+        sub = e.extract_sub_code()
+        return sub is not None and sub not in (CARDKIT_ELEMENT_LIMIT,)
+    return False
+
+
 class FeishuClient:
     """飞书 REST API 封装 — 基于 lark-oapi SDK.
 
     SDK 自动管理 tenant_access_token 的获取和刷新.
+    CardKit 瞬态错误自动重试（指数退避）.
     """
 
     def __init__(self, config: FeishuClientConfig) -> None:
@@ -116,6 +147,37 @@ class FeishuClient:
         self._use_async_stream_element = hasattr(
             self._client.cardkit.v1.card_element, 'acontent'
         )
+
+    async def _retry_transient(
+        self,
+        operation: str,
+        coro_factory: Callable[[], Any],
+        *,
+        max_retries: int = _TRANSIENT_MAX_RETRIES,
+    ) -> Any:
+        """执行协程，遇到 CardKit 瞬态错误时自动重试.
+
+        coro_factory: 返回协程的工厂函数（每次重试创建新协程）.
+        非瞬态错误直接抛出，不重试.
+        """
+        last_error: FeishuAPIError | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                return await coro_factory()
+            except FeishuAPIError as e:
+                last_error = e
+                if not _is_transient_error(e):
+                    raise
+                if attempt < max_retries:
+                    delay = _TRANSIENT_RETRY_DELAYS[attempt]
+                    _logger.info(
+                        "transient retry: %s attempt=%d/%d code=%s delay=%.2fs",
+                        operation, attempt + 1, max_retries, e.code, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+        raise last_error  # unreachable, but type-safe
 
     @staticmethod
     def _check(response: Any, operation: str) -> None:
@@ -217,19 +279,22 @@ class FeishuClient:
 
     async def cardkit_create(self, card: dict[str, Any]) -> str:
         """创建 CardKit 实体，返回 card_id."""
-        request = (
-            CreateCardRequest.builder()
-            .request_body(CreateCardRequestBody.builder().type("card_json").data(self._dumps(card)).build())
-            .build()
-        )
-        t0 = _time.monotonic()
-        resp = await self._client.cardkit.v1.card.acreate(request)
-        elapsed_ms = (_time.monotonic() - t0) * 1000
-        _logger.debug("perf: feishu_card_create elapsed=%.0fms", elapsed_ms)
-        self._check(resp, "cardkit_create")
-        if resp.data and resp.data.card_id:
-            return str(resp.data.card_id)
-        raise FeishuAPIError("cardkit_create: response missing card_id")
+        async def _do():
+            request = (
+                CreateCardRequest.builder()
+                .request_body(CreateCardRequestBody.builder().type("card_json").data(self._dumps(card)).build())
+                .build()
+            )
+            t0 = _time.monotonic()
+            resp = await self._client.cardkit.v1.card.acreate(request)
+            elapsed_ms = (_time.monotonic() - t0) * 1000
+            _logger.debug("perf: feishu_card_create elapsed=%.0fms", elapsed_ms)
+            self._check(resp, "cardkit_create")
+            if resp.data and resp.data.card_id:
+                return str(resp.data.card_id)
+            raise FeishuAPIError("cardkit_create: response missing card_id")
+
+        return await self._retry_transient("cardkit_create", _do)
 
     async def cardkit_stream_element(
         self,
@@ -240,26 +305,29 @@ class FeishuClient:
         sequence: int = 0,
     ) -> None:
         """流式更新卡片内指定 element 的内容（打字机效果）."""
-        body_builder = ContentCardElementRequestBody.builder().content(content)
-        body_builder = body_builder.sequence(sequence)
-        request = (
-            ContentCardElementRequest.builder()
-            .card_id(card_id)
-            .element_id(element_id)
-            .request_body(body_builder.build())
-            .build()
-        )
-        t0 = _time.monotonic()
-        if self._use_async_stream_element:
-            resp = await self._client.cardkit.v1.card_element.acontent(request)
-        else:
-            resp = await asyncio.to_thread(
-                self._client.cardkit.v1.card_element.content,
-                request,
+        async def _do():
+            body_builder = ContentCardElementRequestBody.builder().content(content)
+            body_builder = body_builder.sequence(sequence)
+            request = (
+                ContentCardElementRequest.builder()
+                .card_id(card_id)
+                .element_id(element_id)
+                .request_body(body_builder.build())
+                .build()
             )
-        elapsed_ms = (_time.monotonic() - t0) * 1000
-        _logger.debug("perf: feishu_stream_element card=%s el=%s elapsed=%.0fms", card_id[:12], element_id[:12], elapsed_ms)
-        self._check(resp, "cardkit_stream_element")
+            t0 = _time.monotonic()
+            if self._use_async_stream_element:
+                resp = await self._client.cardkit.v1.card_element.acontent(request)
+            else:
+                resp = await asyncio.to_thread(
+                    self._client.cardkit.v1.card_element.content,
+                    request,
+                )
+            elapsed_ms = (_time.monotonic() - t0) * 1000
+            _logger.debug("perf: feishu_stream_element card=%s el=%s elapsed=%.0fms", card_id[:12], element_id[:12], elapsed_ms)
+            self._check(resp, "cardkit_stream_element")
+
+        await self._retry_transient("cardkit_stream_element", _do)
 
     async def cardkit_update(
         self,
@@ -268,13 +336,16 @@ class FeishuClient:
         sequence: int = 0,
     ) -> None:
         """全量更新 CardKit 卡片."""
-        body_builder = UpdateCardRequestBody.builder().card(
-            Card.builder().type("card_json").data(self._dumps(card)).build()
-        )
-        body_builder = body_builder.sequence(sequence)
-        request = UpdateCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
-        resp = await self._client.cardkit.v1.card.aupdate(request)
-        self._check(resp, "cardkit_update")
+        async def _do():
+            body_builder = UpdateCardRequestBody.builder().card(
+                Card.builder().type("card_json").data(self._dumps(card)).build()
+            )
+            body_builder = body_builder.sequence(sequence)
+            request = UpdateCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
+            resp = await self._client.cardkit.v1.card.aupdate(request)
+            self._check(resp, "cardkit_update")
+
+        await self._retry_transient("cardkit_update", _do)
 
     async def cardkit_batch_update(
         self,
@@ -284,21 +355,27 @@ class FeishuClient:
         sequence: int = 0,
     ) -> None:
         """局部更新 CardKit 卡片（增删改组件）."""
-        body_builder = BatchUpdateCardRequestBody.builder().sequence(sequence).actions(self._dumps(actions))
-        request = BatchUpdateCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
-        t0 = _time.monotonic()
-        resp = await self._client.cardkit.v1.card.abatch_update(request)
-        elapsed_ms = (_time.monotonic() - t0) * 1000
-        _logger.debug("perf: feishu_batch_update card=%s elapsed=%.0fms actions=%d", card_id[:12], elapsed_ms, len(actions))
-        self._check(resp, "cardkit_batch_update")
+        async def _do():
+            body_builder = BatchUpdateCardRequestBody.builder().sequence(sequence).actions(self._dumps(actions))
+            request = BatchUpdateCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
+            t0 = _time.monotonic()
+            resp = await self._client.cardkit.v1.card.abatch_update(request)
+            elapsed_ms = (_time.monotonic() - t0) * 1000
+            _logger.debug("perf: feishu_batch_update card=%s elapsed=%.0fms actions=%d", card_id[:12], elapsed_ms, len(actions))
+            self._check(resp, "cardkit_batch_update")
+
+        await self._retry_transient("cardkit_batch_update", _do)
 
     async def cardkit_close_streaming(self, card_id: str, sequence: int = 0) -> None:
         """关闭 CardKit 卡片的流式模式."""
-        body_builder = SettingsCardRequestBody.builder().settings(self._dumps({"streaming_mode": False}))
-        body_builder = body_builder.sequence(sequence)
-        request = SettingsCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
-        resp = await self._client.cardkit.v1.card.asettings(request)
-        self._check(resp, "cardkit_close_streaming")
+        async def _do():
+            body_builder = SettingsCardRequestBody.builder().settings(self._dumps({"streaming_mode": False}))
+            body_builder = body_builder.sequence(sequence)
+            request = SettingsCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
+            resp = await self._client.cardkit.v1.card.asettings(request)
+            self._check(resp, "cardkit_close_streaming")
+
+        await self._retry_transient("cardkit_close_streaming", _do)
 
     async def upload_image(self, image_url: str) -> str | None:
         """下载远程图片并上传到飞书，返回 img_key."""

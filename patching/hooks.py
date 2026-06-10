@@ -1,6 +1,6 @@
 """Runtime Hook Functions for Monkey Patching.
 
-These functions are called by monkey_patch.py when wrapping Hermes methods.
+These functions are called by patching/ sub-package when wrapping Hermes methods.
 They perform one task: check config → call controller.
 """
 
@@ -11,7 +11,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
-from .controller import get_controller
+from ..controller import get_controller
 
 _logger = logging.getLogger("hermes_lark_streaming")
 

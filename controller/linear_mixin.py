@@ -8,9 +8,8 @@ import time as _time
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
-import re
 
-from .cardkit import (
+from ..cardkit import (
     _LOADING_ELEMENT_ID,
     _LOADING_HINT_ELEMENT_ID,
     _build_background_review_panel,
@@ -26,15 +25,21 @@ from .cardkit import (
     build_streaming_card_v2,
 )
 
-# 匹配 markdown 图片语法: ![alt](img_xxx) — 与 cardkit._IMG_MD_PATTERN 对齐
-_IMG_MD_PATTERN = re.compile(r"!\[([^\]]*)\]\((img_[^)\s]+)\)")
-from .cardkit_i18n import _T, _i18n
-from .cardkit_md import (
+from ..cardkit.i18n import _T, _i18n
+from ..cardkit.md import (
     _downgrade_tables,
-    _split_long_text,
     optimize_markdown_style,
 )
-from .controller_mixin import (
+from ..state.linear_split import (
+    _ELEMENT_THRESHOLD,
+    _FOOTER_RESERVE,
+    _estimate_segment_elements,
+    _estimate_tool_elements,
+    _find_tool_split_offset,
+    _simplify_segments_for_complete,
+    _tool_segment_end,
+)
+from .mixin import (
     _TERMINAL,
     ABORTED,
     COMPLETED,
@@ -44,7 +49,7 @@ from .controller_mixin import (
     IDLE,
     STREAMING,
 )
-from .feishu import (
+from ..feishu import (
     CARDKIT_CONTENT_FAILED,
     CARDKIT_ELEMENT_LIMIT,
     CARDKIT_ELEMENT_LIMIT_DIRECT,
@@ -54,68 +59,28 @@ from .feishu import (
     FeishuAPIError,
     is_element_limit_error,
 )
-from .flush import CARDKIT_MS, PATCH_MS
-from .image import ImageResolver
-from .linear import LinearState, Segment
-from .text import split_reasoning_text
+from ..flush import CARDKIT_MS, PATCH_MS
+from ..state.linear import LinearState, Segment
+from ..state.text import split_reasoning_text
 
 if TYPE_CHECKING:
-    from .config import Config
-    from .controller import CardSession
-    from .feishu import FeishuClient
+    from ..config import Config
+    from ..state.session import CardSession
+    from ..feishu import FeishuClient
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
-_ELEMENT_THRESHOLD = 150  # 拆卡阈值（飞书硬上限 200 总元素含嵌套，预留 50 给 footer + 图片 + 波动）
-_FOOTER_RESERVE = 2  # footer 元素预留（hr + markdown）
+__all__ = [
+    "LinearControllerMixin",
+    "_estimate_segment_elements",
+    "_estimate_tool_elements",
+    "_find_tool_split_offset",
+    "_simplify_segments_for_complete",
+    "_tool_segment_end",
+    "_ELEMENT_THRESHOLD",
+    "_FOOTER_RESERVE",
+]
 
-
-def _count_images_in_text(text: str) -> int:
-    """统计 markdown 文本中 img_ 前缀的图片数量（与 cardkit._extract_images_from_markdown 对齐）."""
-    return len(_IMG_MD_PATTERN.findall(text))
-
-
-def _estimate_segment_elements(seg: Segment, all_steps: list[dict[str, Any]]) -> int:
-    """估算单个 segment 封卡时实际占用的卡片元素数.
-
-    流式阶段 answer 虽只占 1 个 streaming markdown element，
-    但封卡时会被 `_split_long_text` 拆成 N 个 markdown 元素。
-    估算必须对齐封卡实际元素数，否则拆卡判断失效——
-    流式阶段判断"不超限"，封卡时实际超限。
-    """
-    if seg.type == "reasoning":
-        return 4  # collapsible_panel + plain_text + standard_icon + markdown
-    elif seg.type == "answer":
-        if seg.text:
-            content = _downgrade_tables(optimize_markdown_style(seg.text))
-            # 图片提取后变成独立 img 元素，需计入
-            img_count = _count_images_in_text(content)
-            return max(len(_split_long_text(content)), 1) + img_count
-        return 1
-    elif seg.type == "tool":
-        return _estimate_tool_elements(
-            seg.tool_offset,
-            _tool_segment_end(seg, all_steps),
-            all_steps,
-        )
-    return 0
-
-
-def _tool_segment_end(seg: Segment, all_steps: list[dict[str, Any]]) -> int:
-    return seg.tool_end_offset if seg.tool_end_offset else len(all_steps)
-
-
-def _estimate_tool_elements(start: int, end: int, all_steps: list[dict[str, Any]]) -> int:
-    """估算 tool panel 在 [start, end) step 区间内的元素数."""
-    steps = all_steps[start:end]
-    count = 3  # panel/header 基础元素
-    for step in steps:
-        count += 3  # title: div + standard_icon + lark_md
-        if step.get("detail"):
-            count += 2  # detail: div + plain_text
-        if step.get("result_block") or step.get("error_block"):
-            count += 2  # output: div + lark_md
-    return count
 
 class LinearControllerMixin:
     """线性模式专用方法 — 由 StreamCardController 继承."""
@@ -200,6 +165,7 @@ class LinearControllerMixin:
                     show_streaming_element=False,
                     streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                     print_strategy=self._cfg.print_strategy,
+                    header_enabled=self._cfg.header_enabled,
                 )
                 card_id = await self._client.cardkit_create(card)
                 card_msg_id = await self._client.reply_card_by_id(
@@ -249,16 +215,6 @@ class LinearControllerMixin:
                 session.linear_state = None
                 session.flush.set_throttle(PATCH_MS)
 
-            if session.image_resolver is None and self._client:
-                session.image_resolver = ImageResolver(
-                    client=self._client,
-                    on_image_resolved=(
-                        lambda: self._schedule_linear_flush(session)
-                        if session.linear
-                        else self._schedule_card_update(session)
-                    ),
-                )
-
             session.flush.set_card_message_ready(True)
             if session.state == CREATING:
                 session.state = STREAMING
@@ -296,49 +252,13 @@ class LinearControllerMixin:
         segments = linear_state.segments
         all_steps = session.tool_use.build_display_steps()
 
-        # ── 步骤 0: 重新估算已创建 answer segment 的元素数 ──
-        # answer 在流式阶段只有一个 streaming element，但封卡时会被 _split_long_text
-        # 拆成 N 个 markdown 元素。文本增长后旧估算可能偏低，需要动态更新 element_count
-        # 以确保拆卡判断基于封卡时的实际元素数。
-        # 如果增长后超限，先做 answer 内部拆分再拆卡。
-        for i, seg in enumerate(segments[session.split_index:]):
-            real_i = i + session.split_index
-            if seg.created and seg.type == "answer" and seg.dirty:
-                new_est = _estimate_segment_elements(seg, all_steps)
-                if new_est != seg.element_estimate:
-                    delta = new_est - seg.element_estimate
-                    session.element_count += delta
-                    seg.element_estimate = new_est
-                    _logger.debug(
-                        "answer estimate updated: msg=%s el=%s old=%d new=%d",
-                        (session.message_id or "?")[:12], seg.el_id,
-                        new_est - delta, new_est,
-                    )
-                # 增长后超限 → answer 内部拆分 + 拆卡
-                if (
-                    session.element_count + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
-                    and not session.split_disabled
-                ):
-                    split_offset = self._find_answer_split_offset(
-                        session.element_count - seg.element_estimate, seg,
-                    )
-                    if split_offset is not None:
-                        linear_state.split_answer_segment(real_i, split_offset)
-                        seg.element_estimate = _estimate_segment_elements(seg, all_steps)
-                        # 新 segment 的估算
-                        new_seg = segments[real_i + 1]
-                        new_seg_est = _estimate_segment_elements(new_seg, all_steps)
-                        new_seg.element_estimate = new_seg_est
-                        # 拆卡：封当前卡到 real_i+1，新卡从 real_i+1 开始
-                        split_ok = await self._do_linear_split(
-                            session, real_i + 1, [], set(), {}, [],
-                        )
-                        if not split_ok:
-                            return
-                        # 拆卡后重新获取 segments 和 all_steps（状态已变化）
-                        segments = linear_state.segments
-                        all_steps = session.tool_use.build_display_steps()
-                        break
+        # ── 步骤 0: 重新估算已创建 answer segment 的元素数 (REMOVED v1.0.0 方案B) ──
+        # 旧逻辑：answer 在流式阶段估算为封卡后的 _split_long_text 分块数，
+        # 文本增长后动态更新 element_count，增长后超限则做 answer 内部拆分再拆卡。
+        # 方案B：answer 估算固定为 1 element（对齐保留式封卡），不再动态重估，
+        # 从根本上消除了估算错位导致的过早拆卡问题。
+        # 如果保留式封卡失败（全量重建触发 _split_long_text），
+        # 由 300305 reactive 拆卡兜底。
 
         # ── 步骤 1: batch_update — 按 segment 顺序处理结构性变更 ──
         actions: list[dict[str, Any]] = []
@@ -362,7 +282,7 @@ class LinearControllerMixin:
                     and session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
                     and not session.split_disabled
                 ):
-                    split_offset = self._find_tool_split_offset(
+                    split_offset = _find_tool_split_offset(
                         session.element_count + new_el_total,
                         seg,
                         all_steps,
@@ -370,18 +290,10 @@ class LinearControllerMixin:
                     if split_offset is not None:
                         linear_state.split_tool_segment(i, split_offset)
                         estimated = _estimate_segment_elements(seg, all_steps)
-                # ── Answer 内部拆分：按文本块边界拆 ──
-                if (
-                    seg.type == "answer"
-                    and session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
-                    and not session.split_disabled
-                ):
-                    split_offset = self._find_answer_split_offset(
-                        session.element_count + new_el_total, seg,
-                    )
-                    if split_offset is not None:
-                        linear_state.split_answer_segment(i, split_offset)
-                        estimated = _estimate_segment_elements(seg, all_steps)
+                # ── Answer 内部拆分 (REMOVED v1.0.0 方案B) ──
+                # answer 估算固定为 1 element，不再需要内部拆分。
+                # 保留式封卡下 answer 始终是 1 个 streaming element，
+                # 只有全量重建封卡时才触发 _split_long_text，由 300305 reactive 拆卡兜底。
                 # ── 超阈值 → 拆卡 ──
                 if (
                     session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
@@ -414,10 +326,7 @@ class LinearControllerMixin:
                 elif seg.type == "answer":
                     # 预填充文本：避免 batch_update 后再调一次 stream_element，
                     # 减少首次文字出现的 API 调用次数（省 ~100-200ms）
-                    _ans_content = seg.text or ""
-                    if session.image_resolver:
-                        _ans_content = session.image_resolver.resolve_images(_ans_content)
-                    _ans_content = _downgrade_tables(optimize_markdown_style(_ans_content)) or " "
+                    _ans_content = _downgrade_tables(optimize_markdown_style(seg.text or "")) or " "
                     el = _streaming_element(content=_ans_content, element_id=seg.el_id)
                     if seg.text:
                         seg.dirty = False  # 文本已在 batch_update 中发送
@@ -450,28 +359,14 @@ class LinearControllerMixin:
                     })
                     session._loading_hint_removed = True
                     session.element_count -= 1  # 占位提示被删除
-                if (
-                    seg.type == "tool"
-                    and i + 1 < len(segments)
-                    and segments[i + 1].type == "tool"
-                    and segments[i + 1].tool_offset == seg.tool_end_offset
-                    and not session.split_disabled
-                ) or (
-                    seg.type == "answer"
-                    and i + 1 < len(segments)
-                    and segments[i + 1].type == "answer"
-                    and not session.split_disabled
-                ):
-                    split_ok = await self._do_linear_split(
-                        session, i + 1, actions, new_el_ids, new_el_estimates, updated_tool_segs,
-                    )
-                    if not split_ok:
-                        return
-                    actions = []
-                    new_el_ids = set()
-                    new_el_estimates = {}
-                    updated_tool_segs = []
-                    new_el_total = 0
+                # ── Trigger B removed (2026-06-09) ──
+                # Previously, adjacent same-type segments (answer→answer, tool→tool)
+                # triggered an unconditional split regardless of element count,
+                # causing "秒拆" (premature split). Card 2.0 has no documented
+                # element limit, so splitting should ONLY be triggered by actual
+                # element count exceeding the threshold (Trigger A above).
+                # The tool→tool adjacent split was also redundant because
+                # tool internal splits are handled by _find_tool_split_offset().
             elif seg.type == "reasoning" and seg.elapsed_ms > 0 and not seg.reasoning_finalized:
                 _logger.info(
                     "linear reasoning finalize: msg=%s el=%s elapsed=%.0fms seq=%d",
@@ -603,10 +498,7 @@ class LinearControllerMixin:
                     _logger.debug("perf: stream_element msg=%s type=%s elapsed=%.0fms", (session.message_id or "?")[:12], seg.type, (_time.monotonic()-t_se)*1000)
                     seg.dirty = False
                 elif seg.type == "answer":
-                    content = seg.text
-                    if session.image_resolver:
-                        content = session.image_resolver.resolve_images(content)
-                    content = _downgrade_tables(optimize_markdown_style(content)) or " "
+                    content = _downgrade_tables(optimize_markdown_style(seg.text)) or " "
                     session.sequence += 1
                     _logger.info(
                         "linear stream: msg=%s seq=%d type=answer len=%d",
@@ -814,49 +706,6 @@ class LinearControllerMixin:
             )
             return False
 
-    def _find_tool_split_offset(
-        self,
-        base_count: int,
-        seg: Segment,
-        all_steps: list[dict[str, Any]],
-    ) -> int | None:
-        """寻找 tool step 拆分点，让当前卡保留尽可能多的 steps."""
-        start = seg.tool_offset
-        end = _tool_segment_end(seg, all_steps)
-        if end - start <= 1:
-            return None
-        for split_offset in range(end - 1, start, -1):
-            estimate = _estimate_tool_elements(start, split_offset, all_steps)
-            if base_count + estimate + _FOOTER_RESERVE <= _ELEMENT_THRESHOLD:
-                return split_offset
-        return None
-
-    def _find_answer_split_offset(
-        self,
-        base_count: int,
-        seg: Segment,
-    ) -> int | None:
-        """寻找 answer 文本拆分点，让当前卡保留尽可能多的文本块.
-
-        按 `_split_long_text` 的实际分块边界拆分：
-        1. 将 answer 文本按 2400 字符分块
-        2. 从后往前找，找到当前卡能容纳的最大块数
-        3. 反推字符偏移量作为拆分点
-        """
-        if not seg.text:
-            return None
-        content = _downgrade_tables(optimize_markdown_style(seg.text))
-        chunks = _split_long_text(content)
-        if len(chunks) <= 1:
-            return None
-        # 从后往前找：保留尽可能多的 chunks 在当前卡
-        for keep in range(len(chunks), 0, -1):
-            if base_count + keep + _FOOTER_RESERVE <= _ELEMENT_THRESHOLD:
-                # 反推字符偏移：前 keep 个 chunk 的总长度
-                char_offset = sum(len(c) for c in chunks[:keep])
-                return char_offset
-        return None
-
     async def _maybe_rollover_tool_segment(
         self,
         *,
@@ -882,7 +731,7 @@ class LinearControllerMixin:
         ):
             return None
 
-        split_offset = self._find_tool_split_offset(
+        split_offset = _find_tool_split_offset(
             session.element_count - seg.element_estimate,
             seg,
             all_steps,
@@ -943,13 +792,6 @@ class LinearControllerMixin:
 
         # 准备封卡数据
         seal_segments = [s for s in segments[:split_idx] if s.created]
-        if session.image_resolver:
-            for seg in seal_segments:
-                if seg.type == "answer" and seg.text:
-                    try:
-                        seg.text = await session.image_resolver.resolve_await(seg.text)
-                    except Exception:
-                        _logger.debug("linear seal image resolve failed: el=%s", seg.el_id, exc_info=True)
 
         seal_card = build_linear_complete_card(
             segments=seal_segments,
@@ -959,6 +801,7 @@ class LinearControllerMixin:
             panel_expanded=self._cfg.panel_expanded,
             partial=True,
             bg_review_messages=linear_state.bg_review_messages if linear_state else None,
+            header_enabled=self._cfg.header_enabled,
         )
 
         # ── Step 1: 封旧卡（先封！避免并发 sequence conflict）──
@@ -1008,6 +851,7 @@ class LinearControllerMixin:
                             panel_expanded=False,
                             partial=True,
                             bg_review_messages=linear_state.bg_review_messages if linear_state else None,
+                            header_enabled=self._cfg.header_enabled,
                         )
                         session.sequence += 1
                         await self._client.cardkit_update(old_card_id, minimal_seal, sequence=session.sequence)
@@ -1037,6 +881,7 @@ class LinearControllerMixin:
                 show_streaming_element=False,
                 streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                 print_strategy=self._cfg.print_strategy,
+                header_enabled=self._cfg.header_enabled,
             )
             new_card_id = await self._client.cardkit_create(card)
             new_msg_id = await self._client.reply_card_by_id(session.anchor_id or session.message_id, new_card_id)
@@ -1194,14 +1039,6 @@ class LinearControllerMixin:
             linear_state.segments[session.split_index:] if linear_state is not None else []
         )
 
-        if session.image_resolver:
-            for seg in active_segments:
-                if seg.type == "answer" and seg.text:
-                    try:
-                        seg.text = await session.image_resolver.resolve_await(seg.text)
-                    except Exception:
-                        _logger.debug("linear image resolve failed: el=%s", seg.el_id, exc_info=True)
-
         card = build_linear_complete_card(
             segments=active_segments,
             all_tool_steps=all_tool_steps,
@@ -1213,6 +1050,7 @@ class LinearControllerMixin:
             footer_show_label=self._cfg.footer_show_label,
             panel_expanded=self._cfg.panel_expanded,
             bg_review_messages=linear_state.bg_review_messages if linear_state else None,
+            header_enabled=self._cfg.header_enabled,
         )
 
         # ── Try preservative seal first (no element explosion) ──
@@ -1292,7 +1130,7 @@ class LinearControllerMixin:
                         session.card_id,
                         (session.message_id or "?")[:12],
                     )
-                    simplified_active = self._simplify_segments_for_complete(
+                    simplified_active = _simplify_segments_for_complete(
                         active_segments, all_tool_steps, level=simplify_level,
                     )
                     card = build_linear_complete_card(
@@ -1306,6 +1144,7 @@ class LinearControllerMixin:
                         footer_show_label=self._cfg.footer_show_label,
                         panel_expanded=self._cfg.panel_expanded,
                         bg_review_messages=linear_state.bg_review_messages if linear_state else None,
+                        header_enabled=self._cfg.header_enabled,
                     )
                     continue  # 立即用简化卡片重试，不等待
 
@@ -1345,66 +1184,3 @@ class LinearControllerMixin:
         session.state = FAILED
         _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
         return False
-
-    def _simplify_segments_for_complete(
-        self,
-        segments: list[Segment],
-        all_tool_steps: list[dict[str, Any]],
-        level: int = 1,
-    ) -> list[Segment]:
-        """为简化卡片构建精简 segment 列表.
-
-        当封卡因元素超限 (300305) 失败时，构建一个精简版的 segment 列表。
-
-        Level 1 (compact): 保留所有面板类型，截断内容以减少元素
-          - reasoning 文本截断至 2000 字符
-          - answer 文本截断至 4000 字符
-          - tool 保留但精简步骤详情（移除 detail 和 result_block）
-        Level 2 (minimal): 移除 reasoning，保留 tool+answer
-          - 截断 answer 文本至 4000 字符
-          - 保留 tool segment 但精简步骤详情
-        """
-        simplified = []
-        for seg in segments:
-            if seg.type == "reasoning":
-                if level >= 2:
-                    # Level 2+: drop reasoning entirely
-                    continue
-                # Level 1: truncate reasoning text
-                if seg.text and len(seg.text) > 2000:
-                    new_seg = Segment(seg.type, seg.el_id)
-                    new_seg.text = seg.text[:2000] + "\n\n... (truncated)"
-                    new_seg.text_el_id = seg.text_el_id
-                    new_seg.created = seg.created
-                    new_seg.element_estimate = 4
-                    simplified.append(new_seg)
-                else:
-                    simplified.append(seg)
-            elif seg.type == "answer":
-                # 截断过长文本
-                if len(seg.text) > 4000:
-                    new_seg = Segment(seg.type, seg.el_id)
-                    new_seg.text = seg.text[:4000] + "\n\n... (truncated)"
-                    new_seg.text_el_id = seg.text_el_id
-                    new_seg.created = seg.created
-                    new_seg.element_estimate = 1  # 保守估算
-                    simplified.append(new_seg)
-                else:
-                    simplified.append(seg)
-            elif seg.type == "tool":
-                # 保留 tool segment 但精简步骤详情
-                simplified.append(seg)
-            else:
-                simplified.append(seg)
-        if not simplified:
-            # 如果所有 segment 都被过滤，至少保留 answer 的文本
-            for seg in segments:
-                if seg.type == "answer" and seg.text:
-                    simple_seg = Segment("answer", seg.el_id)
-                    simple_seg.text = seg.text[:4000]
-                    simple_seg.text_el_id = seg.text_el_id
-                    simple_seg.created = seg.created
-                    simple_seg.element_estimate = 1
-                    simplified.append(simple_seg)
-                    break
-        return simplified

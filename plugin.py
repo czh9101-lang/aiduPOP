@@ -2,12 +2,12 @@
 
 On registration:
 - Backs up ``config.yaml`` before first modification (format: config.yaml.YYYYMMDD_HHMMSS.hermes-lark-streaming)
-- Ensures ``config.yaml`` has a clean top-level ``streaming`` section
+- Ensures ``config.yaml`` has a clean top-level ``hermes_lark_streaming`` section
   with the minimal required defaults so streaming cards work out of the box.
 - Ensures ``hermes-lark-streaming`` is listed in ``plugins.enabled``.
 
 On unregistration:
-- Removes the ``streaming`` section and ``plugins.enabled`` entry from config.yaml
+- Removes the ``hermes_lark_streaming`` section and ``plugins.enabled`` entry from config.yaml
   (does NOT restore the backup — user can manually restore if needed).
 """
 
@@ -42,14 +42,9 @@ def _get_hermes_config_path() -> Path:
     return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
 
 
-# 向后兼容：保留常量名，但改为使用 getter 函数
-# 注意：这仍然在模块导入时求值，但大多数场景下是正确的
-# 对于多 Profile 场景，请使用 _get_hermes_config_path()
-_HERMES_CONFIG_PATH = _get_hermes_config_path()
-
 _PLUGIN_NAME = "hermes-lark-streaming"
 
-# Default streaming config injected into config.yaml on first load
+# Default hermes_lark_streaming config injected into config.yaml on first load
 _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "enabled": True,
     "linear": True,
@@ -115,7 +110,7 @@ def _prepare_config(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def _ensure_streaming_config() -> None:
-    """Ensure ``config.yaml`` has a clean top-level ``streaming`` section."""
+    """Ensure ``config.yaml`` has a clean top-level ``hermes_lark_streaming`` section."""
     # 每次都动态读取 HERMES_HOME，支持多 Profile 场景
     config_path = _get_hermes_config_path()
     if not config_path.exists():
@@ -127,20 +122,20 @@ def _ensure_streaming_config() -> None:
         raw = yaml.safe_load(text) or {}
         changed = False
 
-        # Ensure streaming section exists
-        if "streaming" not in raw:
+        # Ensure hermes_lark_streaming section exists
+        if "hermes_lark_streaming" not in raw:
             # Back up config.yaml before first modification
             _backup_config()
 
-            raw["streaming"] = dict(_DEFAULT_STREAMING_CONFIG)
+            raw["hermes_lark_streaming"] = dict(_DEFAULT_STREAMING_CONFIG)
             changed = True
-            _logger.info("Injected top-level streaming config into %s", config_path)
+            _logger.info("Injected top-level hermes_lark_streaming config into %s", config_path)
 
-        # NOTE: We intentionally do NOT migrate `streaming.show_label` to
-        # `streaming.footer.show_label`.  If `show_label` appears at the
-        # streaming top level (or even the config.yaml top level), it may have
+        # NOTE: We intentionally do NOT migrate `hermes_lark_streaming.show_label` to
+        # `hermes_lark_streaming.footer.show_label`.  If `show_label` appears at the
+        # hermes_lark_streaming top level (or even the config.yaml top level), it may have
         # been placed there by the user for other purposes.  Our plugin only
-        # writes `streaming.footer.show_label` and never touches user-defined
+        # writes `hermes_lark_streaming.footer.show_label` and never touches user-defined
         # keys outside that scope.
 
         # Ensure plugins.enabled includes this plugin
@@ -148,7 +143,7 @@ def _ensure_streaming_config() -> None:
         if isinstance(plugins, dict):
             enabled = plugins.get("enabled")
             if isinstance(enabled, list) and _PLUGIN_NAME not in enabled:
-                # Back up if not already done (e.g. streaming section existed but plugin wasn't listed)
+                # Back up if not already done (e.g. hermes_lark_streaming section existed but plugin wasn't listed)
                 _backup_config()
 
                 enabled.append(_PLUGIN_NAME)
@@ -160,11 +155,11 @@ def _ensure_streaming_config() -> None:
             with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(prepped, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
     except Exception:
-        _logger.exception("Failed to ensure streaming config in config.yaml")
+        _logger.exception("Failed to ensure hermes_lark_streaming config in config.yaml")
 
 
 def _cleanup_config() -> None:
-    """Remove ``streaming`` section and ``plugins.enabled`` entry.
+    """Remove ``hermes_lark_streaming`` section and ``plugins.enabled`` entry.
 
     Called via ``unregister()`` when Hermes plugin system supports it.
     """
@@ -178,10 +173,10 @@ def _cleanup_config() -> None:
         raw = yaml.safe_load(text) or {}
         changed = False
 
-        if "streaming" in raw:
-            del raw["streaming"]
+        if "hermes_lark_streaming" in raw:
+            del raw["hermes_lark_streaming"]
             changed = True
-            _logger.info("Removed top-level streaming config from %s", config_path)
+            _logger.info("Removed top-level hermes_lark_streaming config from %s", config_path)
 
         plugins = raw.get("plugins")
         if isinstance(plugins, dict):
@@ -195,7 +190,7 @@ def _cleanup_config() -> None:
             with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
     except Exception:
-        _logger.exception("Failed to clean up streaming config / plugins.enabled")
+        _logger.exception("Failed to clean up hermes_lark_streaming config / plugins.enabled")
 
 
 def register(ctx: "PluginContext") -> None:
@@ -234,7 +229,7 @@ def register(ctx: "PluginContext") -> None:
 
     _logger.info("hermes-lark-streaming v%s: applying runtime patches...", __version__)
     try:
-        from .monkey_patch import apply_patches
+        from .patching import apply_patches
 
         apply_patches()
         _logger.info("hermes-lark-streaming v%s: patches applied (check logs for per-module status)", __version__)
@@ -245,7 +240,7 @@ def register(ctx: "PluginContext") -> None:
 def unregister(ctx: "PluginContext") -> None:
     """Unregister hermes-lark-streaming.
 
-    Cleans up the injected streaming config from config.yaml.
+    Cleans up the injected hermes_lark_streaming config from config.yaml.
     """
     _cleanup_config()
     _logger.info("hermes-lark-streaming: unregistered")

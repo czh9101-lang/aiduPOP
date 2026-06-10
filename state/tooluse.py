@@ -2,6 +2,26 @@
 
 from __future__ import annotations
 
+__all__ = [
+    "ToolStep",
+    "ToolSession",
+    "ToolUseTracker",
+    "redact_inline_secrets",
+    "_basename_only",
+    "_build_display_block",
+    "_fenced_block",
+    "_format_duration_label",
+    "_humanize_tool_name",
+    "_redact_paths",
+    "_resolve_tool_descriptor",
+    "_sanitize_detail",
+    "_TOOL_DESCRIPTORS",
+    "_SENSITIVE_NAME_RE",
+    "_INLINE_ASSIGNMENT_RE",
+    "_AUTH_HEADER_RE",
+    "_SECRET_FLAG_RE",
+]
+
 import json
 import os
 import re
