@@ -98,7 +98,7 @@ __all__ = [
 _thread_local_ctx = threading.local()
 _thread_local_ctx.data = None
 
-_logger = logging.getLogger("hermes_lark_streaming")
+_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
 
 # ── Module-level Config singleton for inject_time ──────────────────
 # Reused across calls so we don't create a new Config() per message.

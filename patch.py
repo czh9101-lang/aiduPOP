@@ -13,7 +13,7 @@ from typing import Any
 
 from .controller import get_controller
 
-_logger = logging.getLogger("hermes_lark_streaming")
+_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
 
 
 def _safe_hook(

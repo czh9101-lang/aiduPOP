@@ -14,7 +14,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 
-_logger = logging.getLogger("hermes_lark_streaming")
+_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
 
 
 CARDKIT_MS = 0.100  # CardKit 流式 API 的刷新间隔（与参考项目对齐：100ms）

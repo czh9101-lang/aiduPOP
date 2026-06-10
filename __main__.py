@@ -37,8 +37,8 @@ def _ensure_importable() -> None:
         *Path(str(Path.home() / "hermes-agent")).glob("lib/python*/site-packages"),
         # 4. 当前 Python 的 site-packages
         *Path(sys.prefix).glob("lib/python*/site-packages"),
-        # 5. 插件父目录（当 __main__.py 直接运行时）
-        Path(__file__).resolve().parent.parent,
+        # 5. 插件目录（当 __main__.py 直接运行时）
+        Path(__file__).resolve().parent,
     ]
 
     for p in search_paths:

@@ -79,7 +79,7 @@ Background: _run_background_task ── [Hook 1/2]
 
 **4.2 Monkey Patch 非 AST 注入**: 运行时方法替换，不修改源文件，卸载即恢复。代价：需自计时替代不可访问的局部变量。
 
-**4.3 模块解析 + 线程安全**: `_resolve_hermes_agent_module()` 3层解析解决 Apple Silicon 冲突；`_started_msg_ids` 线程安全追踪中断；`threading.local()` 重入守卫；根 `__init__.py` 桥接。
+**4.3 模块解析 + 线程安全**: `_resolve_hermes_agent_module()` 3层解析解决 Apple Silicon 冲突；`_started_msg_ids` 线程安全追踪中断；`threading.local()` 重入守卫；根 `__init__.py` 条件导入（relative 优先，absolute 兜底兼容 pytest）。
 
 **4.4 异步 + 双重补丁**: Cron 全链路异步化(禁止 `run_coroutine_threadsafe().result()`)；`run_conversation` 模块级+实例级双重补丁；Cron/后台临时替换 `adapter.send`（卡片替换纯文本）。
 
@@ -230,7 +230,7 @@ git clone -b DEV https://gitee.com/Aowen-Nowor/hermes-lark-streaming.git
 hermes plugins install /path/to/hermes-lark-streaming
 
 # 查看日志
-grep hermes_lark_streaming ~/.hermes/logs/agent.log
+grep hermes_lark_streaming ~/.hermes/logs/gateway.log
 
 # 运行测试（需要 Hermes venv 的 Python，因为依赖 lark-oapi）
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
@@ -256,12 +256,12 @@ hermes gateway restart
 
 | 症状 | 检查 | 文件 |
 |------|------|------|
-| 卡片不出现 | `grep "GatewayRunner" agent.log` | patching/__init__.py |
+| 卡片不出现 | `grep "GatewayRunner" gateway.log` | patching/__init__.py |
 | 内容重复 | `interim_assistant_callback` 是否被包裹 | patching/callbacks.py |
-| Cron 推送纯文本 | `grep "cron" agent.log` | patching/gateway.py |
-| 后台任务纯文本 | `grep "background" agent.log` | patching/gateway.py |
+| Cron 推送纯文本 | `grep "cron" gateway.log` | patching/gateway.py |
+| 后台任务纯文本 | `grep "background" gateway.log` | patching/gateway.py |
 | 页脚无 cache 字段 | `cache_read_tokens` 是否提取 | patching/callbacks.py |
-| Apple Silicon 报错 | `grep "conversation_loop" agent.log` | patching/__init__.py |
+| Apple Silicon 报错 | `grep "conversation_loop" gateway.log` | patching/__init__.py |
 | 版本号 unknown | plugin.yaml 路径 | `__init__.py` |
 | 页脚耗时为 0 | `_msg_start_time` 设置 | patching/gateway.py |
 | 消息删除后仍更新 | UnavailableGuard | unavailable_guard.py |

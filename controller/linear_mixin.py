@@ -68,7 +68,7 @@ if TYPE_CHECKING:
     from ..state.session import CardSession
     from ..feishu import FeishuClient
 
-_logger = logging.getLogger("hermes_lark_streaming")
+_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
 
 __all__ = [
     "LinearControllerMixin",

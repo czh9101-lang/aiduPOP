@@ -85,7 +85,7 @@ hermes gateway restart
 
 ```bash
 hermes plugins list
-grep hermes_lark_streaming ~/.hermes/logs/agent.log
+grep hermes_lark_streaming ~/.hermes/logs/gateway.log
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
 $HERMES_PYTHON -m hermes_lark_streaming status
 $HERMES_PYTHON -m hermes_lark_streaming verify

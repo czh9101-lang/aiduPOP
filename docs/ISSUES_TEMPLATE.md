@@ -90,20 +90,20 @@
 请运行以下命令获取插件相关日志：
 
 ```bash
-grep hermes_lark_streaming ~/.hermes/logs/agent.log | tail -200
+grep hermes_lark_streaming ~/.hermes/logs/gateway.log | tail -200
 ```
 
 如果有报错，也可以查看完整日志：
 
 ```bash
 # 查看最近 500 行日志
-tail -500 ~/.hermes/logs/agent.log
+tail -500 ~/.hermes/logs/gateway.log
 
 # 搜索特定错误码（如 300317、300305）
-grep -E "300317|300305|element_limit" ~/.hermes/logs/agent.log | tail -50
+grep -E "300317|300305|element_limit" ~/.hermes/logs/gateway.log | tail -50
 
 # 搜索特定模块的日志
-grep -E "controller_linear|flush|cardkit" ~/.hermes/logs/agent.log | tail -100
+grep -E "controller_linear|flush|cardkit" ~/.hermes/logs/gateway.log | tail -100
 ```
 
 **贴日志时请注意**：
@@ -153,7 +153,7 @@ grep -E "controller_linear|flush|cardkit" ~/.hermes/logs/agent.log | tail -100
 
 1. **日志**（最关键！）：没有日志几乎无法定位问题。务必让用户运行：
    ```bash
-   grep hermes_lark_streaming ~/.hermes/logs/agent.log | tail -200
+   grep hermes_lark_streaming ~/.hermes/logs/gateway.log | tail -200
    ```
 
 2. **插件版本**：不同版本的 Bug 和功能差异很大，必须确认版本号：
