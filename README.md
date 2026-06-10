@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -123,15 +123,16 @@ hermes_lark_streaming:
   footer:
     show_label: false              # Show field labels
     fields:
-      - [status, elapsed, model, compression_exhausted]
+      - [status, elapsed, model, cost, compression_exhausted]
       # Available fields:
       #   status      — Reply status (Completed / Error / Stopped)
       #   elapsed     — AI response elapsed time
       #   model       — Model name used
+      #   cost        — Estimated cost with trust indicator ($0.023 est. / $0.023 actual / Free)
       #   compression_exhausted — Context window is full (⚠ Context Full)
       # Fields below are not shown by default — add them to the fields list to enable:
       #   cache       — Cache hit rate (cache_read/total_input hit%)
-      #   tokens      — Token usage (↑ input ↓ output)
+      #   tokens      — Token usage (↑ input ↓ output 💭 reasoning)
       #   context     — Context window usage (used/total percentage)
       #   api_calls   — Number of API calls in this session
       #   history_offset — Conversation history offset; larger = longer history, sudden decrease = context compression

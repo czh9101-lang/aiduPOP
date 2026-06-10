@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 1.0.0 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
+| 版本 | 1.0.1 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
 
 ---
 
@@ -136,7 +136,7 @@ hermes_lark_streaming:
   inject_time: false
   footer:
     show_label: false
-    fields: [status, elapsed, model, compression_exhausted]
+    fields: [status, elapsed, model, cost, compression_exhausted]
 ```
 
 ---
@@ -267,6 +267,8 @@ hermes gateway restart
 | Cron 推送纯文本 | `grep "cron" agent.log` | patching/gateway.py |
 | 后台任务纯文本 | `grep "background" agent.log` | patching/gateway.py |
 | 页脚无 cache 字段 | `cache_read_tokens` 是否提取 | patching/callbacks.py |
+| 页脚无 cost 字段 | `session_estimated_cost_usd` 是否提取 | patching/gateway.py |
+| tokens 缺推理数 | `session_reasoning_tokens` 是否提取 | patching/gateway.py |
 | Apple Silicon 报错 | `grep "conversation_loop" agent.log` | patching/__init__.py |
 | 版本号 unknown | plugin.yaml 路径 | `__init__.py` |
 | 页脚耗时为 0 | `_msg_start_time` 设置 | patching/gateway.py |
@@ -277,4 +279,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-10 | Version: 1.0.0*
+*Last updated: 2026-06-10 | Version: 1.0.1*

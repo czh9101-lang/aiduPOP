@@ -46,6 +46,9 @@ _T: dict[str, tuple[str, str]] = {
     "clarify_submitted": ("Submitted, awaiting confirmation...", "已提交，等待确认..."),
     "clarify_retry": ("Retry submission", "重试提交"),
     "clarify_confirmed": ("Confirmed", "已确认"),
+    "cost_estimated": ("${} (est.)", "${} (估算)"),
+    "cost_actual": ("${} (actual)", "${} (实报)"),
+    "cost_included": ("Free", "免费"),
 }
 
 

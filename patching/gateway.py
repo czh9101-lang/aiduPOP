@@ -386,6 +386,9 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     _agent_ref_child = ctx.get("_agent_ref")
                     cache_read_child = getattr(_agent_ref_child, "session_cache_read_tokens", 0) if _agent_ref_child else 0
                     cache_write_child = getattr(_agent_ref_child, "session_cache_write_tokens", 0) if _agent_ref_child else 0
+                    reasoning_tokens = getattr(_agent_ref_child, "session_reasoning_tokens", 0) if _agent_ref_child else 0
+                    estimated_cost_usd = getattr(_agent_ref_child, "session_estimated_cost_usd", 0) if _agent_ref_child else 0
+                    cost_status = getattr(_agent_ref_child, "session_cost_status", "unknown") if _agent_ref_child else "unknown"
 
                     card_sent_child = on_message_completed(
                         message_id=ctx["message_id"],
@@ -407,6 +410,9 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         compression_exhausted=result.get("compression_exhausted", False),
                         aborted=is_interrupted_child,
                         error_message=_error_msg_child,
+                        reasoning_tokens=reasoning_tokens,
+                        estimated_cost_usd=estimated_cost_usd,
+                        cost_status=cost_status,
                     )
                     if card_sent_child:
                         result["already_sent"] = True
@@ -497,6 +503,9 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 _agent_ref = ctx.get("_agent_ref")
                 cache_read = getattr(_agent_ref, "session_cache_read_tokens", 0) if _agent_ref else 0
                 cache_write = getattr(_agent_ref, "session_cache_write_tokens", 0) if _agent_ref else 0
+                reasoning_tokens = getattr(_agent_ref, "session_reasoning_tokens", 0) if _agent_ref else 0
+                estimated_cost_usd = getattr(_agent_ref, "session_estimated_cost_usd", 0) if _agent_ref else 0
+                cost_status = getattr(_agent_ref, "session_cost_status", "unknown") if _agent_ref else "unknown"
 
                 card_sent = on_message_completed(
                     message_id=ctx["message_id"],
@@ -518,6 +527,9 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     compression_exhausted=result.get("compression_exhausted", False),
                     aborted=is_interrupted,
                     error_message=_error_msg,
+                    reasoning_tokens=reasoning_tokens,
+                    estimated_cost_usd=estimated_cost_usd,
+                    cost_status=cost_status,
                 )
                 if card_sent:
                     result["already_sent"] = True
@@ -752,6 +764,9 @@ def _wrap_run_background_task(orig: Callable) -> Callable:
                 _agent_ref = ctx.get("_agent_ref")
                 cache_read = getattr(_agent_ref, "session_cache_read_tokens", 0) if _agent_ref else 0
                 cache_write = getattr(_agent_ref, "session_cache_write_tokens", 0) if _agent_ref else 0
+                reasoning_tokens = getattr(_agent_ref, "session_reasoning_tokens", 0) if _agent_ref else 0
+                estimated_cost_usd = getattr(_agent_ref, "session_estimated_cost_usd", 0) if _agent_ref else 0
+                cost_status = getattr(_agent_ref, "session_cost_status", "unknown") if _agent_ref else "unknown"
 
                 card_sent = on_message_completed(
                     message_id=task_id,
@@ -773,6 +788,9 @@ def _wrap_run_background_task(orig: Callable) -> Callable:
                     compression_exhausted=(result or {}).get("compression_exhausted", False),
                     aborted=False,
                     error_message=(result or {}).get("error") or "",
+                    reasoning_tokens=reasoning_tokens,
+                    estimated_cost_usd=estimated_cost_usd,
+                    cost_status=cost_status,
                 )
 
                 if card_sent:

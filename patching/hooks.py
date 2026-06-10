@@ -114,6 +114,9 @@ def on_message_completed(
     compression_exhausted: bool = False,
     aborted: bool = False,
     error_message: str = "",
+    reasoning_tokens: int = 0,
+    estimated_cost_usd: float = 0.0,
+    cost_status: str = "unknown",
 ) -> bool:
     """[注入点 2] return 前 — message.completed."""
     return bool(
@@ -129,6 +132,9 @@ def on_message_completed(
             compression_exhausted=compression_exhausted,
             aborted=aborted,
             error_message=error_message,
+            reasoning_tokens=reasoning_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+            cost_status=cost_status,
         )
     )
 

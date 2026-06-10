@@ -279,6 +279,63 @@ class TestBuildFooterElements:
         assert len(result) >= 2
         assert "10" in result[1]["content"]
 
+    def test_cost_estimated_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"estimated_cost_usd": 0.023, "cost_status": "estimated"},
+            fields=[["cost"]],
+        )
+        assert len(result) >= 2
+        assert "$" in result[1]["content"]
+        assert "est." in result[1]["content"]
+
+    def test_cost_actual_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"estimated_cost_usd": 1.50, "cost_status": "actual"},
+            fields=[["cost"]],
+        )
+        assert len(result) >= 2
+        assert "$" in result[1]["content"]
+        assert "actual" in result[1]["content"]
+
+    def test_cost_included_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"cost_status": "included"},
+            fields=[["cost"]],
+        )
+        assert len(result) >= 2
+        content = result[1]["content"]
+        assert "Free" in content or "免费" in content
+
+    def test_cost_unknown_not_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"cost_status": "unknown"},
+            fields=[["cost"]],
+        )
+        assert result == []
+
+    def test_cost_zero_not_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"estimated_cost_usd": 0, "cost_status": "estimated"},
+            fields=[["cost"]],
+        )
+        assert result == []
+
+    def test_tokens_with_reasoning_displayed(self) -> None:
+        result = _build_footer_elements(
+            {"input_tokens": 2100, "output_tokens": 850, "reasoning_tokens": 3200},
+            fields=[["tokens"]],
+        )
+        assert len(result) >= 2
+        assert "💭" in result[1]["content"]
+
+    def test_tokens_without_reasoning_no_thinking_icon(self) -> None:
+        result = _build_footer_elements(
+            {"input_tokens": 2100, "output_tokens": 850},
+            fields=[["tokens"]],
+        )
+        assert len(result) >= 2
+        assert "💭" not in result[1]["content"]
+
 
 # --- 错误面板 ---
 

@@ -41,7 +41,7 @@ class TestEnabled:
 
 
 class TestFooterFields:
-    _DEFAULT_FIELDS = [["status", "elapsed", "model", "compression_exhausted"]]
+    _DEFAULT_FIELDS = [["status", "elapsed", "model", "cost", "compression_exhausted"]]
 
     def test_normal_2d_fields(self) -> None:
         cfg = _make_config({"hermes_lark_streaming": {"footer": {"fields": [["a", "b"], ["c"]]}}})

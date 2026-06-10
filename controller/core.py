@@ -415,6 +415,9 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         compression_exhausted: bool = False,
         aborted: bool = False,
         error_message: str = "",
+        reasoning_tokens: int = 0,
+        estimated_cost_usd: float = 0.0,
+        cost_status: str = "unknown",
     ) -> bool:
         """消息处理完成 — 构建终端卡片.
 
@@ -510,6 +513,9 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             **({"api_calls": api_calls} if api_calls else {}),
             **({"history_offset": history_offset} if history_offset else {}),
             **({"compression_exhausted": compression_exhausted} if compression_exhausted else {}),
+            **({"reasoning_tokens": reasoning_tokens} if reasoning_tokens else {}),
+            **({"estimated_cost_usd": estimated_cost_usd} if estimated_cost_usd else {}),
+            **({"cost_status": cost_status} if cost_status and cost_status != "unknown" else {}),
         }
 
         # ── 状态转移: → COMPLETING ──
