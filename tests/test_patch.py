@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hermes_lark_streaming.patch import (
+from hermes_lark_streaming.patching.hooks import (
     _safe_hook,
     on_answer_delta,
     on_background_review_message,
@@ -50,7 +50,7 @@ class TestSafeHook:
         def my_hook(*, ctrl: Any, message_id: str, **kwargs: Any) -> Any:
             raise AssertionError("should not be called")
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = my_hook(message_id="m1")
 
         assert result == 42
@@ -63,7 +63,7 @@ class TestSafeHook:
         def my_hook(*, ctrl: Any, message_id: str, **kwargs: Any) -> Any:
             raise RuntimeError("boom")
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = my_hook(message_id="m1")
 
         assert result == "fallback"
@@ -80,7 +80,7 @@ class TestSafeHook:
             called_with["kwargs"] = kwargs
             return "ok"
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = my_hook(message_id="m1", extra="val")
 
         assert result == "ok"
@@ -96,7 +96,7 @@ class TestSafeHook:
         def my_hook(*, ctrl: Any, message_id: str, **kwargs: Any) -> Any:
             return "never"
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = my_hook(message_id="m1")
 
         assert result is None
@@ -110,8 +110,8 @@ class TestSafeHook:
             raise RuntimeError("test error")
 
         with (
-            patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl),
-            patch("hermes_lark_streaming.patch._logger") as mock_logger,
+            patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl),
+            patch("hermes_lark_streaming.patching.hooks._logger") as mock_logger,
         ):
             my_hook(message_id="m1")
 
@@ -127,8 +127,8 @@ class TestSafeHook:
             raise RuntimeError("test error")
 
         with (
-            patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl),
-            patch("hermes_lark_streaming.patch._logger") as mock_logger,
+            patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl),
+            patch("hermes_lark_streaming.patching.hooks._logger") as mock_logger,
         ):
             my_hook(message_id="m1")
 
@@ -143,7 +143,7 @@ class TestSafeHook:
         def my_hook(*, ctrl: Any, message_id: str, **kwargs: Any) -> Any:
             return None
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             with pytest.raises(TypeError):
                 my_hook("m1")  # type: ignore[arg-type]
 
@@ -156,8 +156,8 @@ class TestSafeHook:
             raise ValueError("bad")
 
         with (
-            patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl),
-            patch("hermes_lark_streaming.patch._logger") as mock_logger,
+            patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl),
+            patch("hermes_lark_streaming.patching.hooks._logger") as mock_logger,
         ):
             my_hook(message_id="m1")
 
@@ -174,7 +174,7 @@ class TestOnMessageStarted:
     def test_delegates_with_correct_params(self) -> None:
         ctrl = _make_ctrl(enabled=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_message_started(message_id="m1", chat_id="c1", anchor_id="a1")
 
         ctrl.on_message_started.assert_called_once_with(
@@ -184,7 +184,7 @@ class TestOnMessageStarted:
     def test_delegates_without_anchor_id(self) -> None:
         ctrl = _make_ctrl(enabled=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_message_started(message_id="m1", chat_id="c1")
 
         ctrl.on_message_started.assert_called_once_with(
@@ -194,7 +194,7 @@ class TestOnMessageStarted:
     def test_returns_none_when_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_message_started(message_id="m1", chat_id="c1")
 
         assert result is None
@@ -211,7 +211,7 @@ class TestOnMessageCompleted:
         ctrl = _make_ctrl(enabled=True)
         ctrl.on_completed.return_value = True
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_message_completed(
                 message_id="m1",
                 answer="hello",
@@ -245,7 +245,7 @@ class TestOnMessageCompleted:
         ctrl = _make_ctrl(enabled=True)
         ctrl.on_completed.return_value = "truthy"
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_message_completed(message_id="m1")
 
         assert result is True  # bool("truthy") == True
@@ -254,7 +254,7 @@ class TestOnMessageCompleted:
         ctrl = _make_ctrl(enabled=True)
         ctrl.on_completed.return_value = 0
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_message_completed(message_id="m1")
 
         assert result is False  # bool(0) == False
@@ -262,7 +262,7 @@ class TestOnMessageCompleted:
     def test_returns_false_when_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_message_completed(message_id="m1")
 
         assert result is False
@@ -273,7 +273,7 @@ class TestOnMessageCompleted:
         ctrl = _make_ctrl(enabled=True)
         ctrl.on_completed.return_value = True
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_message_completed(message_id="m1")
 
         call_kwargs = ctrl.on_completed.call_args[1]
@@ -291,7 +291,7 @@ class TestOnToolUpdated:
     def test_delegates_with_correct_params(self) -> None:
         ctrl = _make_ctrl(enabled=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_tool_updated(
                 message_id="m1", tool_name="read", status="started", detail="file.py"
             )
@@ -304,7 +304,7 @@ class TestOnToolUpdated:
     def test_returns_false_when_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_tool_updated(message_id="m1", tool_name="read", status="started")
 
         assert result is False
@@ -320,7 +320,7 @@ class TestOnAnswerDelta:
     def test_delegates_with_correct_params(self) -> None:
         ctrl = _make_ctrl(enabled=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_answer_delta(message_id="m1", text="hello world")
 
         ctrl.on_answer.assert_called_once_with(message_id="m1", text="hello world")
@@ -329,7 +329,7 @@ class TestOnAnswerDelta:
     def test_returns_false_when_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_answer_delta(message_id="m1", text="hello")
 
         assert result is False
@@ -345,7 +345,7 @@ class TestOnThinkingDelta:
     def test_delegates_with_correct_params(self) -> None:
         ctrl = _make_ctrl(enabled=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_thinking_delta(message_id="m1", text="thinking...")
 
         ctrl.on_thinking.assert_called_once_with(message_id="m1", text="thinking...")
@@ -354,7 +354,7 @@ class TestOnThinkingDelta:
     def test_returns_false_when_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_thinking_delta(message_id="m1", text="thinking...")
 
         assert result is False
@@ -370,7 +370,7 @@ class TestOnReasoningDelta:
     def test_delegates_with_correct_params(self) -> None:
         ctrl = _make_ctrl(enabled=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_reasoning_delta(message_id="m1", text="reasoning step")
 
         ctrl.on_reasoning.assert_called_once_with(message_id="m1", text="reasoning step")
@@ -379,7 +379,7 @@ class TestOnReasoningDelta:
     def test_returns_false_when_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_reasoning_delta(message_id="m1", text="reasoning")
 
         assert result is False
@@ -397,7 +397,7 @@ class TestOnBackgroundReviewMessage:
         ctrl.defer_background_review.return_value = True
         sender = MagicMock()
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_background_review_message(
                 message_id="m1", text="review text", sender=sender
             )
@@ -412,7 +412,7 @@ class TestOnBackgroundReviewMessage:
         ctrl.defer_background_review.return_value = False
         sender = MagicMock()
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_background_review_message(
                 message_id="m1", text="review", sender=sender
             )
@@ -422,7 +422,7 @@ class TestOnBackgroundReviewMessage:
     def test_returns_false_when_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_background_review_message(
                 message_id="m1", text="review", sender=MagicMock()
             )
@@ -440,7 +440,7 @@ class TestOnMessageAborted:
     def test_delegates_with_correct_params(self) -> None:
         ctrl = _make_ctrl(enabled=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_message_aborted(message_id="m1")
 
         ctrl.on_aborted.assert_called_once_with(message_id="m1")
@@ -448,7 +448,7 @@ class TestOnMessageAborted:
     def test_returns_none_when_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_message_aborted(message_id="m1")
 
         assert result is None
@@ -465,7 +465,7 @@ class TestOnMessageInterrupted:
         """message_id -> old_message_id, new_message_id stays as is."""
         ctrl = _make_ctrl(enabled=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_message_interrupted(
                 message_id="old_msg",
                 new_message_id="new_msg",
@@ -483,7 +483,7 @@ class TestOnMessageInterrupted:
     def test_delegates_without_anchor_id(self) -> None:
         ctrl = _make_ctrl(enabled=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_message_interrupted(
                 message_id="old_msg",
                 new_message_id="new_msg",
@@ -500,7 +500,7 @@ class TestOnMessageInterrupted:
     def test_returns_none_when_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = on_message_interrupted(
                 message_id="old_msg",
                 new_message_id="new_msg",
@@ -527,7 +527,7 @@ class TestOnCronDeliver:
     async def test_returns_false_when_controller_disabled(self) -> None:
         ctrl = _make_ctrl(enabled=False)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = await on_cron_deliver(
                 chat_id="c1", content="hello", loop=MagicMock()
             )
@@ -539,7 +539,7 @@ class TestOnCronDeliver:
         ctrl = _make_ctrl(enabled=True)
         ctrl.on_cron_deliver_async = AsyncMock(return_value=True)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = await on_cron_deliver(
                 chat_id="c1", content="hello", loop=MagicMock()
             )
@@ -554,7 +554,7 @@ class TestOnCronDeliver:
         ctrl = _make_ctrl(enabled=True)
         ctrl.on_cron_deliver_async = AsyncMock(return_value="truthy_value")
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = await on_cron_deliver(
                 chat_id="c1", content="hello", loop=MagicMock()
             )
@@ -566,7 +566,7 @@ class TestOnCronDeliver:
         ctrl = _make_ctrl(enabled=True)
         ctrl.on_cron_deliver_async = AsyncMock(side_effect=RuntimeError("fail"))
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             result = await on_cron_deliver(
                 chat_id="c1", content="hello", loop=MagicMock()
             )
@@ -586,7 +586,7 @@ class TestOnCronDeliver:
         ctrl.on_cron_deliver_async = AsyncMock(return_value=True)
         loop = MagicMock()
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             await on_cron_deliver(chat_id="c1", content="hello", loop=loop)
 
         ctrl.on_cron_deliver_async.assert_called_once_with(
@@ -626,7 +626,7 @@ class TestOnFeishuNormalize:
             raw_message={"event": {"message": {}}},  # no thread_id
         )
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(
                 message_id="m1",
                 source=source,
@@ -646,7 +646,7 @@ class TestOnFeishuNormalize:
             raw_message={"event": {"message": {"thread_id": "real_thread"}}},
         )
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(
                 message_id="m1",
                 source=source,
@@ -664,7 +664,7 @@ class TestOnFeishuNormalize:
             raw_message={},
         )
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(
                 message_id="m1",
                 source=source,
@@ -682,7 +682,7 @@ class TestOnFeishuNormalize:
             raw_message={},
         )
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(
                 message_id="m1",
                 source=source,
@@ -700,7 +700,7 @@ class TestOnFeishuNormalize:
             raw_message={},
         )
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(
                 message_id="m1",
                 source=source,
@@ -719,7 +719,7 @@ class TestOnFeishuNormalize:
             raw_message={},
         )
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(
                 message_id="m1",
                 source=source,
@@ -737,7 +737,7 @@ class TestOnFeishuNormalize:
             raw_message={"event": {"message": {"content": "hi"}}},
         )
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(message_id="m1", source=source, event=event)
 
         assert source.thread_id is None
@@ -752,7 +752,7 @@ class TestOnFeishuNormalize:
         raw = SimpleNamespace(event=event_obj)
         event = self._make_event(reply_to="reply_msg", raw_message=raw)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(message_id="m1", source=source, event=event)
 
         assert source.thread_id is None
@@ -766,7 +766,7 @@ class TestOnFeishuNormalize:
             raw_message={"message": {}},
         )
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(message_id="m1", source=source, event=event)
 
         assert source.thread_id is None
@@ -781,7 +781,7 @@ class TestOnFeishuNormalize:
         raw = SimpleNamespace(event=event_obj)
         event = self._make_event(reply_to="reply_msg", raw_message=raw)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(message_id="m1", source=source, event=event)
 
         assert source.thread_id is None
@@ -792,7 +792,7 @@ class TestOnFeishuNormalize:
         source = self._make_source(thread_id="bad_thread")
         event = self._make_event(reply_to="reply_msg", raw_message=None)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(message_id="m1", source=source, event=event)
 
         assert source.thread_id is None
@@ -807,7 +807,7 @@ class TestOnFeishuNormalize:
         raw = SimpleNamespace(event=event_obj)
         event = self._make_event(reply_to="reply_msg", raw_message=raw)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(message_id="m1", source=source, event=event)
 
         # real_thread_id is "real_thread", so source.thread_id should NOT be cleared
@@ -823,7 +823,7 @@ class TestOnFeishuNormalize:
         raw = SimpleNamespace(event=raw_event_obj)
         event = self._make_event(reply_to="reply_msg", raw_message=raw)
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(message_id="m1", source=source, event=event)
 
         assert source.thread_id is None
@@ -837,7 +837,7 @@ class TestOnFeishuNormalize:
             raw_message={"message": {"thread_id": "real_thread"}},
         )
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(message_id="m1", source=source, event=event)
 
         # real_thread_id exists, so should NOT clear
@@ -852,7 +852,7 @@ class TestOnFeishuNormalize:
         source = SimpleNamespace(platform="feishu", thread_id="bad_thread")
         event = self._make_event(reply_to="reply_msg", raw_message={})
 
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=ctrl):
             on_feishu_normalize(message_id="m1", source=source, event=event)
 
         # platform_value will be "" (string has no .value), so it won't match "feishu"

@@ -11,9 +11,9 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .feishu import MSG_NOT_FOUND
+from .client import MSG_NOT_FOUND
 
-_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
+_logger = logging.getLogger("hermes_lark_streaming")
 
 
 _TERMINAL_MESSAGE_CODES = {

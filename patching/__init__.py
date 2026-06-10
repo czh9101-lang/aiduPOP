@@ -91,6 +91,19 @@ __all__ = [
     '_clarify_selections',
     '_clarify_answers',
     '_clarify_card_info',
+    # From hooks
+    'on_feishu_normalize',
+    'on_message_started',
+    'on_message_completed',
+    'on_tool_updated',
+    'on_answer_delta',
+    'on_thinking_delta',
+    'on_reasoning_delta',
+    'on_background_review_message',
+    'on_message_aborted',
+    'on_message_interrupted',
+    'on_cron_deliver',
+    '_safe_hook',
 ]
 
 
@@ -98,7 +111,7 @@ __all__ = [
 _thread_local_ctx = threading.local()
 _thread_local_ctx.data = None
 
-_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
+_logger = logging.getLogger("hermes_lark_streaming")
 
 # ── Module-level Config singleton for inject_time ──────────────────
 # Reused across calls so we don't create a new Config() per message.
@@ -201,6 +214,20 @@ from .adapter import (  # noqa: E402
     _clarify_selections,
     _clarify_answers,
     _clarify_card_info,
+)
+from .hooks import (  # noqa: E402
+    on_feishu_normalize,
+    on_message_started,
+    on_message_completed,
+    on_tool_updated,
+    on_answer_delta,
+    on_thinking_delta,
+    on_reasoning_delta,
+    on_background_review_message,
+    on_message_aborted,
+    on_message_interrupted,
+    on_cron_deliver,
+    _safe_hook,
 )
 
 

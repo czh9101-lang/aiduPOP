@@ -8,14 +8,28 @@ and progressive card splitting.
 
 Module Organization
 ──────────────────
+Configuration:
+  config/                     Sub-package
+    __init__.py               Re-exports: Config
+    reader.py                 Config reader (Hermes config.yaml)
+
+Feishu API:
+  feishu/                     Sub-package
+    __init__.py               Re-exports: FeishuClient, FeishuAPIError, UnavailableGuard, etc.
+    client.py                 FeishuClient (Lark SDK wrapper, transient retry)
+    guard.py                  UnavailableGuard (message-deleted protection)
+
+Flush Throttle:
+  flush/                      Sub-package
+    __init__.py               Re-exports: FlushController, constants
+    controller.py             FlushController (throttle scheduler)
+
 Core Controller:
   controller/                 Sub-package
     __init__.py               Re-exports: StreamCardController, CardSession, states
     core.py                   StreamCardController (singleton, manages sessions)
     mixin.py                  ControllerMixin (non-linear card API orchestration)
     linear_mixin.py           LinearControllerMixin (linear mode API orchestration)
-  flush.py                    FlushController (throttle scheduler)
-  patch.py                    Hook functions (on_message_started, on_answer_delta, etc.)
 
 Card Building:
   cardkit/                    Sub-package
@@ -26,10 +40,6 @@ Card Building:
     md.py                     Markdown processing (downgrade, split, optimize)
     i18n.py                   i18n zh/en bilingual text mapping
 
-Feishu API:
-  feishu.py                   FeishuClient (Lark SDK wrapper, transient retry)
-  unavailable_guard.py        UnavailableGuard (message-deleted protection)
-
 State & Data:
   state/                      Sub-package
     __init__.py               Re-exports: CardSession, TextState, LinearState, etc.
@@ -38,7 +48,6 @@ State & Data:
     linear_split.py           Element threshold, split estimation helpers
     text.py                   TextState (incremental text tracking)
     tooluse.py                ToolUseTracker (tool call visualization + redaction)
-  config.py                   Config reader (Hermes config.yaml)
 
 Runtime Patching:
   patching/                   Sub-package
@@ -46,6 +55,18 @@ Runtime Patching:
     gateway.py                GatewayRunner wrappers, inject_time, cron
     callbacks.py              Callback wrapping (answer, thinking, tool, reasoning)
     adapter.py                FeishuAdapter interception (send, edit, reactions, clarify)
+    hooks.py                  Hook functions (on_message_started, on_answer_delta, etc.)
+
+Entry Points:
+  plugin.py                   Plugin register/unregister (Hermes entry point)
+  __main__.py                 CLI entry (status, verify, cleanup)
+
+Logging
+───────
+Plugin logger name: ``hermes_lark_streaming``
+  - Inherits level from Hermes root logger (set by config.yaml ``logging.level``)
+  - Logs to ``agent.log`` (catch-all), NOT routed to ``gateway.log``
+  - No explicit ``setLevel()`` — level follows Hermes config automatically
 
 Streaming Mode
 ──────────────
@@ -64,7 +85,7 @@ degradation when exceeding Feishu's 200-element limit.
 import logging
 from pathlib import Path
 
-_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
+_logger = logging.getLogger("hermes_lark_streaming")
 
 _plugin_yaml = Path(__file__).resolve().parent / "plugin.yaml"
 if _plugin_yaml.exists():

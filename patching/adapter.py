@@ -175,7 +175,7 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                                 _sess.state,
                             )
                             try:
-                                from ..patch import on_message_aborted
+                                from .hooks import on_message_aborted
                                 on_message_aborted(message_id=_sess.message_id)
                             except Exception:
                                 pass

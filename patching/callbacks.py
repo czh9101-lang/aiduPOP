@@ -79,7 +79,7 @@ def _maybe_wrap_callbacks(agent) -> None:
 
         def _answer_wrapper(text, *args, **kwargs):
             try:
-                from ..patch import on_answer_delta
+                from .hooks import on_answer_delta
 
                 if text and on_answer_delta(message_id=eid, text=text):
                     _logger.debug(
@@ -117,7 +117,7 @@ def _maybe_wrap_callbacks(agent) -> None:
                 # Dedup: skip if stream_delta_callback already consumed this text
                 last_consumed = _stream_consumed_texts.get(eid, "")
                 if text and text != last_consumed:
-                    from ..patch import on_thinking_delta
+                    from .hooks import on_thinking_delta
                     consumed = on_thinking_delta(message_id=eid, text=text)
                     if consumed:
                         # Card consumed the text — skip original callback to
@@ -157,7 +157,7 @@ def _maybe_wrap_callbacks(agent) -> None:
 
         def _tool_wrapper(event_type, tool_name=None, preview=None, *args, **kwargs):
             try:
-                from ..patch import on_tool_updated
+                from .hooks import on_tool_updated
 
                 if event_type in ("tool.started", "tool.completed"):
                     if on_tool_updated(
@@ -189,7 +189,7 @@ def _maybe_wrap_callbacks(agent) -> None:
 
     def _reasoning_wrapper(text, *args, **kwargs):
         try:
-            from ..patch import on_reasoning_delta
+            from .hooks import on_reasoning_delta
 
             if text:
                 on_reasoning_delta(message_id=eid, text=text)
@@ -206,7 +206,7 @@ def _maybe_wrap_callbacks(agent) -> None:
 
         def _bg_wrapper(message, *args, **kwargs):
             try:
-                from ..patch import on_background_review_message
+                from .hooks import on_background_review_message
 
                 deferred = on_background_review_message(
                     message_id=eid,

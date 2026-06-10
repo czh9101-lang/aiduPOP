@@ -27,7 +27,7 @@ from . import __version__
 if TYPE_CHECKING:
     from hermes_cli.plugins import PluginContext
 
-_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
+_logger = logging.getLogger("hermes_lark_streaming")
 
 
 def _get_hermes_config_path() -> Path:

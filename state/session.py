@@ -14,7 +14,7 @@ FAILED = "failed"
 from ..flush import PATCH_MS, FlushController
 from .text import TextState
 from .tooluse import ToolUseTracker
-from ..unavailable_guard import UnavailableGuard
+from ..feishu import UnavailableGuard
 
 if TYPE_CHECKING:
     from .linear import LinearState

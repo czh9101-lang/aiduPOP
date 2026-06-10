@@ -39,7 +39,7 @@ def _wrap_handle_message(orig: Callable) -> Callable:
     async def wrapper(self, event, *args, **kwargs):
         # NORMALIZE hook — fires before any message processing
         try:
-            from ..patch import on_feishu_normalize
+            from .hooks import on_feishu_normalize
 
             on_feishu_normalize(
                 message_id=event.message_id,
@@ -69,7 +69,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
 
         # ── START hook ──
         try:
-            from ..patch import on_message_started
+            from .hooks import on_message_started
 
             on_message_started(
                 message_id=mid,
@@ -149,7 +149,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                     others = _started_msg_ids - {mid}
                 if others:
                     try:
-                        from ..patch import on_message_interrupted
+                        from .hooks import on_message_interrupted
 
                         new_mid = next(iter(others))
                         on_message_interrupted(
@@ -165,7 +165,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
             else:
                 # Card was never sent — real abort (error, reset, /stop, etc.)
                 try:
-                    from ..patch import on_message_aborted
+                    from .hooks import on_message_aborted
 
                     on_message_aborted(message_id=mid)
                 except Exception:
@@ -191,7 +191,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                                 mid[:12], _sess.state, ctx.get("card_sent"),
                             )
                             try:
-                                from ..patch import on_message_aborted
+                                from .hooks import on_message_aborted
                                 on_message_aborted(message_id=mid)
                             except Exception:
                                 pass
@@ -296,7 +296,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 # reply_anchor as event_message_id in the recursive call,
                 # so this is the correct anchor for the new card.
                 try:
-                    from ..patch import on_message_interrupted
+                    from .hooks import on_message_interrupted
                     on_message_interrupted(
                         message_id=_saved_parent_ctx.get("message_id", ""),
                         new_message_id=event_message_id,
@@ -308,7 +308,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
 
                 # Fire START hook for the new (interrupted-into) message
                 try:
-                    from ..patch import on_message_started
+                    from .hooks import on_message_started
                     on_message_started(
                         message_id=event_message_id,
                         chat_id=ctx["chat_id"],
@@ -359,7 +359,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
             # to complete B's card properly.
             if ctx is not None:
                 try:
-                    from ..patch import on_message_completed
+                    from .hooks import on_message_completed
 
                     _elapsed_child = time.monotonic() - ctx.get("_msg_start_time", time.monotonic())
                     is_interrupted_child = result.get("interrupted", False) or result.get("partial", False)
@@ -422,7 +422,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
             # The parent message was interrupted by the child (B).
             # Fire its COMPLETE as ABORTED so A's card shows "已停止".
             try:
-                from ..patch import on_message_completed
+                from .hooks import on_message_completed
                 _logger.debug(
                     "run_agent: parent COMPLETE hook firing as interrupted "
                     "for msg=%s (child msg=%s completed normally)",
@@ -454,7 +454,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                 _logger.debug("run_agent: parent ABORTED completion failed", exc_info=True)
         elif ctx is not None:
             try:
-                from ..patch import on_message_completed
+                from .hooks import on_message_completed
 
                 # 自计时：计算从消息开始到 agent 运行完成的耗时
                 # 原因：_response_time 是 _handle_message_with_agent 的局部变量，
@@ -697,7 +697,7 @@ def _wrap_run_background_task(orig: Callable) -> Callable:
 
         # ── Fire START hook ──
         try:
-            from ..patch import on_message_started
+            from .hooks import on_message_started
             on_message_started(message_id=task_id, chat_id=chat_id, anchor_id=None)
         except Exception:
             _logger.debug("background task START hook failed", exc_info=True)
@@ -744,7 +744,7 @@ def _wrap_run_background_task(orig: Callable) -> Callable:
         ctx = _msg_ctx.get()
         if ctx is not None:
             try:
-                from ..patch import on_message_completed
+                from .hooks import on_message_completed
 
                 _elapsed = time.monotonic() - ctx.get("_msg_start_time", time.monotonic())
 

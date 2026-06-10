@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 
-_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
+_logger = logging.getLogger("hermes_lark_streaming")
 
 _MAX_CARD_TABLES = 20  # 用户迭代值：20表降级阈值（参考项目用3/5，但经实际迭代20更合适）
 _MAX_CHUNK_CHARS = 2400

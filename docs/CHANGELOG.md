@@ -22,9 +22,10 @@
 | 18 | 🐛 Fixed | **answer 估算错位导致过早拆卡** | answer 估算按全量重建封卡的 `_split_long_text` 分块数计算（answer 24000 字符 → 估算 10 elements），但保留式封卡后 answer 仍为 1 element，估算与实际严重错位导致"第N张卡只有一句话" | **方案B**: answer 估算固定为 1 element（对齐保留式封卡实际行为）；移除 Step 0 动态重估和 answer 内部拆分逻辑；300305 reactive 拆卡作为兜底 |
 | 19 | 🐛 Fixed | **/stop 与占位卡片路径不统一** | `on_aborted` 与 `on_completed(aborted=True)` 两条封卡路径不统一，占位卡片（跑马灯状态）和有内容卡片被区别对待 | 统一封卡路径：无论卡片有无内容，/stop 时都走 `_preservative_seal`（关闭流式 + 添加停止标记）；占位卡片是流式卡片生命周期的正常阶段；新增 gateway.py 卡片卡死检测 + adapter.py /stop 响应拦截 |
 | 20 | Refactor | **目录结构扁平化** | 嵌套 `hermes_lark_streaming/` 子目录使根 `__init__.py` 需 `importlib` 桥接，与 Hermes 官方插件约定不一致 | 移除嵌套子目录，核心代码直接位于 repo root；根 `__init__.py` 改为实际包初始化（非桥接）；对齐 Hermes 插件规范（如 spotify、google_meet） |
-| 21 | Refactor | **Logger 名称对齐** | `logging.getLogger("hermes_lark_streaming")` 不在 Hermes `COMPONENT_PREFIXES` 前缀范围内，日志路由到 `agent.log` 而非 `gateway.log` | 全局改为 `logging.getLogger("hermes_plugins.hermes_lark_streaming")`，日志正确路由到 `gateway.log`；插件日志级别显式跟随 Hermes `config.yaml` → `logging.level` |
-| 22 | Refactor | **跨子包导入规范化** | 桥接模块移除后需统一导入方式 | 跨子包用 `..`（如 `from ..config import Config`），同子包用 `.`；根 `__init__.py` 条件导入（先 relative 后 absolute，兼容 pytest） |
-| 23 | Test | **测试基础设施对齐** | 目录结构变更后 pytest 无法定位包 | 新增 `conftest.py` 在 repo root 注册包到 `sys.modules`（镜像 Hermes `_load_directory_module`）；更新 `pyproject.toml` pytest 配置 |
+| 21 | Refactor | **Logger 名称对齐** | `logging.getLogger("hermes_lark_streaming")` 不在 Hermes `COMPONENT_PREFIXES` 前缀内，日志路由到 `agent.log`；修改 `config.yaml` 的 `logging.level` 不影响插件日志级别 | Logger 名称保持 `hermes_lark_streaming`，从 Hermes root logger 继承级别（由 `config.yaml` `logging.level` 设定）；日志留在 `agent.log`、不路由到 `gateway.log`；无需显式 `setLevel()`——级别自动跟随 Hermes 配置 |
+| 22 | Refactor | **模块结构重组 — 单文件归入子包** | `feishu.py`、`flush.py`、`config.py`、`patch.py`、`unavailable_guard.py` 散落在仓库根目录，根目录 .py 文件过多，结构不清晰 | `feishu.py` + `unavailable_guard.py` → `feishu/` 子包（client.py + guard.py）；`flush.py` → `flush/` 子包（controller.py）；`config.py` → `config/` 子包（reader.py）；`patch.py` → `patching/hooks.py`（归入已有 patching 子包）；根目录仅保留 `__init__.py`、`__main__.py`、`plugin.py` 三个入口文件；所有子包 `__init__.py` 提供 re-export，对外接口不变 |
+| 23 | Refactor | **跨子包导入规范化** | 桥接模块移除后需统一导入方式 | 跨子包用 `..`（如 `from ..config import Config`），同子包用 `.`；根 `__init__.py` 条件导入（先 relative 后 absolute，兼容 pytest） |
+| 24 | Test | **测试基础设施对齐** | 目录结构变更后 pytest 无法定位包 | 新增 `conftest.py` 在 repo root 注册包到 `sys.modules`（镜像 Hermes `_load_directory_module`）；更新 `pyproject.toml` pytest 配置 |
 
 ---
 

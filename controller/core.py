@@ -34,7 +34,7 @@ from ..feishu import (
 from ..state.text import TextState, split_reasoning_text, strip_reasoning_tags
 from ..state.tooluse import ToolUseTracker
 
-_logger = logging.getLogger("hermes_plugins.hermes_lark_streaming")
+_logger = logging.getLogger("hermes_lark_streaming")
 
 
 from ..state.session import CardSession  # noqa: F401 — re-exported for backward compatibility

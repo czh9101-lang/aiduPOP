@@ -32,7 +32,7 @@ Cron: _deliver_result ── [Hook 10: on_cron_deliver] (async)
 Background: _run_background_task ── [Hook 1/2]
 ```
 
-调用链: `patching → patch → controller → mixin → cardkit → feishu → flush`
+调用链: `patching → hooks → controller → mixin → cardkit → feishu → flush`
 
 ---
 
@@ -42,6 +42,7 @@ Background: _run_background_task ── [Hook 1/2]
 |------|------|------|--------|
 | **patching/** | | **运行时拦截子包** | |
 | `├ __init__.py` | ~770 | 入口 + 共享状态 + 编排 | `apply_patches()` + 模块解析 + 延迟补丁 |
+| `├ hooks.py` | ~230 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获 |
 | `├ gateway.py` | ~890 | GatewayRunner 包装 | 6 个 wrapper + 时间前缀注入 + cron/background |
 | `├ callbacks.py` | ~230 | 回调包装 | 5 个内部 wrapper 防重复消费 |
 | `└ adapter.py` | ~1030 | FeishuAdapter 包装 | send/edit/reaction/clarify 包装 + gateway card 注册 |
@@ -64,11 +65,16 @@ Background: _run_background_task ── [Hook 1/2]
 | `├ linear_split.py` | ~170 | 拆分/估算逻辑 | 独立函数，预估元素数 + 查找拆分偏移 |
 | `├ text.py` | ~111 | 文本增量追踪 | `<think|thinking|thought>` 标签拆分 |
 | `└ tooluse.py` | ~299 | 工具调用追踪 | `ToolStep`/`ToolSession`，敏感信息脱敏 |
-| `patch.py` | 229 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获 |
-| `config.py` | ~270 | 配置读取 | `_plugin_sec()` 惰性加载 + 5秒 TTL 缓存 |
-| `feishu.py` | ~450 | 飞书 API 客户端 | CardKit v1/v2 + IM API，错误码分类 |
-| `flush.py` | ~185 | 节流调度器 | CardKit 500ms / IM PATCH 1.5s，互斥锁 + re-flush |
-| `unavailable_guard.py` | ~144 | 消息不可用保护 | 删除/撤回检测，30分钟 TTL |
+| **feishu/** | | **飞书 API 客户端子包** | |
+| `├ __init__.py` | ~48 | 重导出门面 | `FeishuClient`, `UnavailableGuard` 等 |
+| `├ client.py` | ~450 | 飞书 API 客户端 | CardKit v1/v2 + IM API，错误码分类 + 瞬态重试 |
+| `└ guard.py` | ~144 | 消息不可用保护 | 删除/撤回检测，30分钟 TTL |
+| **flush/** | | **节流调度子包** | |
+| `├ __init__.py` | ~21 | 重导出门面 | `FlushController`, `CARDKIT_MS`, `PATCH_MS` |
+| `└ controller.py` | ~185 | 节流调度器 | CardKit 100ms / IM PATCH 1.5s，互斥锁 + re-flush |
+| **config/** | | **配置读取子包** | |
+| `├ __init__.py` | ~9 | 重导出门面 | `Config`, `_get_hermes_config_path` |
+| `└ reader.py` | ~270 | 配置读取 | `_plugin_sec()` 惰性加载 + 5秒 TTL 缓存 |
 | `plugin.py` | ~250 | 插件注册入口 | `register()`/`unregister()`，自动备份 config |
 
 ---
@@ -230,7 +236,7 @@ git clone -b DEV https://gitee.com/Aowen-Nowor/hermes-lark-streaming.git
 hermes plugins install /path/to/hermes-lark-streaming
 
 # 查看日志
-grep hermes_lark_streaming ~/.hermes/logs/gateway.log
+grep hermes_lark_streaming ~/.hermes/logs/agent.log
 
 # 运行测试（需要 Hermes venv 的 Python，因为依赖 lark-oapi）
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
@@ -256,19 +262,19 @@ hermes gateway restart
 
 | 症状 | 检查 | 文件 |
 |------|------|------|
-| 卡片不出现 | `grep "GatewayRunner" gateway.log` | patching/__init__.py |
+| 卡片不出现 | `grep "GatewayRunner" agent.log` | patching/__init__.py |
 | 内容重复 | `interim_assistant_callback` 是否被包裹 | patching/callbacks.py |
-| Cron 推送纯文本 | `grep "cron" gateway.log` | patching/gateway.py |
-| 后台任务纯文本 | `grep "background" gateway.log` | patching/gateway.py |
+| Cron 推送纯文本 | `grep "cron" agent.log` | patching/gateway.py |
+| 后台任务纯文本 | `grep "background" agent.log` | patching/gateway.py |
 | 页脚无 cache 字段 | `cache_read_tokens` 是否提取 | patching/callbacks.py |
-| Apple Silicon 报错 | `grep "conversation_loop" gateway.log` | patching/__init__.py |
+| Apple Silicon 报错 | `grep "conversation_loop" agent.log` | patching/__init__.py |
 | 版本号 unknown | plugin.yaml 路径 | `__init__.py` |
 | 页脚耗时为 0 | `_msg_start_time` 设置 | patching/gateway.py |
-| 消息删除后仍更新 | UnavailableGuard | unavailable_guard.py |
-| 拆卡后超元素 | answer 估算=1（方案B）| linear_split.py |
-| 卡片卡死不更新 | 元素超限无限重试 | controller_linear_mixin.py |
-| /stop 卡片卡死 | on_aborted/on_completed 路径 | gateway.py / adapter.py |
+| 消息删除后仍更新 | UnavailableGuard | feishu/guard.py |
+| 拆卡后超元素 | answer 估算=1（方案B）| state/linear_split.py |
+| 卡片卡死不更新 | 元素超限无限重试 | controller/linear_mixin.py |
+| /stop 卡片卡死 | on_aborted/on_completed 路径 | patching/gateway.py / patching/adapter.py |
 
 ---
 
-*Last updated: 2026-06-10 | Version: 1.0.0*
+*Last updated: 2026-06-12 | Version: 1.0.0*

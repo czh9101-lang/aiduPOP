@@ -94,7 +94,7 @@ class TestAnswerWrapper:
     def test_card_consumes_text_skips_original_callback(self):
         """当卡片消费了文字, 不调原始 stream_delta_callback → 避免重复消息."""
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -110,7 +110,7 @@ class TestAnswerWrapper:
         """当卡片没消费文字, 正常调原始回调."""
         mock_ctrl = MagicMock()
         mock_ctrl.enabled = False  # disabled → on_answer_delta returns False
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -124,7 +124,7 @@ class TestAnswerWrapper:
     def test_empty_text_not_consumed(self):
         """空文字不触发卡片消费, 直接调原始回调."""
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -141,7 +141,7 @@ class TestAnswerWrapper:
         mock_ctrl = MagicMock()
         mock_ctrl.enabled = True
         mock_ctrl.on_answer = MagicMock(side_effect=RuntimeError("boom"))
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -167,7 +167,7 @@ class TestThinkingWrapper:
     def test_card_consumes_text_skips_original_callback(self):
         """[BUG FIX] 卡片消费了文字 → 不调原始 interim_assistant_callback → 不重复."""
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -183,7 +183,7 @@ class TestThinkingWrapper:
         """卡片禁用时, 正常调原始回调 → 降级为纯文本."""
         mock_ctrl = MagicMock()
         mock_ctrl.enabled = False
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -199,7 +199,7 @@ class TestThinkingWrapper:
         mock_ctrl = MagicMock()
         mock_ctrl.enabled = True
         mock_ctrl.on_thinking = MagicMock(side_effect=RuntimeError("boom"))
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -212,7 +212,7 @@ class TestThinkingWrapper:
     def test_empty_text_skips_card_not_original(self):
         """空文字不触发卡片消费, 但调原始回调."""
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -227,7 +227,7 @@ class TestThinkingWrapper:
     def test_already_streamed_kwarg_accepted_when_card_consumes(self):
         """already_streamed=True 时, 卡片消费了就不调原始回调."""
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -241,7 +241,7 @@ class TestThinkingWrapper:
         """卡片没消费时, already_streamed 应正确传递给原始回调."""
         mock_ctrl = MagicMock()
         mock_ctrl.enabled = False
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -266,7 +266,7 @@ class TestThinkingWrapperDedup:
         """当文字已被 stream_delta_callback 消费(卡片已展示),
         thinking_wrapper 应跳过原始回调避免重复发送."""
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -288,7 +288,7 @@ class TestThinkingWrapperDedup:
     def test_different_text_from_stream_delta_goes_to_card(self):
         """当 interim 文字和 stream_delta 不同时, 应发到卡片."""
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -348,7 +348,7 @@ class TestDoubleWrapGuard:
     def test_second_wrap_is_noop(self):
         """已经包装过的回调不应被二次包装."""
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -390,7 +390,7 @@ class TestFullPipelineSimulation:
         期望: 原始回调(通往 _stream_consumer → adapter.send 的管道)不应被调.
         """
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -412,7 +412,7 @@ class TestFullPipelineSimulation:
         """[降级场景] 卡片禁用时, 文字应走原始管道(纯文本)."""
         mock_ctrl = MagicMock()
         mock_ctrl.enabled = False
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
@@ -429,7 +429,7 @@ class TestFullPipelineSimulation:
         """[already_streamed 场景] 卡片活跃 + already_streamed=True 时,
         on_segment_break 不会丢 (因为 _stream_consumer 的 _accumulated 是空的)."""
         mock_ctrl = _make_mock_ctrl()
-        with patch("hermes_lark_streaming.patch.get_controller", return_value=mock_ctrl):
+        with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
             agent = FakeAgent()
 
