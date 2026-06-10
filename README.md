@@ -26,10 +26,10 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 
 ## Effect Preview
 
-<img src="assets/img1.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
-<img src="assets/img3.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
-<img src="assets/img2.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
-<img src="assets/img4.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img1.png" width="22%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img2.png" width="22%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img3.png" width="22%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img4.png" width="22%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
 
 ---
 
