@@ -2,7 +2,6 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
-  <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/version-1.0.0-ff9800.svg" alt="Version">
@@ -10,6 +9,7 @@
 
 <p align="center">
 <a href="https://applink.feishu.cn/client/message/link/open?token=AmoQJk5dwczIahKlW78ADLU%3D"><img src="https://img.shields.io/badge/官方唯一交流群-中国-red" alt="官方交流群"></a>
+<a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
 </p>
 
 <p align="center">
@@ -26,7 +26,10 @@
 
 ## 效果预览
 
-<img src="assets/img1.png" width="45%" /> <img src="assets/img2.png" width="25%" /> <img src="assets/img3.png" width="25%" />
+<img src="assets/img1.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img3.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img2.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img4.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
 
 ---
 
@@ -38,17 +41,22 @@
 - Hermes CLI 支持插件系统（可用 `hermes plugins` 命令）
 
 ### 安装
-
 > 插件会自动读取 `HERMES_HOME` 环境变量定位安装路径（默认 `~/.hermes`），非默认路径下无需额外操作。
 
+**Gitee**
+> 以下两种方式任选其一即可：
 ```bash
-# gitee (SSH)
+# Gitee (SSH)
 hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
-
-# github (SSH)
+# Gitee (HTTPS)
+hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
+```
+**GitHub**
+> 以下两种方式任选其一即可：
+```bash
+# GitHub (SSH)
 hermes plugins install git@github.com:Aowen-Nowor/hermes-lark-streaming.git
-
-# github (HTTPS)
+# GitHub (HTTPS)
 hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
 ```
 
@@ -116,8 +124,18 @@ hermes_lark_streaming:
     show_label: false              # 是否显示字段标签
     fields:
       - [status, elapsed, model, compression_exhausted]
-      # 可用字段：status, elapsed, model, compression_exhausted,
-      #   cache, tokens, context, api_calls, history_offset
+      # 可用字段说明：
+      #   status      — 回复状态（已完成 / 出错 / 已停止）
+      #   elapsed     — AI 回复耗时
+      #   model       — 使用的模型名称
+      #   compression_exhausted — 上下文已满（⚠ 上下文已满）
+      # 以下字段默认不显示 — 在 fields 列表中添加即可启用：
+      #   cache       — 缓存命中率（缓存命中/总输入 命中率%）
+      #   tokens      — Token 用量（↑ 输入 ↓ 输出）
+      #   context     — 上下文窗口用量（已用/总量 百分比）
+      #   api_calls   — 本轮对话的 API 调用次数
+      #   history_offset — 对话历史偏移量；值越大对话越长，值突然变小说明发生了上下文压缩
+      # 每个内层列表为页脚的一行，字段仅在有值时显示
 ```
 
 ### 时间感知模式（`inject_time`）
@@ -152,8 +170,15 @@ display:
 
 > 📖 **[SKILL.md](docs/SKILL.md)** — LLM 快速上手指南。项目架构、关键设计决策、常见陷阱，高效代码修改指南。
 
-完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
+> 完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
 
+> ⚠️ **重要提醒：** 当前版本为深度重构版本（V1.0.0），已不兼容老版本（V0.19.1及以下版本），升级请慎重！
+> 如依旧需要升级，请按照卸载流程卸载老版本，重新安装新版本，禁止通过更新方式升级！
+
+---
+
+## 如何提交 ISSUES
+> 请查看模板 [ISSUES_TEMPLATE.md](docs/ISSUES_TEMPLATE.md)
 ---
 
 ## 致谢

@@ -1,15 +1,15 @@
 <h1 align="center">hermes-lark-streaming</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
-  <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
+  <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/version-1.0.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
-<a href="https://applink.feishu.cn/client/message/link/open?token=AmoQJk5dwczIahKlW78ADLU%3D"><img src="https://img.shields.io/badge/官方唯一交流群-中国-red" alt="Official Group"></a>
+<a href="https://applink.feishu.cn/client/message/link/open?token=AmoQJk5dwczIahKlW78ADLU%3D"><img src="https://img.shields.io/badge/The_Only_Official_Group-China-red" alt="The Only Official Group"></a>
+<a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-Knowledge_Base-3370FF?logo=feishu&logoColor=white" alt="Knowledge Base"></a>
 </p>
 
 <p align="center">
@@ -26,7 +26,10 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 
 ## Effect Preview
 
-<img src="assets/img1.png" width="45%" /> <img src="assets/img2.png" width="25%" /> <img src="assets/img3.png" width="25%" />
+<img src="assets/img1.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img3.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img2.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<img src="assets/img4.png" width="45%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
 
 ---
 
@@ -38,17 +41,22 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 - Hermes CLI with plugin system support (`hermes plugins` command available)
 
 ### Installation
+> The plugin automatically reads the `HERMES_HOME` environment variable to locate the installation path (`~/.hermes` by default). No extra steps are needed for non-default paths.
 
-> The plugin auto-detects `HERMES_HOME` (default `~/.hermes`). No extra steps needed for non-default paths.
-
+**Gitee**
+> Choose either SSH or HTTPS:
 ```bash
-# gitee (SSH)
+# Gitee (SSH)
 hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
-
-# github (SSH)
+# Gitee (HTTPS)
+hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
+```
+**GitHub**
+> Choose either SSH or HTTPS:
+```bash
+# GitHub (SSH)
 hermes plugins install git@github.com:Aowen-Nowor/hermes-lark-streaming.git
-
-# github (HTTPS)
+# GitHub (HTTPS)
 hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
 ```
 
@@ -116,8 +124,18 @@ hermes_lark_streaming:
     show_label: false              # Show field labels
     fields:
       - [status, elapsed, model, compression_exhausted]
-      # Available: status, elapsed, model, compression_exhausted,
-      #   cache, tokens, context, api_calls, history_offset
+      # Available fields:
+      #   status      — Reply status (Completed / Error / Stopped)
+      #   elapsed     — AI response elapsed time
+      #   model       — Model name used
+      #   compression_exhausted — Context window is full (⚠ Context Full)
+      # Fields below are not shown by default — add them to the fields list to enable:
+      #   cache       — Cache hit rate (cache_read/total_input hit%)
+      #   tokens      — Token usage (↑ input ↓ output)
+      #   context     — Context window usage (used/total percentage)
+      #   api_calls   — Number of API calls in this session
+      #   history_offset — Conversation history offset; larger = longer history, sudden decrease = context compression
+      # Each inner list is one row in the footer; fields only shown when they have values
 ```
 
 ### Time Awareness Mode (`inject_time`)
@@ -152,9 +170,15 @@ display:
 
 > 📖 **[SKILL.md](docs/SKILL.md)** — LLM quick-start guide. Architecture, key design decisions, common pitfalls, efficient code modification guide.
 
-完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
+> For the full version history, see [CHANGELOG.md](docs/CHANGELOG.md)
+
+> ⚠️ **Important Notice:** The current version is a deeply refactored release (V1.0.0) and is incompatible with older versions (V0.19.1 and below). Please upgrade with caution!
+> If you still wish to upgrade, please follow the uninstallation process to remove the old version and freshly install the new one. Do NOT upgrade via the update command!
 
 ---
+
+## How to Submit Issues
+> Please refer to the template [ISSUES_TEMPLATE.md](docs/ISSUES_TEMPLATE.md)
 
 ## Acknowledgments
 

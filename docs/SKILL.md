@@ -277,4 +277,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-12 | Version: 1.0.0*
+*Last updated: 2026-06-10 | Version: 1.0.0*
