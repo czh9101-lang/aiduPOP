@@ -13,8 +13,8 @@ from .linear_split import (  # noqa: F401
     _FOOTER_RESERVE,
     _estimate_segment_elements,
     _estimate_tool_elements,
-    _find_answer_split_offset,
     _find_tool_split_offset,
     _simplify_segments_for_complete,
     _tool_segment_end,
+    _count_images_in_text,
 )

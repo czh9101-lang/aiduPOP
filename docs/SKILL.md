@@ -112,7 +112,7 @@ CardKit v2 Streaming → CardKit v2 Create+Patch → IM Create+Patch → Hermes 
 
 ## 7. 线性模式
 
-单卡按事件顺序渲染: `[Reasoning] → [Tool] → [Answer] → ...`。Segment 扁平排列，仅按元素数量超阈值拆卡（Trigger A，阈值 185/200），Tool 按 step 拆分，Answer 按文本块拆分。相邻同类型段不再强制拆卡（Trigger B 已移除，修复"秒拆"bug）。
+单卡按事件顺序渲染: `[Reasoning] → [Tool] → [Answer] → ...`。Segment 扁平排列，仅按元素数量超阈值拆卡（Trigger A，阈值 185/200），Tool 按 step 边界拆分。Answer 估算固定为 1 element（方案B：对齐保留式封卡实际行为），不再做 answer 内部拆分和动态重估；保留式封卡下 answer 始终是 1 个 streaming element，300305 reactive 拆卡兜底。相邻同类型段不再强制拆卡（Trigger B 已移除，修复"秒拆"bug）。
 
 ---
 
@@ -175,7 +175,7 @@ hermes_lark_streaming:
 worker 线程必须用 `call_soon_threadsafe()`，`call_soon()` 不唤醒事件循环→flush 永不执行。
 
 ### 10.7 元素估算必须对齐实际渲染
-飞书卡片 2.0 硬上限 200 元素+组件（API 错误码 300307/300305），拆卡阈值 185（预留 15 给 footer+封卡波动）。估算对齐封卡分块数，否则拆卡判断形同虚设。
+飞书卡片 2.0 硬上限 200 元素+组件（API 错误码 300307/300305），拆卡阈值 185（预留 15 给 footer+封卡波动）。方案B: answer 估算固定为 1（对齐保留式封卡），只有 tool segment 按实际元素数估算。估算错位会导致过早拆卡（answer 估算 10+ 实际 1）。
 
 ### 10.8 幂等守卫 = 同步状态转移 + 错误码容错
 COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态。
@@ -265,8 +265,9 @@ hermes gateway restart
 | 版本号 unknown | plugin.yaml 路径 | `__init__.py` |
 | 页脚耗时为 0 | `_msg_start_time` 设置 | patching/gateway.py |
 | 消息删除后仍更新 | UnavailableGuard | unavailable_guard.py |
-| 拆卡后超元素 | answer 估算对齐 | linear_split.py |
+| 拆卡后超元素 | answer 估算=1（方案B）| linear_split.py |
 | 卡片卡死不更新 | 元素超限无限重试 | controller_linear_mixin.py |
+| /stop 卡片卡死 | on_aborted/on_completed 路径 | gateway.py / adapter.py |
 
 ---
 

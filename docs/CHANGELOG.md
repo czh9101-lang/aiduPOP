@@ -19,6 +19,8 @@
 | 15 | 🗑️ Removed | **MEDIA 域代码全部移除** | 插件不再处理 MEDIA 域，媒体文件由 hermes 完全负责 | 移除 MEDIA FIX 透传、`extract_media` 调用、`media_delivery_allow_dirs` 桥接、gateway 卡片中 `media_parts` 参数；MEDIA 域 100% 由 hermes 负责 |
 | 16 | 🐛 Fixed | **中断 anchor_id 错误** | 中断时新卡片错误引用旧消息的 anchor_id，导致新卡关联到错误的消息 | 新卡片现在正确引用新消息的 anchor_id |
 | 17 | 🐛 Fixed | **中断+拆卡竞态条件** | `on_interrupted` 在进行中的 flush 完成前就中止旧会话，导致并发 `card_id` 操作 | `on_interrupted` 现在等待进行中的 flush 完成后再中止旧会话，防止并发 `card_id` 操作 |
+| 18 | 🐛 Fixed | **answer 估算错位导致过早拆卡** | answer 估算按全量重建封卡的 `_split_long_text` 分块数计算（answer 24000 字符 → 估算 10 elements），但保留式封卡后 answer 仍为 1 element，估算与实际严重错位导致"第N张卡只有一句话" | **方案B**: answer 估算固定为 1 element（对齐保留式封卡实际行为）；移除 Step 0 动态重估和 answer 内部拆分逻辑；300305 reactive 拆卡作为兜底 |
+| 19 | 🐛 Fixed | **/stop 与占位卡片路径不统一** | `on_aborted` 与 `on_completed(aborted=True)` 两条封卡路径不统一，占位卡片（跑马灯状态）和有内容卡片被区别对待 | 统一封卡路径：无论卡片有无内容，/stop 时都走 `_preservative_seal`（关闭流式 + 添加停止标记）；占位卡片是流式卡片生命周期的正常阶段；新增 gateway.py 卡片卡死检测 + adapter.py /stop 响应拦截 |
 
 ---
 

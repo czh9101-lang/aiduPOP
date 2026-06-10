@@ -35,7 +35,6 @@ from ..state.linear_split import (
     _FOOTER_RESERVE,
     _estimate_segment_elements,
     _estimate_tool_elements,
-    _find_answer_split_offset,
     _find_tool_split_offset,
     _simplify_segments_for_complete,
     _tool_segment_end,
@@ -75,7 +74,6 @@ __all__ = [
     "LinearControllerMixin",
     "_estimate_segment_elements",
     "_estimate_tool_elements",
-    "_find_answer_split_offset",
     "_find_tool_split_offset",
     "_simplify_segments_for_complete",
     "_tool_segment_end",
@@ -254,49 +252,13 @@ class LinearControllerMixin:
         segments = linear_state.segments
         all_steps = session.tool_use.build_display_steps()
 
-        # ── 步骤 0: 重新估算已创建 answer segment 的元素数 ──
-        # answer 在流式阶段只有一个 streaming element，但封卡时会被 _split_long_text
-        # 拆成 N 个 markdown 元素。文本增长后旧估算可能偏低，需要动态更新 element_count
-        # 以确保拆卡判断基于封卡时的实际元素数。
-        # 如果增长后超限，先做 answer 内部拆分再拆卡。
-        for i, seg in enumerate(segments[session.split_index:]):
-            real_i = i + session.split_index
-            if seg.created and seg.type == "answer" and seg.dirty:
-                new_est = _estimate_segment_elements(seg, all_steps)
-                if new_est != seg.element_estimate:
-                    delta = new_est - seg.element_estimate
-                    session.element_count += delta
-                    seg.element_estimate = new_est
-                    _logger.debug(
-                        "answer estimate updated: msg=%s el=%s old=%d new=%d",
-                        (session.message_id or "?")[:12], seg.el_id,
-                        new_est - delta, new_est,
-                    )
-                # 增长后超限 → answer 内部拆分 + 拆卡
-                if (
-                    session.element_count + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
-                    and not session.split_disabled
-                ):
-                    split_offset = _find_answer_split_offset(
-                        session.element_count - seg.element_estimate, seg,
-                    )
-                    if split_offset is not None:
-                        linear_state.split_answer_segment(real_i, split_offset)
-                        seg.element_estimate = _estimate_segment_elements(seg, all_steps)
-                        # 新 segment 的估算
-                        new_seg = segments[real_i + 1]
-                        new_seg_est = _estimate_segment_elements(new_seg, all_steps)
-                        new_seg.element_estimate = new_seg_est
-                        # 拆卡：封当前卡到 real_i+1，新卡从 real_i+1 开始
-                        split_ok = await self._do_linear_split(
-                            session, real_i + 1, [], set(), {}, [],
-                        )
-                        if not split_ok:
-                            return
-                        # 拆卡后重新获取 segments 和 all_steps（状态已变化）
-                        segments = linear_state.segments
-                        all_steps = session.tool_use.build_display_steps()
-                        break
+        # ── 步骤 0: 重新估算已创建 answer segment 的元素数 (REMOVED v1.0.0 方案B) ──
+        # 旧逻辑：answer 在流式阶段估算为封卡后的 _split_long_text 分块数，
+        # 文本增长后动态更新 element_count，增长后超限则做 answer 内部拆分再拆卡。
+        # 方案B：answer 估算固定为 1 element（对齐保留式封卡），不再动态重估，
+        # 从根本上消除了估算错位导致的过早拆卡问题。
+        # 如果保留式封卡失败（全量重建触发 _split_long_text），
+        # 由 300305 reactive 拆卡兜底。
 
         # ── 步骤 1: batch_update — 按 segment 顺序处理结构性变更 ──
         actions: list[dict[str, Any]] = []
@@ -328,18 +290,10 @@ class LinearControllerMixin:
                     if split_offset is not None:
                         linear_state.split_tool_segment(i, split_offset)
                         estimated = _estimate_segment_elements(seg, all_steps)
-                # ── Answer 内部拆分：按文本块边界拆 ──
-                if (
-                    seg.type == "answer"
-                    and session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
-                    and not session.split_disabled
-                ):
-                    split_offset = _find_answer_split_offset(
-                        session.element_count + new_el_total, seg,
-                    )
-                    if split_offset is not None:
-                        linear_state.split_answer_segment(i, split_offset)
-                        estimated = _estimate_segment_elements(seg, all_steps)
+                # ── Answer 内部拆分 (REMOVED v1.0.0 方案B) ──
+                # answer 估算固定为 1 element，不再需要内部拆分。
+                # 保留式封卡下 answer 始终是 1 个 streaming element，
+                # 只有全量重建封卡时才触发 _split_long_text，由 300305 reactive 拆卡兜底。
                 # ── 超阈值 → 拆卡 ──
                 if (
                     session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD

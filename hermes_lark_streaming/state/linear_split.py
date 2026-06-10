@@ -17,7 +17,6 @@ __all__ = [
     "_FOOTER_RESERVE",
     "_estimate_segment_elements",
     "_estimate_tool_elements",
-    "_find_answer_split_offset",
     "_find_tool_split_offset",
     "_simplify_segments_for_complete",
     "_tool_segment_end",
@@ -39,20 +38,17 @@ def _count_images_in_text(text: str) -> int:
 def _estimate_segment_elements(seg: Segment, all_steps: list[dict[str, Any]]) -> int:
     """估算单个 segment 封卡时实际占用的卡片元素数.
 
-    流式阶段 answer 虽只占 1 个 streaming markdown element，
-    但封卡时会被 `_split_long_text` 拆成 N 个 markdown 元素。
-    估算必须对齐封卡实际元素数，否则拆卡判断失效——
-    流式阶段判断"不超限"，封卡时实际超限。
+    v1.0.0 (方案B): answer 估算固定为 1，对齐保留式封卡的实际行为——
+    保留式封卡（close_streaming + batch_update）不重建整卡，
+    streaming element 封卡后仍为 1 个元素（不触发 _split_long_text），
+    避免 1→N+2M 的估算错位导致过早拆卡（"秒拆"/"第N张卡只有一句话"）。
+    只有全量重建封卡（preservative seal 失败时的降级路径）才会触发
+    _split_long_text，此时由 300305 reactive 拆卡兜底。
     """
     if seg.type == "reasoning":
         return 4  # collapsible_panel + plain_text + standard_icon + markdown
     elif seg.type == "answer":
-        if seg.text:
-            content = _downgrade_tables(optimize_markdown_style(seg.text))
-            # 图片提取后变成独立 img 元素，需计入
-            img_count = _count_images_in_text(content)
-            return max(len(_split_long_text(content)), 1) + img_count
-        return 1
+        return 1  # 保留式封卡下，answer 永远是 1 个 element
     elif seg.type == "tool":
         return _estimate_tool_elements(
             seg.tool_offset,
@@ -96,30 +92,11 @@ def _find_tool_split_offset(
     return None
 
 
-def _find_answer_split_offset(
-    base_count: int,
-    seg: Segment,
-) -> int | None:
-    """寻找 answer 文本拆分点，让当前卡保留尽可能多的文本块.
-
-    按 `_split_long_text` 的实际分块边界拆分：
-    1. 将 answer 文本按 2400 字符分块
-    2. 从后往前找，找到当前卡能容纳的最大块数
-    3. 反推字符偏移量作为拆分点
-    """
-    if not seg.text:
-        return None
-    content = _downgrade_tables(optimize_markdown_style(seg.text))
-    chunks = _split_long_text(content)
-    if len(chunks) <= 1:
-        return None
-    # 从后往前找：保留尽可能多的 chunks 在当前卡
-    for keep in range(len(chunks), 0, -1):
-        if base_count + keep + _FOOTER_RESERVE <= _ELEMENT_THRESHOLD:
-            # 反推字符偏移：前 keep 个 chunk 的总长度
-            char_offset = sum(len(c) for c in chunks[:keep])
-            return char_offset
-    return None
+# _find_answer_split_offset removed in v1.0.0 (方案B)
+# answer 估算固定为 1 element，不再需要 answer 内部拆分。
+# 保留式封卡下 answer 始终是 1 个 streaming element，
+# 只有全量重建封卡时才可能触发 _split_long_text，
+# 此时由 300305 reactive 拆卡兜底。
 
 
 def _simplify_segments_for_complete(

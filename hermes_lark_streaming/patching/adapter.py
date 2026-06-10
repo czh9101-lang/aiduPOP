@@ -149,6 +149,46 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                     return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
         # ── Gateway-internal path: convert to card ──
+        # ── /stop response: abort active streaming card ──
+        # When the gateway sends a "⚡ 已停止" response from /stop command,
+        # check if there's an active streaming card in this chat that needs
+        # to be sealed as "stopped". This prevents the card from being stuck
+        # in loading/marquee state and also prevents the duplicate "⚡ 已停止"
+        # gateway card from appearing alongside the streaming card.
+        _is_stop_response = any(kw in content for kw in ("已停止", "stopped", "Stopped"))
+        if _is_stop_response:
+            try:
+                from ..controller import get_controller
+                _ctrl = get_controller()
+                if _ctrl and _ctrl.enabled:
+                    # Find an active streaming session in this chat
+                    for _sess in list(_ctrl._sessions.values()):
+                        if (
+                            _sess.chat_id == chat_id
+                            and _sess.state in ("streaming", "creating", "idle")
+                            and _sess.card_msg_id
+                        ):
+                            _logger.info(
+                                "gateway_send: /stop response detected, aborting "
+                                "streaming card for msg=%s (state=%s)",
+                                (_sess.message_id or "?")[:12],
+                                _sess.state,
+                            )
+                            try:
+                                from ..patch import on_message_aborted
+                                on_message_aborted(message_id=_sess.message_id)
+                            except Exception:
+                                pass
+                            # Suppress the "⚡ 已停止" gateway card —
+                            # the streaming card will show the stopped state.
+                            try:
+                                from gateway.platforms.base import SendResult
+                                return SendResult(success=True)
+                            except (ImportError, AttributeError):
+                                return None
+            except Exception:
+                pass
+
         _logger.info(
             "gateway_send: entering gateway-internal path, chat=%s content_len=%d",
             chat_id[:12] if chat_id else "?",

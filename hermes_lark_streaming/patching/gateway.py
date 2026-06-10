@@ -163,13 +163,40 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                 # else: card completed normally, Hermes returned None
                 #       to suppress text reply — NOT an abort.
             else:
-                # Card was never sent — real abort (error, reset, etc.)
+                # Card was never sent — real abort (error, reset, /stop, etc.)
                 try:
                     from ..patch import on_message_aborted
 
                     on_message_aborted(message_id=mid)
                 except Exception:
                     pass
+        elif ctx and ctx.get("card_sent"):
+            # result is not None and card_sent=True — card was completed
+            # by _wrap_run_agent's COMPLETE hook. Check if the card session
+            # is still in a non-terminal state (e.g. card_sent was set by
+            # the adapter interception path, not by actual completion).
+            # This catches /stop scenarios where the card is stuck in
+            # loading/marquee state.
+            try:
+                from ..controller import get_controller
+                _ctrl = get_controller()
+                if _ctrl and _ctrl.enabled:
+                    _eid = ctx.get("event_message_id", "")
+                    if _eid:
+                        _sess = _ctrl._sessions.get(_eid)
+                        if _sess and _sess.state not in ("completing", "completed", "failed", "aborted"):
+                            _logger.info(
+                                "card session stuck in non-terminal state for msg=%s "
+                                "(state=%s, card_sent=%s), firing abort",
+                                mid[:12], _sess.state, ctx.get("card_sent"),
+                            )
+                            try:
+                                from ..patch import on_message_aborted
+                                on_message_aborted(message_id=mid)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
 
         # Cleanup tracking
         with _started_msg_ids_lock:
