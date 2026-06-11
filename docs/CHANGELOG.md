@@ -1,3 +1,55 @@
+## v1.0.2 (2026-06-11)
+
+### 🏗️ Architecture: Unified Panel (Breaking Change)
+
+**Complete redesign of the card element architecture** — replaces the old segment-based approach with a single unified collapsible panel that holds all reasoning rounds and tool steps.
+
+#### Why
+The old architecture created a separate collapsible panel for each reasoning round and tool call segment, causing element count to explode near Feishu's 200-element card limit. This led to:
+- 100% preservative seal failure rate (300314 element not found)
+- Frequent card splitting (22 times in production logs)
+- Cascade failures: seal → full rebuild → 300305 → compact → minimal → split
+- Streaming mode closure (300309) when card TTL exceeded 600s
+- Users reporting cards feel significantly slower than native Hermes messages
+
+#### What Changed
+
+**Unified Panel Architecture:**
+- **1 unified panel** = 1 card element for ALL reasoning + tool calls (was: N panels = N×4 elements)
+- **1 answer streaming element** for the answer text
+- **3-4 total elements** regardless of conversation length (was: 50-100+ elements)
+- Panel icon: `robot_filled`, reasoning round icon: `robot-add_outlined` (replacing emoji)
+- Panel title: `Agent Process · N rounds · M tools · Xs` (dynamic stats)
+- `display.show_reasoning` config still controls whether reasoning content appears in the panel
+
+**Performance Optimizations:**
+- Initial card pre-allocates all slots (2 API calls instead of 3) — saves ~150-200ms
+- Loading hint embedded in initial card JSON — eliminates 1 separate API call
+- FeishuClient pre-warming at plugin registration — saves ~50-100ms on first message
+- Default flush interval reduced from 500ms to 200ms — faster text appearance
+
+**Bug Fixes:**
+- **Element existence tracking**: Preservative seal now only deletes elements that actually exist on the card, eliminating 100% failure rate caused by deleting already-removed `context_loading_hint`
+- **Proactive TTL extension**: When card approaches 540s lifetime, automatically extends TTL by 600s, preventing 300309 streaming closure
+- Preservative seal now updates the unified panel to its final state (non-streaming, expanded per config) during seal, ensuring consistent visual presentation
+- **CLI `python -m` fix**: `python -m hermes_lark_streaming` now works when run directly via `__main__.py` — the script auto-registers the package using `importlib.util` to handle the directory name mismatch (`hermes-lark-streaming` vs `hermes_lark_streaming`). Updated README docs to recommend `python /path/to/__main__.py` for directory plugin installs
+
+**Removed Code:**
+- `state/linear_split.py` — No longer needed (no element counting/splitting)
+- `_do_linear_split`, `_maybe_rollover_tool_segment` — No more card splitting
+- `build_linear_compact_seal_card` — No more progressive degradation
+- Element counting fields (`element_count`, `element_limit_hit`, `split_disabled`, `split_index`) removed from `CardSession`
+
+**Migration Notes:**
+- `LinearState` → `UnifiedLinearState` (backward-compat alias maintained)
+- `session.linear_state` → `session.unified_state` (backward-compat property maintained with deprecation warning)
+- `Segment` class → `ReasoningRound` (backward-compat alias maintained with deprecation warning)
+- New i18n keys: `agent_process`, `rounds`, `tools_count`, `round_n`
+- New element IDs: `UNIFIED_PANEL_ELEMENT_ID`, `ANSWER_ELEMENT_ID`
+- Default `flush_interval_ms` changed from 500 to 200
+
+---
+
 ## v1.0.1 (2026-06-10)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

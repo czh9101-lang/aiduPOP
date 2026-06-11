@@ -33,7 +33,12 @@ from hermes_lark_streaming.cardkit.md import (
     _strip_invalid_image_keys,
     optimize_markdown_style,
 )
-from hermes_lark_streaming.state.linear import Segment
+import warnings
+
+from hermes_lark_streaming.state.linear import ReasoningRound
+
+# Segment is deprecated; suppress warnings in tests that still use the legacy path
+from hermes_lark_streaming.state.linear import Segment as _Segment  # noqa: F401
 
 # --- Markdown 优化 ---
 
@@ -489,24 +494,32 @@ class TestBuildStreamingCardV2:
         assert card["config"]["streaming_mode"] is True
         assert card["body"]["elements"]
 
-    def test_with_tool_steps(self) -> None:
+    def test_with_unified_panel(self) -> None:
+        """With include_unified_panel=True (default), unified panel is present."""
+        from hermes_lark_streaming.cardkit import UNIFIED_PANEL_ELEMENT_ID
         card = build_streaming_card_v2(tool_steps=[_STEP_RUNNING], elapsed_ms=100)
+        assert any(e.get("element_id") == UNIFIED_PANEL_ELEMENT_ID for e in card["body"]["elements"])
+
+    def test_no_unified_panel_shows_legacy_tool_use(self) -> None:
+        """With include_unified_panel=False and tool_steps, legacy tool panel is used."""
+        card = build_streaming_card_v2(include_unified_panel=False, show_tool_use=True, tool_steps=[_STEP_RUNNING])
         assert any(e.get("element_id") == TOOL_PANEL_ELEMENT_ID for e in card["body"]["elements"])
 
-    def test_no_tool_use(self) -> None:
-        card = build_streaming_card_v2(show_tool_use=False)
+    def test_no_unified_panel_no_tool_use(self) -> None:
+        card = build_streaming_card_v2(include_unified_panel=False, show_tool_use=False)
         assert not any(e.get("element_id") == TOOL_PANEL_ELEMENT_ID for e in card["body"]["elements"])
 
-    def test_show_reasoning_adds_panel(self) -> None:
-        card = build_streaming_card_v2(show_reasoning=True)
+    def test_show_reasoning_adds_panel_legacy(self) -> None:
+        card = build_streaming_card_v2(include_unified_panel=False, show_reasoning=True)
         assert any(e.get("element_id") == REASONING_ELEMENT_ID for e in card["body"]["elements"])
 
-    def test_show_reasoning_default_no_panel(self) -> None:
-        card = build_streaming_card_v2()
+    def test_show_reasoning_default_no_panel_legacy(self) -> None:
+        card = build_streaming_card_v2(include_unified_panel=False)
         assert not any(e.get("element_id") == REASONING_ELEMENT_ID for e in card["body"]["elements"])
 
-    def test_reasoning_before_tool_before_answer(self) -> None:
+    def test_reasoning_before_tool_before_answer_legacy(self) -> None:
         card = build_streaming_card_v2(
+            include_unified_panel=False,
             show_reasoning=True,
             tool_steps=[_STEP_RUNNING],
             elapsed_ms=100,
@@ -517,14 +530,27 @@ class TestBuildStreamingCardV2:
         tool_idx = ids.index(TOOL_PANEL_ELEMENT_ID)
         assert reasoning_idx < tool_idx
 
-    def test_reasoning_panel_expanded(self) -> None:
-        card = build_streaming_card_v2(show_reasoning=True)
+    def test_reasoning_panel_expanded_legacy(self) -> None:
+        card = build_streaming_card_v2(include_unified_panel=False, show_reasoning=True)
         panel = next(e for e in card["body"]["elements"] if e.get("element_id") == REASONING_ELEMENT_ID)
         assert panel["expanded"] is True
 
-    def test_reasoning_panel_collapsed_in_streaming(self) -> None:
-        card = build_streaming_card_v2(show_reasoning=True, streaming_panel_expanded=False)
+    def test_reasoning_panel_collapsed_in_streaming_legacy(self) -> None:
+        card = build_streaming_card_v2(include_unified_panel=False, show_reasoning=True, streaming_panel_expanded=False)
         panel = next(e for e in card["body"]["elements"] if e.get("element_id") == REASONING_ELEMENT_ID)
+        assert panel["expanded"] is False
+
+    def test_unified_panel_expanded(self) -> None:
+        """Unified panel placeholder respects streaming_panel_expanded."""
+        from hermes_lark_streaming.cardkit import UNIFIED_PANEL_ELEMENT_ID
+        card = build_streaming_card_v2(streaming_panel_expanded=True)
+        panel = next(e for e in card["body"]["elements"] if e.get("element_id") == UNIFIED_PANEL_ELEMENT_ID)
+        assert panel["expanded"] is True
+
+    def test_unified_panel_collapsed(self) -> None:
+        from hermes_lark_streaming.cardkit import UNIFIED_PANEL_ELEMENT_ID
+        card = build_streaming_card_v2(streaming_panel_expanded=False)
+        panel = next(e for e in card["body"]["elements"] if e.get("element_id") == UNIFIED_PANEL_ELEMENT_ID)
         assert panel["expanded"] is False
 
     def test_print_strategy_delay(self) -> None:
@@ -638,9 +664,11 @@ class TestBuildCompleteCard:
 # --- 线性完成态卡片 ---
 
 
-def _seg(seg_type: str, text: str = "", **kwargs: int | float) -> Segment:
-    """创建测试用 Segment mock."""
-    seg = Segment(seg_type, f"{seg_type}_0")
+def _seg(seg_type: str, text: str = "", **kwargs: int | float) -> _Segment:
+    """创建测试用 Segment mock (deprecated — for legacy build_linear_complete_card path)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        seg = _Segment(seg_type, f"{seg_type}_0")
     seg.text = text
     if seg_type == "reasoning":
         seg.text_el_id = f"{seg_type}_0_text"
@@ -1070,14 +1098,12 @@ class TestCompleteCardImageExtraction:
         assert "img_v3_chart_001" in combined
 
     def test_linear_complete_card_extracts_images(self) -> None:
-        """build_linear_complete_card 提取图片为独立img元素."""
-        seg = Segment("answer", "answer_0")
-        seg.text = "See chart:\n![chart](img_v3_chart_002)\nEnd."
-        segments = [seg]
+        """build_linear_complete_card (unified path) extracts images as independent img elements."""
+        from hermes_lark_streaming.state.linear import ReasoningRound
         card = build_linear_complete_card(
-            segments=segments,
-            all_tool_steps=[],
-            footer_fields=[],
+            reasoning_rounds=[],
+            tool_steps=[],
+            answer_text="See chart:\n![chart](img_v3_chart_002)\nEnd.",
         )
         elements = card["body"]["elements"]
         img_elements = [e for e in elements if e.get("tag") == "img"]
@@ -1102,7 +1128,7 @@ class TestPartialStatusIndicator:
 
     def test_partial_indicator_in_complete_card(self) -> None:
         """partial=True 时卡片底部出现继续提示."""
-        from hermes_lark_streaming.state.linear import Segment
+        from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment  # deprecated alias
         seg = Segment("answer", "answer_0")
         seg.text = "部分回答内容"
         card = build_linear_complete_card(
@@ -1117,7 +1143,7 @@ class TestPartialStatusIndicator:
 
     def test_no_partial_indicator_by_default(self) -> None:
         """partial=False (默认) 时无继续提示."""
-        from hermes_lark_streaming.state.linear import Segment
+        from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment  # deprecated alias
         seg = Segment("answer", "answer_0")
         seg.text = "回答内容"
         card = build_linear_complete_card(
@@ -1130,7 +1156,7 @@ class TestPartialStatusIndicator:
 
     def test_partial_indicator_in_compact_seal_card(self) -> None:
         """compact seal 卡片也支持 partial 提示."""
-        from hermes_lark_streaming.state.linear import Segment
+        from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment  # deprecated alias
         seg = Segment("answer", "answer_0")
         seg.text = "部分回答"
         card = build_linear_compact_seal_card(
@@ -1162,7 +1188,7 @@ class TestBackgroundReviewPanel:
 
     def test_background_review_in_complete_card(self) -> None:
         """完成态卡片包含后台审查面板."""
-        from hermes_lark_streaming.state.linear import Segment
+        from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment  # deprecated alias
         seg = Segment("answer", "answer_0")
         seg.text = "回答"
         card = build_linear_complete_card(
@@ -1203,8 +1229,14 @@ class TestLoadingHintElement:
         assert "i18n_content" in el["text"]
 
     def test_streaming_card_does_not_include_hint(self) -> None:
-        """流式占位卡片初始不包含占位提示（占位提示通过 batch_update 单独插入）."""
+        """流式占位卡片默认包含占位提示（v1.0.2: 嵌入初始卡片，不再单独API插入）."""
         card = build_streaming_card_v2()
+        element_ids = [e.get("element_id") for e in card["body"]["elements"]]
+        assert _LOADING_HINT_ELEMENT_ID in element_ids  # v1.0.2: hint is now pre-embedded
+
+    def test_streaming_card_without_loading_hint(self) -> None:
+        """include_loading_hint=False 时占位卡片不包含占位提示."""
+        card = build_streaming_card_v2(include_loading_hint=False)
         element_ids = [e.get("element_id") for e in card["body"]["elements"]]
         assert _LOADING_HINT_ELEMENT_ID not in element_ids
 

@@ -1,4 +1,40 @@
-"""线性单卡模式的异步 API 编排 — 创建、刷新、拆卡、完成."""
+"""Unified panel linear mode — create, flush, and seal a single-card streaming session.
+
+Architecture
+-----------
+The unified panel architecture replaces the old segment-based approach:
+
+- **1 unified panel** (``UNIFIED_PANEL_ELEMENT_ID``): A single
+  ``collapsible_panel`` element that holds *all* reasoning rounds and
+  tool steps.  Its internal children are sub-elements that do **not**
+  count toward the Feishu 200-element card limit.
+
+- **1 answer streaming element** (``ANSWER_ELEMENT_ID``): Receives
+  answer text via ``cardkit_stream_element``.
+
+- **1 loading icon** (``_LOADING_ELEMENT_ID``): Deleted on seal.
+
+- **1 loading hint** (``_LOADING_HINT_ELEMENT_ID``): Deleted when the
+  first content (reasoning, tool, or answer) arrives.
+
+Total: at most 4 top-level elements, regardless of conversation length.
+This eliminates the need for:
+
+- Element counting / thresholds
+- Card splitting / rollover
+- Progressive degradation (compact/minimal seal)
+
+The initial card is created with all slots pre-allocated, so no later
+``add_elements`` calls are needed during streaming.  Updates are
+performed exclusively via ``partial_update_element`` (for the unified
+panel) and ``stream_element`` (for answer text).
+
+Migration
+---------
+``LinearControllerMixin`` is kept as a backward-compatible alias for
+``UnifiedControllerMixin``.  All removed methods (``_do_linear_split``,
+``_maybe_rollover_tool_segment``, etc.) are no longer present.
+"""
 
 from __future__ import annotations
 
@@ -8,37 +44,27 @@ import time as _time
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
-
 from ..cardkit import (
+    ANSWER_ELEMENT_ID,
+    UNIFIED_PANEL_ELEMENT_ID,
     _LOADING_ELEMENT_ID,
     _LOADING_HINT_ELEMENT_ID,
-    _build_background_review_panel,
-    _build_reasoning_panel,
-    _build_tool_panel,
-    _format_elapsed,
-    _loading_hint_element,
-    _streaming_element,
-    build_im_fallback_card,
-    build_linear_compact_seal_card,
-    build_linear_complete_card,
-    build_preservative_seal_actions,
     build_streaming_card_v2,
+    build_im_fallback_card,
+    build_unified_panel,
+    build_unified_complete_card,
+    build_preservative_seal_actions,
 )
+from ..cardkit.md import _downgrade_tables, optimize_markdown_style
+from ..state.linear import UnifiedLinearState
+from ..state.text import split_reasoning_text
+from ..feishu import (
+    CARDKIT_SEQUENCE_CONFLICT,
+    CARDKIT_STREAMING_CLOSED,
+    FeishuAPIError,
+)
+from ..flush import PATCH_MS
 
-from ..cardkit.i18n import _T, _i18n
-from ..cardkit.md import (
-    _downgrade_tables,
-    optimize_markdown_style,
-)
-from ..state.linear_split import (
-    _ELEMENT_THRESHOLD,
-    _FOOTER_RESERVE,
-    _estimate_segment_elements,
-    _estimate_tool_elements,
-    _find_tool_split_offset,
-    _simplify_segments_for_complete,
-    _tool_segment_end,
-)
 from .mixin import (
     _TERMINAL,
     ABORTED,
@@ -49,19 +75,6 @@ from .mixin import (
     IDLE,
     STREAMING,
 )
-from ..feishu import (
-    CARDKIT_CONTENT_FAILED,
-    CARDKIT_ELEMENT_LIMIT,
-    CARDKIT_ELEMENT_LIMIT_DIRECT,
-    CARDKIT_RATE_LIMITED,
-    CARDKIT_SEQUENCE_CONFLICT,
-    CARDKIT_STREAMING_CLOSED,
-    FeishuAPIError,
-    is_element_limit_error,
-)
-from ..flush import CARDKIT_MS, PATCH_MS
-from ..state.linear import LinearState, Segment
-from ..state.text import split_reasoning_text
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -70,21 +83,35 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
-__all__ = [
-    "LinearControllerMixin",
-    "_estimate_segment_elements",
-    "_estimate_tool_elements",
-    "_find_tool_split_offset",
-    "_simplify_segments_for_complete",
-    "_tool_segment_end",
-    "_ELEMENT_THRESHOLD",
-    "_FOOTER_RESERVE",
-]
+# ---------------------------------------------------------------------------
+# TTL proactive extension
+# ---------------------------------------------------------------------------
+
+_TTL_EXTEND_THRESHOLD_SEC = 540.0  # Extend TTL when card has lived > 540s
+_TTL_EXTEND_DELTA_SEC = 600        # Extend by 600s
 
 
-class LinearControllerMixin:
-    """线性模式专用方法 — 由 StreamCardController 继承."""
+class UnifiedControllerMixin:
+    """Unified panel linear mode — single card, single panel, single answer.
 
+    This mixin is designed to be inherited by :class:`StreamCardController`
+    alongside :class:`ControllerMixin`.  It provides the linear-mode
+    creation, flush, and completion logic using the unified panel
+    architecture where all reasoning rounds and tool steps live in **one**
+    collapsible panel element.
+
+    Key simplifications vs. the old ``LinearControllerMixin``:
+
+    * No element counting — the card always has exactly 3–4 elements.
+    * No splitting — no ``_do_linear_split``, ``_maybe_rollover_tool_segment``.
+    * No progressive degradation — ``_preservative_seal`` always works
+      because the element count never exceeds the card limit.
+    * The initial card already contains all slots (unified panel,
+      answer element, loading hint, loading icon), so no
+      ``add_elements`` calls are needed during streaming.
+    """
+
+    # ── Instance attributes provided by StreamCardController ──
     _client: FeishuClient | None
     _cfg: Config
     _ensure_init: Callable[..., Coroutine[Any, Any, None]]
@@ -93,64 +120,28 @@ class LinearControllerMixin:
     _flush_deferred_background_reviews: Callable[[CardSession], None]
     _do_complete_inner: Callable[..., Coroutine[Any, Any, bool]]
 
-    def _schedule_linear_flush(self, session: CardSession) -> None:
-        if session.state == IDLE or session.state in _TERMINAL or session.state == COMPLETING:
-            return
-        if session.guard.should_skip("_schedule_linear_flush"):
-            return
-        # ── First-Token Immediate Flush (首字即显) ──
-        # When this is the first content for the session (no elements created yet
-        # and there are dirty segments), skip the throttle interval and flush
-        # immediately. This reduces first-visible-text latency by 0~500ms.
-        if (
-            not session._first_flush_done
-            and session.element_count <= 1
-            and session.linear_state is not None
-            and session.linear_state.has_dirty
-        ):
-            session._first_flush_done = True
-            import asyncio
-            asyncio.create_task(
-                session.flush.flush_now(lambda: self._do_linear_flush(session))
-            )
-            return
-        session.flush.schedule_update(lambda: self._do_linear_flush(session))
-
-    def _linear_on_thinking(self, session: CardSession, text: str) -> None:
-        linear_state = session.linear_state
-        if linear_state is None:
-            return
-        split = split_reasoning_text(text)
-        reasoning = split.get("reasoning_text")
-        answer = split.get("answer_text")
-
-        if reasoning and self._cfg.show_reasoning:
-            linear_state.on_reasoning_delta(reasoning)
-        if answer:
-            # ── Dedup: skip answer text already delivered via stream_delta_callback ──
-            # When streaming is active, answer text arrives incrementally via
-            # stream_delta_callback → on_answer_delta → linear_state.on_answer_delta.
-            # The interim_assistant_callback also delivers the same text in
-            # accumulated form.  Appending it here would cause duplication because
-            # linear_state.on_answer_delta APPENDS to the existing segment.
-            # Only push answer text when no answer segment has text yet
-            # (non-streaming fallback where stream_delta_callback is absent).
-            _has_streamed_answer = any(
-                seg.type == "answer" and seg.text for seg in linear_state.segments
-            )
-            if not _has_streamed_answer:
-                linear_state.on_answer_delta(answer)
-        if not (reasoning and self._cfg.show_reasoning) and not answer:
-            return
-        self._schedule_linear_flush(session)
+    # ===================================================================
+    # Card creation
+    # ===================================================================
 
     async def _do_create_linear_card(self, session: CardSession) -> None:
-        """线性模式：创建只有 loading 的占位卡片."""
+        """Create the initial streaming card with all slots pre-allocated.
+
+        The card contains:
+        1. Unified panel placeholder (``UNIFIED_PANEL_ELEMENT_ID``)
+        2. Answer streaming element (``ANSWER_ELEMENT_ID``)
+        3. Loading hint (``_LOADING_HINT_ELEMENT_ID``)
+        4. Loading icon (``_LOADING_ELEMENT_ID``)
+
+        Because all slots are pre-allocated, no ``add_elements`` calls
+        are needed during streaming — only ``partial_update_element``
+        and ``stream_element``.
+        """
         if session.state != IDLE:
             return
         session.state = CREATING
         session.linear = True
-        session.linear_state = LinearState()
+        session.unified_state = UnifiedLinearState()
 
         t0 = _time.monotonic()
         try:
@@ -158,73 +149,51 @@ class LinearControllerMixin:
             assert self._client is not None
 
             try:
-                reply_to_message_id = session.anchor_id or session.message_id
+                reply_to = session.anchor_id or session.message_id
                 card = build_streaming_card_v2(
-                    show_tool_use=False,
-                    show_reasoning=False,
-                    show_streaming_element=False,
+                    include_unified_panel=True,   # Unified panel placeholder
+                    include_loading_hint=True,     # Loading hint (no separate API needed!)
                     streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                     print_strategy=self._cfg.print_strategy,
                     header_enabled=self._cfg.header_enabled,
                 )
                 card_id = await self._client.cardkit_create(card)
-                card_msg_id = await self._client.reply_card_by_id(
-                    reply_to_message_id,
-                    card_id,
-                )
+                card_msg_id = await self._client.reply_card_by_id(reply_to, card_id)
+
                 session.card_id = card_id
                 session.card_msg_id = card_msg_id
                 session.use_cardkit = True
-                session.element_count = 1  # loading element
+                session.card_created_at = _time.time()
                 session.flush.set_throttle(self._cfg.flush_interval_sec)
 
-                # ── 首卡插入上下文加载占位提示 ──
-                # 只在首卡插入，拆卡新卡不插入（_do_linear_split 重置后
-                # _loading_hint_removed 已为 True）。
-                # 占位提示在首字即显时通过 _do_linear_flush 删除。
-                if not session._loading_hint_removed:
-                    try:
-                        hint_actions = [{
-                            "action": "add_elements",
-                            "params": {
-                                "type": "insert_before",
-                                "target_element_id": _LOADING_ELEMENT_ID,
-                                "elements": [_loading_hint_element()],
-                            },
-                        }]
-                        session.sequence += 1
-                        await self._client.cardkit_batch_update(
-                            card_id, hint_actions, sequence=session.sequence,
-                        )
-                        session.element_count += 1
-                    except FeishuAPIError:
-                        _logger.debug(
-                            "loading hint insert failed, ignoring: card=%s",
-                            card_id[:12],
-                        )
+                # Track existing elements — all 4 are pre-allocated
+                session.existing_elements = {
+                    UNIFIED_PANEL_ELEMENT_ID,
+                    ANSWER_ELEMENT_ID,
+                    _LOADING_HINT_ELEMENT_ID,
+                    _LOADING_ELEMENT_ID,
+                }
+                session._panel_element_created = True  # Panel is in initial card
+
             except FeishuAPIError:
                 _logger.info("linear CardKit create failed, falling back to non-linear")
                 card = build_im_fallback_card()
-                card_msg_id = await self._client.reply_card(
-                    reply_to_message_id,
-                    card,
-                )
+                card_msg_id = await self._client.reply_card(reply_to, card)
                 session.card_msg_id = card_msg_id
                 session.use_cardkit = False
                 session.linear = False
-                session.linear_state = None
+                session.unified_state = None
                 session.flush.set_throttle(PATCH_MS)
 
             session.flush.set_card_message_ready(True)
             if session.state == CREATING:
                 session.state = STREAMING
-            if session.linear and session.linear_state and session.linear_state.has_dirty:
+            if session.linear and session.unified_state and session.unified_state.has_dirty:
                 self._schedule_linear_flush(session)
+
             # ── Signal card readiness ──
             # Must be set AFTER card_id/card_msg_id are assigned and
             # session state is transitioned out of CREATING.
-            # _do_linear_complete_inner awaits this event to ensure
-            # the card exists before attempting close_streaming + update.
             session._card_ready.set()
             _logger.info(
                 "linear card created: msg=%s linear=%s card_id=%s",
@@ -237,351 +206,215 @@ class LinearControllerMixin:
             session.state = FAILED
             # Signal readiness even on failure so awaiters don't deadlock
             session._card_ready.set()
-            _logger.debug("perf: card_create msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
 
-    async def _do_linear_flush(self, session: CardSession) -> None:
-        """线性模式幂等 flush：按 segment 顺序处理结构性变更，超阈值时拆卡."""
+        _logger.debug(
+            "perf: card_create msg=%s elapsed=%.0fms",
+            (session.message_id or "?")[:12],
+            (_time.monotonic() - t0) * 1000,
+        )
+
+    # ===================================================================
+    # Flush scheduling
+    # ===================================================================
+
+    def _schedule_linear_flush(self, session: CardSession) -> None:
+        """Schedule a unified panel flush for the given session.
+
+        First-token immediate flush (首字即显): when this is the first
+        content for the session and there are dirty data, skip the
+        throttle interval and flush immediately.  This reduces
+        first-visible-text latency by 0~500 ms.
+        """
+        if session.state == IDLE or session.state in _TERMINAL or session.state == COMPLETING:
+            return
+        if session.guard.should_skip("_schedule_linear_flush"):
+            return
+
+        # ── First-Token Immediate Flush (首字即显) ──
+        if (
+            not session._first_flush_done
+            and session.unified_state is not None
+            and session.unified_state.has_dirty
+        ):
+            session._first_flush_done = True
+            asyncio.get_event_loop().create_task(
+                session.flush.flush_now(lambda: self._do_unified_flush(session))
+            )
+            return
+
+        session.flush.schedule_update(lambda: self._do_unified_flush(session))
+
+    # ===================================================================
+    # Unified flush
+    # ===================================================================
+
+    async def _do_unified_flush(self, session: CardSession) -> None:
+        """Unified panel flush — max 2 API calls per flush cycle.
+
+        1. ``cardkit_batch_update``: update the unified panel content
+           (``partial_update_element``) and optionally delete the
+           loading hint (``delete_elements``).
+
+        2. ``cardkit_stream_element``: stream answer text to the
+           ``ANSWER_ELEMENT_ID`` element.
+
+        Because the initial card already contains all slots, we never
+        need ``add_elements`` during streaming.  This keeps the flush
+        logic simple and deterministic.
+        """
         if session.state in _TERMINAL or session.state == COMPLETING or not session.card_id:
             return
-        linear_state = session.linear_state
-        if linear_state is None:
+        state = session.unified_state
+        if state is None:
             return
-
-        t0 = _time.monotonic()
         assert self._client is not None
-        segments = linear_state.segments
-        all_steps = session.tool_use.build_display_steps()
 
-        # ── 步骤 0: 重新估算已创建 answer segment 的元素数 (REMOVED v1.0.0 方案B) ──
-        # 旧逻辑：answer 在流式阶段估算为封卡后的 _split_long_text 分块数，
-        # 文本增长后动态更新 element_count，增长后超限则做 answer 内部拆分再拆卡。
-        # 方案B：answer 估算固定为 1 element（对齐保留式封卡），不再动态重估，
-        # 从根本上消除了估算错位导致的过早拆卡问题。
-        # 如果保留式封卡失败（全量重建触发 _split_long_text），
-        # 由 300305 reactive 拆卡兜底。
-
-        # ── 步骤 1: batch_update — 按 segment 顺序处理结构性变更 ──
-        actions: list[dict[str, Any]] = []
-        new_el_ids: set[str] = set()
-        new_el_estimates: dict[str, int] = {}
-        updated_tool_segs: list[Segment] = []
-        new_el_total = 0
-
-        for i, seg in enumerate(segments):
-            if i < session.split_index:
-                continue
-
-            if not seg.created:
-                # 超限后不再新增元素，只刷已有段的脏文本，等完成阶段整体重建
-                if session.element_limit_hit:
-                    continue
-                estimated = _estimate_segment_elements(seg, all_steps)
-                # ── Tool 内部拆分：按 step 边界拆 ──
-                if (
-                    seg.type == "tool"
-                    and session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
-                    and not session.split_disabled
-                ):
-                    split_offset = _find_tool_split_offset(
-                        session.element_count + new_el_total,
-                        seg,
-                        all_steps,
-                    )
-                    if split_offset is not None:
-                        linear_state.split_tool_segment(i, split_offset)
-                        estimated = _estimate_segment_elements(seg, all_steps)
-                # ── Answer 内部拆分 (REMOVED v1.0.0 方案B) ──
-                # answer 估算固定为 1 element，不再需要内部拆分。
-                # 保留式封卡下 answer 始终是 1 个 streaming element，
-                # 只有全量重建封卡时才触发 _split_long_text，由 300305 reactive 拆卡兜底。
-                # ── 超阈值 → 拆卡 ──
-                if (
-                    session.element_count + new_el_total + estimated + _FOOTER_RESERVE > _ELEMENT_THRESHOLD
-                    and session.element_count + new_el_total > 1
-                    and not session.split_disabled
-                ):
-                    split_ok = await self._do_linear_split(
-                        session, i, actions, new_el_ids, new_el_estimates, updated_tool_segs,
-                    )
-                    if not split_ok:
-                        return
-                    actions = []
-                    new_el_ids = set()
-                    new_el_estimates = {}
-                    updated_tool_segs = []
-                    new_el_total = 0
-
-                if seg.type == "reasoning":
-                    # 预填充推理文本：与 answer 优化同理
-                    _reasoning_content = optimize_markdown_style(seg.text) or " " if seg.text else " "
-                    el = _build_reasoning_panel(
-                        _reasoning_content,
-                        seg.elapsed_ms,
-                        expanded=self._cfg.streaming_panel_expanded,
-                        element_id=seg.el_id,
-                        text_element_id=seg.text_el_id,
-                    )
-                    if seg.text:
-                        seg.dirty = False  # 文本已在 batch_update 中发送
-                elif seg.type == "answer":
-                    # 预填充文本：避免 batch_update 后再调一次 stream_element，
-                    # 减少首次文字出现的 API 调用次数（省 ~100-200ms）
-                    _ans_content = _downgrade_tables(optimize_markdown_style(seg.text or "")) or " "
-                    el = _streaming_element(content=_ans_content, element_id=seg.el_id)
-                    if seg.text:
-                        seg.dirty = False  # 文本已在 batch_update 中发送
-                elif seg.type == "tool":
-                    start = seg.tool_offset
-                    end = seg.tool_end_offset if seg.tool_end_offset else len(all_steps)
-                    el = _build_tool_panel(all_steps[start:end], expanded=self._cfg.streaming_panel_expanded, element_id=seg.el_id)
-                    updated_tool_segs.append(seg)
-                new_el_ids.add(seg.el_id)
-                new_el_estimates[seg.el_id] = estimated
-                new_el_total += estimated
-                actions.append({
-                    "action": "add_elements",
-                    "params": {
-                        "type": "insert_before",
-                        "target_element_id": _LOADING_ELEMENT_ID,
-                        "elements": [el],
-                    },
-                })
-
-                # ── 首字即显时删除上下文加载占位提示 ──
-                # 当第一个内容段被创建（不论类型：reasoning/tool/answer），
-                # 在同一批 batch_update 操作中删除占位提示，无需额外 API 调用。
-                if not session._loading_hint_removed and seg.type in ("reasoning", "tool", "answer"):
-                    actions.append({
-                        "action": "delete_elements",
-                        "params": {
-                            "element_ids": [_LOADING_HINT_ELEMENT_ID],
-                        },
-                    })
-                    session._loading_hint_removed = True
-                    session.element_count -= 1  # 占位提示被删除
-                # ── Trigger B removed (2026-06-09) ──
-                # Previously, adjacent same-type segments (answer→answer, tool→tool)
-                # triggered an unconditional split regardless of element count,
-                # causing "秒拆" (premature split). Card 2.0 has no documented
-                # element limit, so splitting should ONLY be triggered by actual
-                # element count exceeding the threshold (Trigger A above).
-                # The tool→tool adjacent split was also redundant because
-                # tool internal splits are handled by _find_tool_split_offset().
-            elif seg.type == "reasoning" and seg.elapsed_ms > 0 and not seg.reasoning_finalized:
+        # ── TTL proactive extension ──
+        # If the card has been alive for > 540s, extend the TTL before
+        # the next flush to prevent the Feishu platform from closing
+        # the streaming session.
+        if session.card_created_at and _time.time() - session.card_created_at > _TTL_EXTEND_THRESHOLD_SEC:
+            try:
+                session.sequence += 1
+                await self._client.cardkit_extend_ttl(
+                    session.card_id,
+                    ttl_seconds=_TTL_EXTEND_DELTA_SEC,
+                    sequence=session.sequence,
+                )
                 _logger.info(
-                    "linear reasoning finalize: msg=%s el=%s elapsed=%.0fms seq=%d",
-                    (session.message_id or "?")[:12],
-                    seg.el_id,
-                    seg.elapsed_ms,
-                    session.sequence + 1,
+                    "TTL extended: card=%s seq=%d",
+                    session.card_id[:12],
+                    session.sequence,
                 )
-                d = _format_elapsed(seg.elapsed_ms)
-                en_label = _T["thought_for"][0].format(d)
-                zh_label = _T["thought_for"][1].format(d)
-                actions.append({
-                    "action": "partial_update_element",
-                    "params": {
-                        "element_id": seg.el_id,
-                        "partial_element": {
-                            "header": {
-                                "title": {
-                                    "tag": "plain_text",
-                                    "content": f"💭 {en_label}",
-                                    "i18n_content": _i18n(f"💭 {en_label}", f"💭 {zh_label}"),
-                                    "text_color": "grey",
-                                    "text_size": "notation",
-                                },
-                            },
-                        },
-                    },
-                })
-            elif seg.type == "tool" and seg.dirty:
-                if seg.tool_end_offset > 0:
-                    start, end = seg.tool_offset, seg.tool_end_offset
-                else:
-                    start, end = seg.tool_offset, len(all_steps)
-                rollover = await self._maybe_rollover_tool_segment(
-                    session=session,
-                    linear_state=linear_state,
-                    index=i,
-                    seg=seg,
-                    all_steps=all_steps,
-                    actions=actions,
-                    new_el_ids=new_el_ids,
-                    new_el_estimates=new_el_estimates,
-                    updated_tool_segs=updated_tool_segs,
-                )
-                if rollover == "failed":
-                    return
-                if rollover == "split":
-                    actions = []
-                    new_el_ids = set()
-                    new_el_estimates = {}
-                    updated_tool_segs = []
-                    new_el_total = 0
-                    continue
-                estimate = _estimate_tool_elements(start, end, all_steps)
-                panel = _build_tool_panel(all_steps[start:end], expanded=self._cfg.streaming_panel_expanded)
-                actions.append({
-                    "action": "partial_update_element",
-                    "params": {
-                        "element_id": seg.el_id,
-                        "partial_element": {
-                            "elements": panel["elements"],
-                            "header": panel["header"],
-                        },
-                    },
-                })
-                updated_tool_segs.append(seg)
-                new_el_estimates[seg.el_id] = estimate
+            except Exception:
+                _logger.debug("TTL extend failed, ignoring", exc_info=True)
 
-        # ── Background review panel ──
-        if linear_state.bg_review_messages and not linear_state.bg_review_panel_added:
-            panel = _build_background_review_panel(
-                linear_state.bg_review_messages,
-                expanded=self._cfg.streaming_panel_expanded,
-                element_id=linear_state.bg_review_panel_id,
-            )
-            actions.append({
-                "action": "add_elements",
-                "params": {
-                    "type": "insert_before",
-                    "target_element_id": _LOADING_ELEMENT_ID,
-                    "elements": [panel],
-                },
-            })
-            new_el_ids.add(linear_state.bg_review_panel_id)
-            new_el_estimates[linear_state.bg_review_panel_id] = 4  # panel + header + icon + markdown
-            linear_state.bg_review_panel_added = True
-        elif linear_state.bg_review_panel_added and linear_state.bg_review_messages:
-            # Update existing panel
-            panel = _build_background_review_panel(
-                linear_state.bg_review_messages,
+        actions: list[dict[str, Any]] = []
+
+        # ── 1. Update unified panel if dirty ──
+        if state.panel_dirty:
+            all_tool_steps = session.tool_use.build_display_steps()
+            panel = build_unified_panel(
+                reasoning_rounds=state.reasoning_rounds,
+                current_reasoning_text=state.current_reasoning_text,
+                tool_steps=all_tool_steps,
+                tool_elapsed_ms=session.tool_use.elapsed_ms,
+                show_reasoning=self._cfg.show_reasoning,
                 expanded=self._cfg.streaming_panel_expanded,
             )
             actions.append({
                 "action": "partial_update_element",
                 "params": {
-                    "element_id": linear_state.bg_review_panel_id,
+                    "element_id": UNIFIED_PANEL_ELEMENT_ID,
                     "partial_element": {
+                        "header": panel["header"],
                         "elements": panel["elements"],
                     },
                 },
             })
+            state.panel_dirty = False
+            state.tool_steps_dirty = False
 
-        if actions and not await self._do_linear_batch_update(
-            session, segments, actions, new_el_ids, new_el_estimates, updated_tool_segs,
-        ):
-            return
+        # ── 2. Delete loading hint on first content ──
+        # When the first reasoning/tool/answer content arrives, remove
+        # the "context loading" hint in the same batch_update call.
+        if not session._loading_hint_removed and (state.panel_visible or state.answer_text):
+            actions.append({
+                "action": "delete_elements",
+                "params": {"element_ids": [_LOADING_HINT_ELEMENT_ID]},
+            })
+            session._loading_hint_removed = True
+            session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
 
-        # ── 步骤 2: stream_element 刷脏文本 ──
-        for seg in segments[session.split_index:]:
-            if not seg.created or not seg.dirty:
-                continue
+        # ── 3. Execute batch_update for panel + hint deletion ──
+        if actions:
+            session.sequence += 1
+            _logger.info(
+                "unified flush: msg=%s seq=%d actions=%d panel=%s hint=%s",
+                (session.message_id or "?")[:12],
+                session.sequence,
+                len(actions),
+                state.panel_dirty,
+                not session._loading_hint_removed,
+            )
             try:
-                if seg.type == "reasoning":
-                    content = optimize_markdown_style(seg.text) or " "
-                    session.sequence += 1
+                await self._client.cardkit_batch_update(
+                    session.card_id, actions, sequence=session.sequence,
+                )
+            except FeishuAPIError as e:
+                if e.code == CARDKIT_STREAMING_CLOSED:
                     _logger.info(
-                        "linear stream: msg=%s seq=%d type=reasoning len=%d",
-                        (session.message_id or "?")[:12],
-                        session.sequence,
-                        len(content),
+                        "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
+                        session.card_id[:12],
                     )
-                    t_se = _time.monotonic()
-                    await self._client.cardkit_stream_element(
-                        session.card_id,
-                        seg.text_el_id,
-                        content,
-                        sequence=session.sequence,
-                    )
-                    _logger.debug("perf: stream_element msg=%s type=%s elapsed=%.0fms", (session.message_id or "?")[:12], seg.type, (_time.monotonic()-t_se)*1000)
-                    seg.dirty = False
-                elif seg.type == "answer":
-                    content = _downgrade_tables(optimize_markdown_style(seg.text)) or " "
-                    session.sequence += 1
+                    return  # Streaming closed, will be handled by TTL or seal
+                _logger.warning("unified flush batch_update failed: %s", e)
+                return
+
+        # ── 4. Stream answer text ──
+        if state.answer_dirty:
+            content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+            session.sequence += 1
+            _logger.info(
+                "unified stream: msg=%s seq=%d type=answer len=%d",
+                (session.message_id or "?")[:12],
+                session.sequence,
+                len(content),
+            )
+            try:
+                t_se = _time.monotonic()
+                await self._client.cardkit_stream_element(
+                    session.card_id, ANSWER_ELEMENT_ID, content, sequence=session.sequence,
+                )
+                _logger.debug(
+                    "perf: stream_element msg=%s type=answer elapsed=%.0fms",
+                    (session.message_id or "?")[:12],
+                    (_time.monotonic() - t_se) * 1000,
+                )
+                state.answer_dirty = False
+            except FeishuAPIError as e:
+                if e.code == CARDKIT_STREAMING_CLOSED:
                     _logger.info(
-                        "linear stream: msg=%s seq=%d type=answer len=%d",
-                        (session.message_id or "?")[:12],
-                        session.sequence,
-                        len(content),
+                        "unified stream: streaming closed, will be handled by TTL or seal: card=%s",
+                        session.card_id[:12],
                     )
-                    t_se = _time.monotonic()
-                    await self._client.cardkit_stream_element(
-                        session.card_id,
-                        seg.el_id,
-                        content,
-                        sequence=session.sequence,
-                    )
-                    _logger.debug("perf: stream_element msg=%s type=%s elapsed=%.0fms", (session.message_id or "?")[:12], seg.type, (_time.monotonic()-t_se)*1000)
-                    seg.dirty = False
-            except Exception as e:
-                _logger.debug("linear stream failed: %s el=%s", e, seg.el_id, exc_info=True)
+                    return
+                _logger.debug("unified stream_element failed: %s", e)
 
-        _logger.debug("perf: linear_flush msg=%s elapsed=%.0fms actions=%d", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000, len(actions))
+    # ===================================================================
+    # Thinking handler
+    # ===================================================================
 
-    async def _do_linear_batch_update(
-        self,
-        session: CardSession,
-        segments: list[Segment],
-        actions: list[dict[str, Any]],
-        new_el_ids: set[str],
-        new_el_estimates: dict[str, int],
-        updated_tool_segs: list[Segment],
-    ) -> bool:
-        """执行 batch_update 并处理快照/标记。返回 False 表示失败."""
-        assert self._client is not None
-        assert session.card_id is not None
-        session.sequence += 1
-        _logger.info(
-            "linear flush: msg=%s seq=%d actions=%d",
-            (session.message_id or "?")[:12],
-            session.sequence,
-            len(actions),
-        )
-        pre_flush_reasoning_elapsed = {
-            seg.el_id: seg.elapsed_ms for seg in segments if seg.type == "reasoning"
-        }
-        pre_flush_tool_offsets = {
-            seg.el_id: seg.tool_end_offset for seg in updated_tool_segs
-        }
-        try:
-            await self._client.cardkit_batch_update(
-                session.card_id,
-                actions,
-                sequence=session.sequence,
-            )
-            for seg in segments:
-                if seg.el_id in new_el_ids:
-                    seg.created = True
-                    estimate = new_el_estimates.get(seg.el_id, 0)
-                    seg.element_estimate = estimate
-                    session.element_count += estimate
-            for seg in segments:
-                if seg.type == "reasoning" and pre_flush_reasoning_elapsed.get(seg.el_id, 0) > 0:
-                    seg.reasoning_finalized = True
-            # 注：旧版本在 new_el_ids 非空时会强制将所有已创建的
-            # reasoning/answer segment 设 dirty=True（冗余重刷保险）。
-            # v0.10.2 起，预填充优化已在 add_elements 时发送文本内容，
-            # 且后续 delta 到来时 on_answer_delta/on_reasoning_delta 会
-            # 自然标记 dirty，因此不再强制重刷——减少冗余 stream_element 调用。
-            for seg in updated_tool_segs:
-                offset_ok = pre_flush_tool_offsets.get(seg.el_id, -1) == seg.tool_end_offset
-                if seg.el_id in new_el_estimates:
-                    estimate = new_el_estimates[seg.el_id]
-                    session.element_count += estimate - seg.element_estimate
-                    seg.element_estimate = estimate
-                if seg.created and offset_ok and seg.tool_end_offset > 0:
-                    seg.dirty = False
-        except FeishuAPIError as e:
-            _logger.warning("linear batch update failed: %s", e, exc_info=True)
-            handled = await self._handle_linear_flush_error_async(
-                e, session, segments, actions, new_el_ids, new_el_estimates, updated_tool_segs,
-            )
-            if handled:
-                return True  # 错误已处理（如拆卡），flush 可继续
-            return False
-        return True
+    def _linear_on_thinking(self, session: CardSession, text: str) -> None:
+        """Handle a thinking/reasoning delta in linear mode.
+
+        Splits the incoming text into reasoning and answer components,
+        updates the unified state, and schedules a flush.
+        """
+        state = session.unified_state
+        if state is None:
+            return
+        split = split_reasoning_text(text)
+        reasoning = split.get("reasoning_text")
+        answer = split.get("answer_text")
+
+        if reasoning and self._cfg.show_reasoning:
+            state.on_reasoning_delta(reasoning)
+        if answer:
+            # ── Dedup: skip answer text already delivered via stream_delta_callback ──
+            # When streaming is active, answer text arrives incrementally via
+            # stream_delta_callback → on_answer → state.on_answer_delta.
+            # The interim_assistant_callback also delivers the same text in
+            # accumulated form.  Appending it here would cause duplication.
+            _has_streamed_answer = bool(state.answer_text)
+            if not _has_streamed_answer:
+                state.on_answer_delta(answer)
+        if (reasoning and self._cfg.show_reasoning) or answer:
+            self._schedule_linear_flush(session)
+
+    # ===================================================================
+    # Preservative seal
+    # ===================================================================
 
     async def _preservative_seal(
         self,
@@ -595,20 +428,32 @@ class LinearControllerMixin:
         footer_fields: list[list[str]] | None = None,
         footer_show_label: bool = False,
     ) -> bool:
-        """保留式封卡：关闭流式模式 + 增量更新，不重建整卡.
+        """Preservative seal — close streaming + update panel + add footer.
 
-        优势：流式阶段的 streaming element 在封卡后仍为 1 个元素（不触发 _split_long_text），
-        避免 1→N+2M 的元素爆炸，根本性解决封卡超限问题。
+        This is the primary seal mechanism for the unified panel
+        architecture.  It:
 
-        返回 True 表示成功，False 表示失败（需降级为全量重建）。
-        失败时 session.sequence 可能已递增，调用方需自行处理降级路径。
+        1. Closes the streaming session (``cardkit_close_streaming``).
+        2. Updates the unified panel to its final non-streaming state
+           via ``partial_update_element`` (finalized reasoning, no
+           in-progress text).
+        3. Adds footer / error panel / deletes loading elements via
+           ``build_preservative_seal_actions``.
+
+        Because the card never has more than 4 elements, this almost
+        never fails due to element limits.  The only expected failure
+        mode is a ``CARDKIT_SEQUENCE_CONFLICT``, which is handled by
+        retry.
+
+        Returns ``True`` on success, ``False`` on failure (caller
+        should fall back to full card rebuild).
         """
         assert self._client is not None
         card_id = session.card_id
         assert card_id is not None
 
         try:
-            # Step 1: Close streaming mode
+            # ── Step 1: Close streaming mode ──
             session.sequence += 1
             _logger.info(
                 "preservative seal: closing streaming card=%s seq=%d",
@@ -616,26 +461,54 @@ class LinearControllerMixin:
             )
             await self._client.cardkit_close_streaming(card_id, sequence=session.sequence)
 
-            # Step 2: Batch update — delete loading, add partial/footer
-            actions = build_preservative_seal_actions(
-                partial=partial,
-                footer_data=footer_data,
-                is_error=is_error,
-                is_aborted=is_aborted,
-                error_message=error_message,
-                footer_fields=footer_fields,
-                footer_show_label=footer_show_label,
+            # ── Step 2: Update unified panel to final state (non-streaming) ──
+            state = session.unified_state
+            seal_actions: list[dict[str, Any]] = []
+
+            if state is not None:
+                state.finalize()
+                all_tool_steps = session.tool_use.build_display_steps()
+                panel = build_unified_panel(
+                    reasoning_rounds=state.reasoning_rounds,
+                    current_reasoning_text="",
+                    tool_steps=all_tool_steps,
+                    tool_elapsed_ms=session.tool_use.elapsed_ms,
+                    show_reasoning=self._cfg.show_reasoning,
+                    expanded=self._cfg.panel_expanded,
+                )
+                seal_actions.append({
+                    "action": "partial_update_element",
+                    "params": {
+                        "element_id": UNIFIED_PANEL_ELEMENT_ID,
+                        "partial_element": {
+                            "header": panel["header"],
+                            "elements": panel["elements"],
+                        },
+                    },
+                })
+
+            # ── Step 3: Add footer + delete loading elements ──
+            seal_actions.extend(
+                build_preservative_seal_actions(
+                    partial=partial,
+                    footer_data=footer_data,
+                    is_error=is_error,
+                    is_aborted=is_aborted,
+                    error_message=error_message,
+                    footer_fields=footer_fields,
+                    footer_show_label=footer_show_label,
+                    existing_elements=session.existing_elements,
+                )
             )
-            if actions:
+
+            if seal_actions:
                 session.sequence += 1
                 _logger.info(
                     "preservative seal: batch_update card=%s seq=%d actions=%d",
-                    card_id[:12], session.sequence, len(actions),
+                    card_id[:12], session.sequence, len(seal_actions),
                 )
                 await self._client.cardkit_batch_update(
-                    card_id,
-                    actions,
-                    sequence=session.sequence,
+                    card_id, seal_actions, sequence=session.sequence,
                 )
 
             _logger.info(
@@ -643,12 +516,14 @@ class LinearControllerMixin:
                 card_id[:12], partial,
             )
             return True
+
         except FeishuAPIError as e:
             if e.code == CARDKIT_SEQUENCE_CONFLICT:
-                # ── v0.19.1-hotfix: sequence conflict 重试 ──
-                # 旧逻辑直接 return True（误判为幂等成功），导致 close_streaming
-                # 和 batch_update 静默失败，跑马灯不停、无 footer。
-                # 现改为重试：递增 sequence 后重新执行 close_streaming + batch_update。
+                # ── Sequence conflict retry ──
+                # The old logic incorrectly treated 300317 as idempotent
+                # success, causing close_streaming and batch_update to
+                # silently fail (spinning icon, no footer).
+                # We now retry with incremented sequence numbers.
                 _logger.warning(
                     "preservative seal: sequence conflict, retrying... card=%s seq=%d",
                     card_id[:12], session.sequence,
@@ -659,21 +534,36 @@ class LinearControllerMixin:
                         await self._client.cardkit_close_streaming(
                             card_id, sequence=session.sequence,
                         )
-                        actions = build_preservative_seal_actions(
-                            partial=partial,
-                            footer_data=footer_data,
-                            is_error=is_error,
-                            is_aborted=is_aborted,
-                            error_message=error_message,
-                            footer_fields=footer_fields,
-                            footer_show_label=footer_show_label,
+
+                        # Rebuild seal actions
+                        retry_actions: list[dict[str, Any]] = []
+                        if state is not None:
+                            retry_actions.append({
+                                "action": "partial_update_element",
+                                "params": {
+                                    "element_id": UNIFIED_PANEL_ELEMENT_ID,
+                                    "partial_element": {
+                                        "header": panel["header"],  # type: ignore[possibly-undefined]
+                                        "elements": panel["elements"],  # type: ignore[possibly-undefined]
+                                    },
+                                },
+                            })
+                        retry_actions.extend(
+                            build_preservative_seal_actions(
+                                partial=partial,
+                                footer_data=footer_data,
+                                is_error=is_error,
+                                is_aborted=is_aborted,
+                                error_message=error_message,
+                                footer_fields=footer_fields,
+                                footer_show_label=footer_show_label,
+                                existing_elements=session.existing_elements,
+                            )
                         )
-                        if actions:
+                        if retry_actions:
                             session.sequence += 1
                             await self._client.cardkit_batch_update(
-                                card_id,
-                                actions,
-                                sequence=session.sequence,
+                                card_id, retry_actions, sequence=session.sequence,
                             )
                         _logger.info(
                             "preservative seal: retry %d succeeded card=%s",
@@ -688,7 +578,7 @@ class LinearControllerMixin:
                             )
                             continue
                         raise
-                # 重试全部失败
+                # All retries exhausted
                 _logger.warning(
                     "preservative seal: retry exhausted after sequence conflicts card=%s",
                     card_id[:12],
@@ -706,295 +596,22 @@ class LinearControllerMixin:
             )
             return False
 
-    async def _maybe_rollover_tool_segment(
-        self,
-        *,
-        session: CardSession,
-        linear_state: LinearState,
-        index: int,
-        seg: Segment,
-        all_steps: list[dict[str, Any]],
-        actions: list[dict[str, Any]],
-        new_el_ids: set[str],
-        new_el_estimates: dict[str, int],
-        updated_tool_segs: list[Segment],
-    ) -> str | None:
-        """按 tool step 边界拆分过大的 dirty tool segment."""
-        start = seg.tool_offset
-        end = _tool_segment_end(seg, all_steps)
-        estimate = _estimate_tool_elements(start, end, all_steps)
-        delta = estimate - seg.element_estimate
-        if (
-            delta <= 0
-            or session.element_count + delta + _FOOTER_RESERVE <= _ELEMENT_THRESHOLD
-            or session.split_disabled
-        ):
-            return None
-
-        split_offset = _find_tool_split_offset(
-            session.element_count - seg.element_estimate,
-            seg,
-            all_steps,
-        )
-        if split_offset is None:
-            return None
-
-        old_estimate = _estimate_tool_elements(seg.tool_offset, split_offset, all_steps)
-        panel = _build_tool_panel(all_steps[seg.tool_offset:split_offset], expanded=self._cfg.streaming_panel_expanded)
-        actions.append({
-            "action": "partial_update_element",
-            "params": {
-                "element_id": seg.el_id,
-                "partial_element": {
-                    "elements": panel["elements"],
-                    "header": panel["header"],
-                },
-            },
-        })
-        updated_tool_segs.append(seg)
-        new_el_estimates[seg.el_id] = old_estimate
-        linear_state.split_tool_segment(index, split_offset)
-        split_ok = await self._do_linear_split(
-            session, index + 1, actions, new_el_ids, new_el_estimates, updated_tool_segs,
-        )
-        if not split_ok:
-            return "failed"
-        return "split"
-
-    async def _do_linear_split(
-        self,
-        session: CardSession,
-        split_idx: int,
-        actions: list[dict[str, Any]],
-        new_el_ids: set[str],
-        new_el_estimates: dict[str, int],
-        updated_tool_segs: list[Segment],
-    ) -> bool:
-        """拆卡：先 flush pending actions，封旧卡，创建新卡。返回 False 表示失败需中断 flush.
-
-        v0.19.1-hotfix: 调整为先封旧卡再建新卡，避免并发操作导致 sequence conflict
-        被误判为幂等成功（旧逻辑先建新卡再封旧卡，两步并发时 sequence conflict
-        导致 close_streaming + batch_update 静默失败，跑马灯不停、无 footer）。
-        """
-        assert self._client is not None
-        old_card_id = session.card_id
-        assert old_card_id is not None
-        linear_state = session.linear_state
-        assert linear_state is not None
-        segments = linear_state.segments
-        all_steps = session.tool_use.build_display_steps()
-
-        # ── Step 0: flush pending actions ──
-        if actions and not await self._do_linear_batch_update(
-            session, segments, actions, new_el_ids, new_el_estimates, updated_tool_segs,
-        ):
-            return False
-
-        # 准备封卡数据
-        seal_segments = [s for s in segments[:split_idx] if s.created]
-
-        seal_card = build_linear_complete_card(
-            segments=seal_segments,
-            all_tool_steps=all_steps,
-            footer_fields=[],
-            footer_show_label=False,
-            panel_expanded=self._cfg.panel_expanded,
-            partial=True,
-            bg_review_messages=linear_state.bg_review_messages if linear_state else None,
-            header_enabled=self._cfg.header_enabled,
-        )
-
-        # ── Step 1: 封旧卡（先封！避免并发 sequence conflict）──
-        try:
-            # 尝试保留式封卡
-            seal_ok = await self._preservative_seal(session, partial=True)
-            if not seal_ok:
-                # 保留式封卡失败 → 全量重建封卡
-                # Note: streaming may already be closed by preservative seal attempt,
-                # so we catch CARDKIT_STREAMING_CLOSED and skip close_streaming.
-                session.sequence += 1
-                try:
-                    await self._client.cardkit_close_streaming(old_card_id, sequence=session.sequence)
-                except FeishuAPIError as close_err:
-                    if close_err.code != CARDKIT_STREAMING_CLOSED:
-                        raise
-                    # Streaming already closed by preservative seal attempt — that's fine
-                session.sequence += 1
-                await self._client.cardkit_update(old_card_id, seal_card, sequence=session.sequence)
-        except FeishuAPIError as e:
-            # ── 封卡 300305 元素超限 → 渐进降级：compact seal → minimal seal ──
-            if is_element_limit_error(e):
-                _logger.warning(
-                    "linear seal element limit for old card %s, attempting compact seal",
-                    old_card_id[:12],
-                )
-                try:
-                    compact_seal = build_linear_compact_seal_card(
-                        segments=seal_segments,
-                        all_tool_steps=all_steps,
-                        panel_expanded=self._cfg.panel_expanded,
-                        partial=True,
-                    )
-                    session.sequence += 1
-                    await self._client.cardkit_update(old_card_id, compact_seal, sequence=session.sequence)
-                except Exception:
-                    _logger.debug(
-                        "compact seal also failed for old card %s, trying minimal seal",
-                        old_card_id[:12], exc_info=True,
-                    )
-                    try:
-                        minimal_seal = build_linear_complete_card(
-                            segments=[s for s in seal_segments if s.type == "answer"][:1],
-                            all_tool_steps=all_steps,
-                            footer_fields=[],
-                            footer_show_label=False,
-                            panel_expanded=False,
-                            partial=True,
-                            bg_review_messages=linear_state.bg_review_messages if linear_state else None,
-                            header_enabled=self._cfg.header_enabled,
-                        )
-                        session.sequence += 1
-                        await self._client.cardkit_update(old_card_id, minimal_seal, sequence=session.sequence)
-                    except Exception:
-                        _logger.debug(
-                            "minimal seal also failed for old card %s",
-                            old_card_id[:12], exc_info=True,
-                        )
-            else:
-                _logger.warning(
-                    "linear seal failed for old card %s, continuing",
-                    old_card_id[:12],
-                    exc_info=True,
-                )
-        except Exception:
-            _logger.warning(
-                "linear seal failed for old card %s, continuing",
-                old_card_id[:12],
-                exc_info=True,
-            )
-
-        # ── Step 2: 创建新卡（后建！确保封旧卡串行完成）──
-        try:
-            card = build_streaming_card_v2(
-                show_tool_use=False,
-                show_reasoning=False,
-                show_streaming_element=False,
-                streaming_panel_expanded=self._cfg.streaming_panel_expanded,
-                print_strategy=self._cfg.print_strategy,
-                header_enabled=self._cfg.header_enabled,
-            )
-            new_card_id = await self._client.cardkit_create(card)
-            new_msg_id = await self._client.reply_card_by_id(session.anchor_id or session.message_id, new_card_id)
-        except Exception:
-            _logger.warning(
-                "linear split fallback: create next card failed, continue on current card",
-                exc_info=True,
-            )
-            # 新卡创建失败时降级为继续写旧卡，并禁用后续拆卡重试。
-            # 但旧卡已经封了，无法继续写 → 设置 split_disabled 避免
-            # 反复尝试，返回 True 让后续 flush 在当前（已封）卡上降级处理。
-            session.split_disabled = True
-            return True
-
-        # ── Step 3: 切换 session 到新卡 ──
-        session.card_id = new_card_id
-        session.card_msg_id = new_msg_id
-        session.element_count = 1  # loading
-        session.sequence = 1
-        session.split_disabled = False
-        session.element_limit_hit = False  # 拆卡后重置超限标记
-        session.split_index = split_idx
-        # 拆卡新卡不插入上下文加载占位提示：
-        # _loading_hint_removed 在首卡首次 answer 时已设为 True，
-        # 拆卡后不再重置，新卡创建时自然跳过。
-        _logger.info(
-            "linear split: msg=%s sealed=%d new_card=%s",
-            (session.message_id or "?")[:12],
-            len(seal_segments),
-            new_card_id[:12],
-        )
-        return True
-
-    async def _handle_linear_flush_error_async(
-        self,
-        e: FeishuAPIError,
-        session: CardSession,
-        segments: list[Segment],
-        actions: list[dict[str, Any]],
-        new_el_ids: set[str],
-        new_el_estimates: dict[str, int],
-        updated_tool_segs: list[Segment],
-    ) -> bool:
-        """处理 batch_update 错误。返回 True 表示错误已处理，flush 可继续。"""
-        if e.code == CARDKIT_RATE_LIMITED:
-            return False
-        if e.code == CARDKIT_STREAMING_CLOSED:
-            return False
-        if e.code == CARDKIT_CONTENT_FAILED or e.code == CARDKIT_ELEMENT_LIMIT_DIRECT:
-            sub_code = e.extract_sub_code() if e.code == CARDKIT_CONTENT_FAILED else CARDKIT_ELEMENT_LIMIT
-            if sub_code == CARDKIT_ELEMENT_LIMIT:
-                _logger.warning(
-                    "linear card element limit exceeded: msg=%s element_count=%d split_disabled=%s",
-                    (session.message_id or "?")[:12],
-                    session.element_count,
-                    session.split_disabled,
-                )
-                session.element_limit_hit = True
-                # ── 超限触发拆卡 ──
-                # 找到第一个未创建 segment 的索引作为拆分点
-                split_idx = session.split_index
-                for i, seg in enumerate(segments):
-                    if i < session.split_index:
-                        continue
-                    if not seg.created:
-                        split_idx = i
-                        break
-                # 如果所有段都已创建，拆分点在最后一个段之后
-                if split_idx == session.split_index:
-                    # 没有未创建段 → 已有段更新导致超限
-                    # 找最后一个已创建段作为拆分边界
-                    for i in range(len(segments) - 1, session.split_index - 1, -1):
-                        if segments[i].created:
-                            split_idx = i + 1
-                            break
-
-                if split_idx <= session.split_index:
-                    # 没有可拆分的内容 → 标记后等待完成阶段处理
-                    _logger.warning(
-                        "linear element limit: no splittable content, deferring to complete: msg=%s",
-                        (session.message_id or "?")[:12],
-                    )
-                    return False
-
-                split_ok = await self._do_linear_split(
-                    session, split_idx, actions, new_el_ids, new_el_estimates, updated_tool_segs,
-                )
-                if split_ok:
-                    _logger.info(
-                        "linear element limit triggered split: msg=%s split_at=%d",
-                        (session.message_id or "?")[:12],
-                        split_idx,
-                    )
-                    return True
-                # 拆卡失败 → 禁用拆卡，标记超限，等完成阶段重建
-                _logger.warning(
-                    "linear element limit split failed, deferring to complete: msg=%s",
-                    (session.message_id or "?")[:12],
-                )
-                return False
-        return False
+    # ===================================================================
+    # Linear complete
+    # ===================================================================
 
     async def _do_linear_complete(self, session: CardSession) -> bool:
-        """线性模式完成：close streaming + 全量重建卡片（保持 segments 顺序）."""
-        try:
-            return await self._do_linear_complete_inner(session)
-        finally:
-            self._flush_deferred_background_reviews(session)
-            self._release_session_data(session)
-            self._cleanup(session.message_id)
+        """Complete the card with the unified panel architecture.
 
-    async def _do_linear_complete_inner(self, session: CardSession) -> bool:
-        t0 = _time.monotonic()
+        Strategy:
+        1. Wait for any pending flush to finish.
+        2. Finalize the unified state (close any in-progress reasoning).
+        3. Try preservative seal (close streaming + update panel + footer).
+        4. If preservative seal fails, fall back to full card rebuild
+           (``build_unified_complete_card`` + ``cardkit_update``).
+
+        Returns ``True`` on success, ``False`` on failure.
+        """
         if session.guard.should_skip("_do_linear_complete"):
             return False
 
@@ -1002,185 +619,102 @@ class LinearControllerMixin:
         session.flush.mark_completed()
 
         # ── Wait for card creation to finish ──
-        # When on_completed fires before _do_create_linear_card finishes
-        # (e.g. agent fails fast with HTTP 401), card_id is still None.
-        # Without this await, the card would stay in streaming mode forever
-        # because we skip close_streaming when card_id is None.
+        # When on_completed fires before _do_create_linear_card finishes,
+        # card_id/card_msg_id are still None.  Wait for the signal.
         try:
             await asyncio.wait_for(session._card_ready.wait(), timeout=30.0)
         except asyncio.TimeoutError:
-            _logger.warning(
-                "linear complete: card creation timed out, msg=%s",
-                (session.message_id or "?")[:12],
-            )
+            _logger.warning("complete: card creation timed out: msg=%s", (session.message_id or "?")[:12])
 
-        # If card creation failed, we cannot render a completion card.
-        # Return False so card_sent=False → gateway sends its own text reply.
-        if not session.card_id and not session.card_msg_id:
-            _logger.info(
-                "linear complete: no card to complete, msg=%s state=%s",
-                (session.message_id or "?")[:12],
-                session.state,
-            )
+        if not session.card_id:
             session.state = FAILED
             return False
 
-        linear_state = session.linear_state
+        # ── Finalize state ──
+        state = session.unified_state
+        if state:
+            state.finalize()
+
+        # ── Build footer data ──
+        footer_data = session.footer
         is_error = session.state == FAILED
-        # COMPLETING 状态下需通过 _was_aborted 获取中断标记
         is_aborted = getattr(session, "_was_aborted", False) or session.state == ABORTED
         error_message = getattr(session, "error_message", "")
-        all_tool_steps = session.tool_use.build_display_steps()
 
-        if linear_state is not None:
-            linear_state.finalize_segments(len(all_tool_steps))
-
-        active_segments = (
-            linear_state.segments[session.split_index:] if linear_state is not None else []
-        )
-
-        card = build_linear_complete_card(
-            segments=active_segments,
-            all_tool_steps=all_tool_steps,
-            footer_data=session.footer,
+        # ── Try preservative seal ──
+        seal_ok = await self._preservative_seal(
+            session,
+            footer_data=footer_data,
             is_error=is_error,
             is_aborted=is_aborted,
             error_message=error_message,
             footer_fields=self._cfg.footer_fields,
             footer_show_label=self._cfg.footer_show_label,
-            panel_expanded=self._cfg.panel_expanded,
-            bg_review_messages=linear_state.bg_review_messages if linear_state else None,
-            header_enabled=self._cfg.header_enabled,
         )
 
-        # ── Try preservative seal first (no element explosion) ──
-        # 保留式封卡：关闭流式 + 增量更新，不触发 _split_long_text，
-        # 流式阶段的 streaming element 仍为 1 个元素。
-        if session.card_id:
-            seal_ok = await self._preservative_seal(
-                session,
-                partial=False,
-                footer_data=session.footer,
-                is_error=is_error,
-                is_aborted=is_aborted,
-                error_message=error_message,
-                footer_fields=self._cfg.footer_fields,
-                footer_show_label=self._cfg.footer_show_label,
+        if not seal_ok:
+            # ── Fallback: full card rebuild ──
+            _logger.info(
+                "preservative seal failed, falling back to full rebuild: card=%s",
+                (session.card_id or "")[:12],
             )
-            if seal_ok:
-                session.state = COMPLETED
-                _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
-                return True
-            # Preservative seal failed — fall back to full rebuild below
-
-        # ── Full rebuild path (preservative seal failed or not applicable) ──
-        streaming_closed = False
-        simplify_level = 0  # 0=full, 1=compact, 2=minimal
-        for attempt in range(3):
             try:
+                # Close streaming first (may already be closed by the failed seal attempt)
+                session.sequence += 1
+                try:
+                    await self._client.cardkit_close_streaming(session.card_id, sequence=session.sequence)  # type: ignore[union-attr]
+                except FeishuAPIError as e:
+                    if e.code != CARDKIT_STREAMING_CLOSED:
+                        raise
+                    # Streaming already closed — that's fine
+
+                complete_card = build_unified_complete_card(
+                    reasoning_rounds=state.reasoning_rounds if state else [],
+                    current_reasoning_text="",
+                    tool_steps=session.tool_use.build_display_steps(),
+                    tool_elapsed_ms=session.tool_use.elapsed_ms,
+                    answer_text=state.answer_text if state else "",
+                    show_reasoning=self._cfg.show_reasoning,
+                    footer_data=footer_data,
+                    is_error=is_error,
+                    is_aborted=is_aborted,
+                    error_message=error_message,
+                    footer_fields=self._cfg.footer_fields,
+                    footer_show_label=self._cfg.footer_show_label,
+                    panel_expanded=self._cfg.panel_expanded,
+                    header_enabled=self._cfg.header_enabled,
+                )
+                session.sequence += 1
                 assert self._client is not None
-                if session.card_id:
-                    if not streaming_closed:
-                        session.sequence += 1
-                        try:
-                            await self._client.cardkit_close_streaming(
-                                session.card_id,
-                                sequence=session.sequence,
-                            )
-                        except FeishuAPIError as close_err:
-                            if close_err.code != CARDKIT_STREAMING_CLOSED:
-                                raise
-                            # Streaming already closed by preservative seal attempt
-                        streaming_closed = True
-                    session.sequence += 1
-                    await self._client.cardkit_update(
-                        session.card_id,
-                        card,
-                        sequence=session.sequence,
-                    )
-                session.state = COMPLETED
-                _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
-                return True
-            except FeishuAPIError as e:
-                # 300317 sequence 冲突 → 幂等成功
-                # hermes 可能双调 on_completed（finally + pop_post_delivery_callback），
-                # 竞态窗口内两次调用触发 300317，表示另一条路径已完成操作。
-                if e.code == CARDKIT_SEQUENCE_CONFLICT:
-                    _logger.info(
-                        "linear complete: 300317 sequence conflict → idempotent success, "
-                        "card_id=%s seq=%d",
-                        session.card_id,
-                        session.sequence,
-                    )
-                    session.state = COMPLETED
-                    _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
-                    return True
-
-                # ── 300305 元素超限 → 渐进降级重试 ──
-                # 重试时提交相同 payload 无意义（仍会超限），
-                # 需要简化卡片内容后再提交。
-                # Level 1 (compact): 保留所有面板但截断内容
-                # Level 2 (minimal): 移除 reasoning，保留 tool+answer
-                if is_element_limit_error(e) and simplify_level < 2:
-                    simplify_level += 1
-                    _logger.warning(
-                        "linear complete: element limit (300305), rebuilding card (level %d): "
-                        "card_id=%s msg=%s",
-                        simplify_level,
-                        session.card_id,
-                        (session.message_id or "?")[:12],
-                    )
-                    simplified_active = _simplify_segments_for_complete(
-                        active_segments, all_tool_steps, level=simplify_level,
-                    )
-                    card = build_linear_complete_card(
-                        segments=simplified_active,
-                        all_tool_steps=all_tool_steps,
-                        footer_data=session.footer,
-                        is_error=is_error,
-                        is_aborted=is_aborted,
-                        error_message=error_message,
-                        footer_fields=self._cfg.footer_fields,
-                        footer_show_label=self._cfg.footer_show_label,
-                        panel_expanded=self._cfg.panel_expanded,
-                        bg_review_messages=linear_state.bg_review_messages if linear_state else None,
-                        header_enabled=self._cfg.header_enabled,
-                    )
-                    continue  # 立即用简化卡片重试，不等待
-
+                await self._client.cardkit_update(session.card_id, complete_card, sequence=session.sequence)
+                seal_ok = True
+                _logger.info(
+                    "full rebuild succeeded: card=%s",
+                    session.card_id[:12],
+                )
+            except Exception:
                 _logger.warning(
-                    "linear complete attempt %d failed: code=%s msg=%s card_id=%s seq=%d",
-                    attempt,
-                    e.code,
-                    e,
-                    session.card_id,
-                    session.sequence,
+                    "full rebuild also failed: card=%s",
+                    (session.card_id or "")[:12],
                     exc_info=True,
                 )
-                if session.guard.terminate("_do_linear_complete", e):
-                    return False
-                if attempt < 2:
-                    await asyncio.sleep(2**attempt)
-                continue
-            except Exception as e:
-                _logger.warning(
-                    "linear complete attempt %d failed: %s: %s card_id=%s seq=%d",
-                    attempt,
-                    type(e).__name__,
-                    e,
-                    session.card_id,
-                    session.sequence,
-                    exc_info=True,
-                )
-                if attempt < 2:
-                    await asyncio.sleep(2**attempt)
-                continue
+                seal_ok = False
 
-        _logger.error(
-            "linear complete failed after 3 attempts: card_id=%s seq=%d",
-            session.card_id,
-            session.sequence,
-        )
-        session.state = FAILED
-        _logger.debug("perf: linear_complete msg=%s elapsed=%.0fms", (session.message_id or "?")[:12], (_time.monotonic()-t0)*1000)
-        return False
+        if seal_ok:
+            session.state = COMPLETED
+        else:
+            session.state = FAILED
+
+        return seal_ok
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible alias
+# ---------------------------------------------------------------------------
+
+LinearControllerMixin = UnifiedControllerMixin
+
+__all__ = [
+    "UnifiedControllerMixin",
+    "LinearControllerMixin",
+]

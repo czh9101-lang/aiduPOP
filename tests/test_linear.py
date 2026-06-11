@@ -1,4 +1,4 @@
-"""linear.py 测试 — LinearState 段管理、边界条件、多轮集成."""
+"""linear.py 测试 — UnifiedLinearState 轮次管理、边界条件、多轮集成."""
 
 from __future__ import annotations
 
@@ -7,158 +7,157 @@ import time
 import pytest
 
 from hermes_lark_streaming.state import linear as linear_module
-from hermes_lark_streaming.state.linear import LinearState, Segment
+from hermes_lark_streaming.state.linear import UnifiedLinearState, ReasoningRound
 
 
-class TestSegmentDefaults:
+class TestReasoningRoundDefaults:
     def test_all_defaults(self) -> None:
-        for seg_type, el_id in [("reasoning", "r_0_panel"), ("answer", "a_0"), ("tool", "t_0")]:
-            seg = Segment(seg_type, el_id)
-            assert seg.type == seg_type
-            assert seg.el_id == el_id
-            assert seg.created is False
-            assert seg.dirty is True
-            assert seg.element_estimate == 0
-            assert seg.text == ""
-            assert seg.tool_offset == 0
-            assert seg.tool_end_offset == 0
-            assert seg.elapsed_ms == 0.0
-            assert seg.reasoning_finalized is False
+        round_ = ReasoningRound(index=1)
+        assert round_.index == 1
+        assert round_.text == ""
+        assert round_.elapsed_ms == 0.0
+        assert round_.start_time == 0.0
+        assert round_.finalized is False
+
+    def test_custom_init(self) -> None:
+        round_ = ReasoningRound(index=2, text="hello", start_time=100.0)
+        assert round_.index == 2
+        assert round_.text == "hello"
+        assert round_.start_time == 100.0
 
     def test_slots_no_dynamic_attr(self) -> None:
-        seg = Segment("answer", "a_0")
+        round_ = ReasoningRound(index=1)
         with pytest.raises(AttributeError):
-            seg.nonexistent = True  # type: ignore[attr-defined]
+            round_.nonexistent = True  # type: ignore[attr-defined]
 
 
-# ── 段创建与追加（三种类型共享同一模式：空→新建、同类型→追加、异类型→新建） ──
+# ── 推理文本追加（on_reasoning_delta） ──
 
 
 class TestOnReasoningDelta:
-    def test_appends_or_creates(self) -> None:
-        state = LinearState()
+    def test_appends_text(self) -> None:
+        state = UnifiedLinearState()
         state.on_reasoning_delta("hello ")
         state.on_reasoning_delta("world")
-        assert len(state.segments) == 1
-        assert state.segments[0].text == "hello world"
+        assert state.current_reasoning_text == "hello world"
+        assert state.has_current_reasoning is True
 
-    def test_new_segment_when_last_is_answer(self) -> None:
-        state = LinearState()
-        state.on_answer_delta("answer")
-        state.on_reasoning_delta("thoughts")
-        assert len(state.segments) == 2
-        assert state.segments[0].type == "answer"
-        assert state.segments[1].type == "reasoning"
+    def test_panel_dirty_set(self) -> None:
+        state = UnifiedLinearState()
+        state.on_reasoning_delta("thinking")
+        assert state.panel_dirty is True
+
+    def test_panel_visible_set(self) -> None:
+        state = UnifiedLinearState()
+        state.on_reasoning_delta("thinking")
+        assert state.panel_visible is True
+
+    def test_total_reasoning_count_with_current(self) -> None:
+        state = UnifiedLinearState()
+        state.on_reasoning_delta("hello")
+        assert state.total_reasoning_count == 1
+
+
+# ── 答案文本追加（on_answer_delta） ──
 
 
 class TestOnAnswerDelta:
-    def test_appends_or_creates(self) -> None:
-        state = LinearState()
+    def test_appends_text(self) -> None:
+        state = UnifiedLinearState()
         state.on_answer_delta("hello ")
         state.on_answer_delta("world")
-        assert len(state.segments) == 1
-        assert state.segments[0].text == "hello world"
+        assert state.answer_text == "hello world"
 
-    def test_new_segment_when_last_is_reasoning(self) -> None:
-        state = LinearState()
-        state.on_reasoning_delta("thinking")
+    def test_answer_dirty_set(self) -> None:
+        state = UnifiedLinearState()
         state.on_answer_delta("reply")
-        assert len(state.segments) == 2
-        assert state.segments[0].type == "reasoning"
-        assert state.segments[1].type == "answer"
+        assert state.answer_dirty is True
 
-    def test_finalizes_prev_reasoning_elapsed(self) -> None:
-        state = LinearState()
+    def test_finalizes_current_reasoning(self) -> None:
+        state = UnifiedLinearState()
         state.on_reasoning_delta("thinking")
         time.sleep(0.01)
         state.on_answer_delta("reply")
-        assert state.segments[0].elapsed_ms > 0
+        # Current reasoning should be finalized and moved to rounds
+        assert state.current_reasoning_text == ""
+        assert state.has_current_reasoning is False
+        assert len(state.reasoning_rounds) == 1
+        assert state.reasoning_rounds[0].text == "thinking"
+        assert state.reasoning_rounds[0].finalized is True
+        assert state.reasoning_rounds[0].elapsed_ms > 0
 
-    def test_does_not_finalize_already_finalized(self) -> None:
-        state = LinearState()
-        state.on_reasoning_delta("a")
-        state.on_answer_delta("b")
-        elapsed_1 = state.segments[0].elapsed_ms
-        state.on_reasoning_delta("c")
-        state.on_answer_delta("d")
-        assert state.segments[0].elapsed_ms == elapsed_1
+
+# ── 工具事件（on_tool_event） ──
 
 
 class TestOnToolEvent:
-    @pytest.mark.parametrize("count", [0, -1])
-    def test_non_positive_returns_early(self, count: int) -> None:
-        state = LinearState()
-        state.on_tool_event(count)
-        assert state.segments == []
+    def test_sets_dirty_flags(self) -> None:
+        state = UnifiedLinearState()
+        state.on_tool_event()
+        assert state.tool_steps_dirty is True
+        assert state.panel_dirty is True
+        assert state.panel_visible is True
 
-    def test_creates_and_marks_dirty(self) -> None:
-        state = LinearState()
-        state.on_tool_event(3)
-        assert len(state.segments) == 1
-        assert state.segments[0].type == "tool"
-        assert state.segments[0].tool_offset == 2
-        assert state.segments[0].dirty is True
-
-    def test_same_type_marks_dirty(self) -> None:
-        state = LinearState()
-        state.on_tool_event(1)
-        state.segments[0].dirty = False
-        state.on_tool_event(2)
-        assert len(state.segments) == 1
-        assert state.segments[0].dirty is True
-
-    def test_cross_type_creates_new_and_finalizes_prev(self) -> None:
-        state = LinearState()
-        state.on_tool_event(2)  # tool1: offset=1
-        state.on_answer_delta("intermediate")
-        state.on_tool_event(5)  # tool2: offset=4, tool1.end=4
-        assert state.segments[0].tool_end_offset == 4
-        assert state.segments[2].tool_offset == 4
-
-
-# ── finalize_segments ──
-
-
-class TestFinalizeSegments:
-    def test_finalizes_last_tool_and_reasoning(self) -> None:
-        state = LinearState()
-        state.on_tool_event(1)
+    def test_finalizes_current_reasoning(self) -> None:
+        state = UnifiedLinearState()
         state.on_reasoning_delta("thinking")
-        time.sleep(0.001)
-        state.finalize_segments(3)
-        assert state.segments[0].tool_end_offset == 3
-        assert state.segments[1].elapsed_ms > 0
+        time.sleep(0.01)
+        state.on_tool_event()
+        assert len(state.reasoning_rounds) == 1
+        assert state.reasoning_rounds[0].finalized is True
 
-    def test_no_segments_no_error(self) -> None:
-        state = LinearState()
-        state.finalize_segments(0)
+
+# ── finalize ──
+
+
+class TestFinalize:
+    def test_finalizes_current_reasoning(self) -> None:
+        state = UnifiedLinearState()
+        state.on_reasoning_delta("think")
+        time.sleep(0.001)
+        state.finalize()
+        assert state.has_current_reasoning is False
+        assert len(state.reasoning_rounds) == 1
+        assert state.reasoning_rounds[0].finalized is True
+        assert state.reasoning_rounds[0].elapsed_ms > 0
+
+    def test_noop_when_no_current_reasoning(self) -> None:
+        state = UnifiedLinearState()
+        state.finalize()
+        assert len(state.reasoning_rounds) == 0
 
     def test_already_finalized_not_overwritten(self) -> None:
-        state = LinearState()
-        state.on_tool_event(2)
-        state.on_answer_delta("mid")
-        state.on_tool_event(5)
+        state = UnifiedLinearState()
         state.on_reasoning_delta("a")
-        time.sleep(0.01)
         state.on_answer_delta("b")
-        # segments: [tool(0), answer(1), tool(2), reasoning(3), answer(4)]
-        elapsed_r1 = state.segments[3].elapsed_ms
-        state.finalize_segments(10)
-        assert state.segments[0].tool_end_offset == 4  # finalized by tool[2], not overwritten
-        assert state.segments[2].tool_end_offset == 10  # finalized by finalize
-        assert state.segments[3].elapsed_ms == elapsed_r1  # reasoning not overwritten
+        elapsed_1 = state.reasoning_rounds[0].elapsed_ms
+        state.finalize()
+        assert state.reasoning_rounds[0].elapsed_ms == elapsed_1
 
 
 # ── has_dirty ──
 
 
 class TestHasDirty:
-    def test_dirty_lifecycle(self) -> None:
-        state = LinearState()
+    def test_initial_not_dirty(self) -> None:
+        state = UnifiedLinearState()
         assert state.has_dirty is False
+
+    def test_panel_dirty(self) -> None:
+        state = UnifiedLinearState()
         state.on_reasoning_delta("a")
         assert state.has_dirty is True
-        state.segments[0].dirty = False
+
+    def test_answer_dirty(self) -> None:
+        state = UnifiedLinearState()
+        state.on_answer_delta("a")
+        assert state.has_dirty is True
+
+    def test_cleared_after_manual_reset(self) -> None:
+        state = UnifiedLinearState()
+        state.on_reasoning_delta("a")
+        state.panel_dirty = False
+        state.answer_dirty = False
         assert state.has_dirty is False
 
 
@@ -167,42 +166,96 @@ class TestHasDirty:
 
 class TestMultiRound:
     def test_two_rounds(self) -> None:
-        state = LinearState()
+        state = UnifiedLinearState()
         state.on_reasoning_delta("think 1")
         state.on_answer_delta("reply 1")
-        state.on_tool_event(2)
+        state.on_tool_event()
         state.on_reasoning_delta("think 2")
         state.on_answer_delta("reply 2")
-        types = [s.type for s in state.segments]
-        assert types == ["reasoning", "answer", "tool", "reasoning", "answer"]
+        assert len(state.reasoning_rounds) == 2
+        assert state.reasoning_rounds[0].text == "think 1"
+        assert state.reasoning_rounds[1].text == "think 2"
+        assert state.answer_text == "reply 1reply 2"
 
-    def test_el_id_naming_persists(self) -> None:
-        state = LinearState()
-        state.on_reasoning_delta("a")  # 0
-        state.on_answer_delta("b")  # 1
-        state.on_tool_event(1)  # 2
-        state.on_reasoning_delta("c")  # 3
-        assert state.segments[0].el_id == "reasoning_0_panel"
-        assert state.segments[0].text_el_id == "reasoning_0_text"
-        assert state.segments[1].el_id == "answer_1"
-        assert state.segments[2].el_id == "tools_2"
-        assert state.segments[3].el_id == "reasoning_3_panel"
+    def test_round_index_numbering(self) -> None:
+        state = UnifiedLinearState()
+        state.on_reasoning_delta("a")
+        state.on_answer_delta("b")
+        state.on_reasoning_delta("c")
+        state.on_answer_delta("d")
+        assert state.reasoning_rounds[0].index == 1
+        assert state.reasoning_rounds[1].index == 2
 
     def test_finalize_complex_scenario(self, monkeypatch: pytest.MonkeyPatch) -> None:
         times = iter(float(i) for i in range(100, 108))
         monkeypatch.setattr(linear_module.time, "time", lambda: next(times))
 
-        state = LinearState()
+        state = UnifiedLinearState()
         state.on_reasoning_delta("r1")
         state.on_answer_delta("a1")
-        state.on_tool_event(2)  # tool1: offset=1
-        state.on_answer_delta("mid")
-        state.on_tool_event(4)  # tool2: offset=3, tool1.end=3
+        state.on_tool_event()
         state.on_reasoning_delta("r2")
         state.on_answer_delta("a2")
-        state.finalize_segments(5)
+        state.finalize()
 
-        assert state.segments[0].elapsed_ms > 0  # r1 finalized by a1
-        assert state.segments[2].tool_end_offset == 3  # tool1 finalized by tool2
-        assert state.segments[4].tool_end_offset == 5  # tool2 finalized by finalize
-        assert state.segments[5].elapsed_ms > 0  # r2 finalized by a2
+        assert len(state.reasoning_rounds) == 2
+        assert state.reasoning_rounds[0].text == "r1"
+        assert state.reasoning_rounds[1].text == "r2"
+        assert state.answer_text == "a1a2"
+
+
+# ── total_reasoning_elapsed_ms ──
+
+
+class TestTotalReasoningElapsed:
+    def test_zero_when_no_reasoning(self) -> None:
+        state = UnifiedLinearState()
+        assert state.total_reasoning_elapsed_ms == 0.0
+
+    def test_positive_after_finalized(self) -> None:
+        state = UnifiedLinearState()
+        state.on_reasoning_delta("think")
+        time.sleep(0.01)
+        state.on_answer_delta("reply")
+        assert state.total_reasoning_elapsed_ms > 0
+
+
+# ── Background review ──
+
+
+class TestBackgroundReview:
+    def test_adds_message(self) -> None:
+        state = UnifiedLinearState()
+        state.on_background_review("checking quality")
+        assert state.bg_review_messages == ["checking quality"]
+
+    def test_bg_review_panel_id(self) -> None:
+        state = UnifiedLinearState()
+        assert state.bg_review_panel_id == "bg_review_panel"
+
+    def test_bg_review_panel_added_initially_false(self) -> None:
+        state = UnifiedLinearState()
+        assert state.bg_review_panel_added is False
+
+    def test_has_dirty_with_bg_review(self) -> None:
+        state = UnifiedLinearState()
+        state.panel_dirty = False
+        state.answer_dirty = False
+        state.on_background_review("review")
+        assert state.has_dirty is True
+
+
+# ── Deprecated backward compat aliases ──
+
+
+class TestDeprecatedAliases:
+    def test_segment_alias_warns(self) -> None:
+        from hermes_lark_streaming.state.linear import Segment
+        with pytest.warns(DeprecationWarning, match="Segment is deprecated"):
+            s = Segment("reasoning", "r_0")
+            assert s.type == "reasoning"
+            assert s.el_id == "r_0"
+
+    def test_linear_state_alias_is_unified(self) -> None:
+        from hermes_lark_streaming.state.linear import LinearState
+        assert LinearState is UnifiedLinearState

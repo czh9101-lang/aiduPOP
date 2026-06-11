@@ -6,11 +6,11 @@
 
 ## 1. 项目概述
 
-**hermes-lark-streaming** 是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书/Lark CardKit v2.0 流式卡片插件。AI 对话过程中实时更新飞书交互卡片（打字效果、工具面板、推理过程、完成态统计等）。
+**hermes-lark-streaming** 是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书/Lark CardKit v2.0 流式卡片插件。AI 对话过程中实时更新飞书交互卡片（打字效果、统一面板、工具步骤、推理过程、完成态统计等）。
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 1.0.1 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
+| 版本 | 1.0.2 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
 
 ---
 
@@ -41,33 +41,32 @@ Background: _run_background_task ── [Hook 1/2]
 | 文件 | 行数 | 职责 | 关键点 |
 |------|------|------|--------|
 | **patching/** | | **运行时拦截子包** | |
-| `├ __init__.py` | ~770 | 入口 + 共享状态 + 编排 | `apply_patches()` + 模块解析 + 延迟补丁 |
+| `├ __init__.py` | ~770 | 入口 + 共享状态 + 编排 | `apply_patches()` + 模块解析 + 延迟补丁 + FeishuClient 预热 |
 | `├ hooks.py` | ~230 | Hook 函数层 | `_safe_hook` 统一 enabled 检查 + 异常捕获 |
 | `├ gateway.py` | ~890 | GatewayRunner 包装 | 6 个 wrapper + 时间前缀注入 + cron/background |
 | `├ callbacks.py` | ~230 | 回调包装 | 5 个内部 wrapper 防重复消费 |
 | `└ adapter.py` | ~1030 | FeishuAdapter 包装 | send/edit/reaction/clarify 包装 + gateway card 注册 |
 | **cardkit/** | | **卡片构建子包** | |
 | `├ __init__.py` | ~5 | 重导出门面 | `from .elements/cards/special import *` |
-| `├ elements.py` | ~680 | 原始元素构建器 | streaming/reasoning/tool/error 面板 + footer |
-| `├ cards.py` | ~440 | 卡片组装器 | streaming/complete/linear/IM-fallback 卡片 |
+| `├ elements.py` | ~680 | 原始元素构建器 | 统一面板 + answer streaming + footer |
+| `├ cards.py` | ~440 | 卡片组装器 | streaming/complete/IM-fallback 卡片 |
 | `├ special.py` | ~410 | 专用卡片类型 | cron/gateway/clarify 三态卡片 |
-| `├ i18n.py` | 58 | 中英双语映射 | `_T` dict + `_i18n()`/`_t()` |
+| `├ i18n.py` | 62 | 中英双语映射 | `_T` dict + `_i18n()`/`_t()`；新增 `agent_process`/`rounds`/`tools_count`/`round_n` |
 | `└ md.py` | 121 | Markdown 处理 | 标题/表格降级、长文本分块 |
 | **controller/** | | **主控制器子包** | |
 | `├ __init__.py` | ~20 | 重导出门面 | StreamCardController + CardSession + 状态常量 |
 | `├ core.py` | ~720 | 主控制器(单例) | 管理生命周期，导入 CardSession |
 | `├ mixin.py` | ~580 | 异步 API 编排 | 状态机 + CardKit→IM PATCH 降级链 |
-| `└ linear_mixin.py` | ~1250 | 线性模式编排 | 拆卡(阈值185)、渐进降级封卡、segment 管理 |
+| `└ linear_mixin.py` | ~1050 | 线性模式编排 | 统一面板更新、保留式封卡、TTL 延长 |
 | **state/** | | **状态与数据子包** | |
-| `├ __init__.py` | ~20 | 重导出门面 | CardSession + TextState + LinearState + 工具类 |
-| `├ session.py` | ~110 | CardSession 数据类 | 37 字段 `__slots__`，独立于 controller |
-| `├ linear.py` | ~180 | 线性 segment 状态 | `Segment` 数据类 + `LinearState` 扁平管理 |
-| `├ linear_split.py` | ~170 | 拆分/估算逻辑 | 独立函数，预估元素数 + 查找拆分偏移 |
+| `├ __init__.py` | ~20 | 重导出门面 | CardSession + TextState + UnifiedLinearState + 工具类 |
+| `├ session.py` | ~100 | CardSession 数据类 | __slots__ 数据类，独立于 controller |
+| `├ linear.py` | ~300 | 统一面板状态 | `ReasoningRound` 数据类 + `UnifiedLinearState` 扁平管理 |
 | `├ text.py` | ~111 | 文本增量追踪 | `<think|thinking|thought>` 标签拆分 |
 | `└ tooluse.py` | ~299 | 工具调用追踪 | `ToolStep`/`ToolSession`，敏感信息脱敏 |
 | **feishu/** | | **飞书 API 客户端子包** | |
 | `├ __init__.py` | ~48 | 重导出门面 | `FeishuClient`, `UnavailableGuard` 等 |
-| `├ client.py` | ~450 | 飞书 API 客户端 | CardKit v1/v2 + IM API，错误码分类 + 瞬态重试 |
+| `├ client.py` | ~450 | 飞书 API 客户端 | CardKit v1/v2 + IM API，错误码分类 + 瞬态重试 + 预热支持 |
 | `└ guard.py` | ~144 | 消息不可用保护 | 删除/撤回检测，30分钟 TTL |
 | **flush/** | | **节流调度子包** | |
 | `├ __init__.py` | ~21 | 重导出门面 | `FlushController`, `CARDKIT_MS`, `PATCH_MS` |
@@ -75,7 +74,7 @@ Background: _run_background_task ── [Hook 1/2]
 | **config/** | | **配置读取子包** | |
 | `├ __init__.py` | ~9 | 重导出门面 | `Config`, `_get_hermes_config_path` |
 | `└ reader.py` | ~270 | 配置读取 | `_plugin_sec()` 惰性加载 + 5秒 TTL 缓存 |
-| `plugin.py` | ~250 | 插件注册入口 | `register()`/`unregister()`，自动备份 config |
+| `plugin.py` | ~250 | 插件注册入口 | `register()`/`unregister()`，自动备份 config，FeishuClient 预热 |
 
 ---
 
@@ -90,6 +89,8 @@ Background: _run_background_task ── [Hook 1/2]
 **4.4 异步 + 双重补丁**: Cron 全链路异步化(禁止 `run_coroutine_threadsafe().result()`)；`run_conversation` 模块级+实例级双重补丁；Cron/后台临时替换 `adapter.send`（卡片替换纯文本）。
 
 **4.5 时间感知格式**: XML 标签 `<time>HH:MM:SS</time>`，LLM 不模仿，无日期/时区后缀。
+
+**4.6 统一面板架构 (v1.0.2)**: 所有推理轮次和工具步骤放在 1 个可折叠面板中（图标 `robot_filled`），回答使用 1 个流式元素。无论对话多长，卡片始终只有 3–4 个元素。面板标题动态显示 `Agent Process · N rounds · M tools · Xs`。`display.show_reasoning` 控制推理内容是否出现在面板中。
 
 ---
 
@@ -116,9 +117,54 @@ CardKit v2 Streaming → CardKit v2 Create+Patch → IM Create+Patch → Hermes 
 
 ---
 
-## 7. 线性模式
+## 7. 统一面板架构
 
-单卡按事件顺序渲染: `[Reasoning] → [Tool] → [Answer] → ...`。Segment 扁平排列，仅按元素数量超阈值拆卡（Trigger A，阈值 185/200），Tool 按 step 边界拆分。Answer 估算固定为 1 element（方案B：对齐保留式封卡实际行为），不再做 answer 内部拆分和动态重估；保留式封卡下 answer 始终是 1 个 streaming element，300305 reactive 拆卡兜底。相邻同类型段不再强制拆卡（Trigger B 已移除，修复"秒拆"bug）。
+v1.0.2 引入统一面板架构，取代旧的分段式设计。
+
+**核心思想**: 1 个可折叠面板承载所有推理轮次和工具步骤，1 个流式元素承载回答文本。无论对话多长，卡片元素总数恒为 3–4 个。
+
+**旧架构问题**:
+- 每个 reasoning round 创建独立面板（4 元素/面板），元素数随对话线性增长
+- 接近飞书 200 元素硬限，导致：100% 封卡失败率、频繁拆卡、级联故障链、流式关闭 (300309)
+
+**统一面板结构**:
+```
+┌─ 统一面板 (robot_filled) ──────────────────────────────┐
+│ Agent Process · 3 rounds · 5 tools · 12.5s              │
+│                                                          │
+│ 🔄 Round 1 (3.2s)                                      │
+│   推理内容...                                             │
+│   🔧 search("query") ✓ 1.2s                            │
+│   🔧 read("file.py") ✓ 0.8s                            │
+│                                                          │
+│ 🔄 Round 2 (4.1s)                                      │
+│   推理内容...                                             │
+│   🔧 write("file.py") ✓ 2.1s                           │
+│                                                          │
+│ 🔄 Round 3 (5.2s)                                      │
+│   推理内容...                                             │
+│   🔧 run("test") ✓ 3.0s                                │
+│   🔧 run("lint") ✓ 1.5s                                │
+└──────────────────────────────────────────────────────────┘
+
+┌─ 回答流式元素 ──────────────────────────────────────────┐
+│ 这是 AI 的回答文本，流式更新...                            │
+└──────────────────────────────────────────────────────────┘
+```
+
+**元素 ID**:
+- `UNIFIED_PANEL_ELEMENT_ID` — 统一面板
+- `ANSWER_ELEMENT_ID` — 回答流式元素
+
+**性能优化**:
+- 初始卡片预分配所有槽位（2 次 API 调用代替 3 次）— 节省 ~150-200ms
+- 加载提示嵌入初始卡片 JSON — 消除 1 次独立 API 调用
+- FeishuClient 在插件注册时预热 — 首条消息节省 ~50-100ms
+- 默认刷新间隔从 500ms 降为 200ms — 文字更快出现
+
+**TTL 延长**: 当卡片接近 540s 生存时间时，自动延长 TTL 600s，防止 300309 流式关闭。
+
+**保留式封卡**: 封卡时仅删除实际存在的元素（如加载提示），更新统一面板为最终状态（非流式、按配置展开）。不再有渐进降级（compact seal / minimal seal），因为元素数永远不会超限。
 
 ---
 
@@ -131,7 +177,7 @@ hermes_lark_streaming:
   panel_expanded: false
   streaming_panel_expanded: false
   print_strategy: delay            # "fast" 或 "delay"
-  flush_interval_ms: 500           # 100~2000ms
+  flush_interval_ms: 200           # 100~2000ms（默认 200，原 500）
   card_ttl_sec: 600
   inject_time: false
   footer:
@@ -180,8 +226,8 @@ hermes_lark_streaming:
 ### 10.6 FlushController 线程安全
 worker 线程必须用 `call_soon_threadsafe()`，`call_soon()` 不唤醒事件循环→flush 永不执行。
 
-### 10.7 元素估算必须对齐实际渲染
-飞书卡片 2.0 硬上限 200 元素+组件（API 错误码 300307/300305），拆卡阈值 185（预留 15 给 footer+封卡波动）。方案B: answer 估算固定为 1（对齐保留式封卡），只有 tool segment 按实际元素数估算。估算错位会导致过早拆卡（answer 估算 10+ 实际 1）。
+### 10.7 统一面板消除元素爆炸
+v1.0.2 之前，每个 reasoning round / tool segment 创建独立面板（4 元素/面板），元素数随对话线性增长接近 200 硬限。统一面板架构将所有内容集中在 1 个面板 + 1 个回答元素 = 3–4 元素恒定，彻底消除拆卡和渐进降级需求。
 
 ### 10.8 幂等守卫 = 同步状态转移 + 错误码容错
 COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态。
@@ -189,17 +235,20 @@ COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态。
 ### 10.9 Monkey patch 签名确认
 必须确认目标是类方法还是模块级函数；签名不匹配 = 静默失败。
 
-### 10.10 封卡超限→渐进降级
-全量封卡→compact seal（截断保留面板）→minimal seal（仅 answer 文本）。降级不应一步跳到最简方案。
+### 10.10 封卡只删除实际存在的元素
+v1.0.2 之前，保留式封卡盲目删除所有已知元素 ID（包括已被飞书删除的 `context_loading_hint`），导致 100% 的 300314 失败。现在封卡只删除卡片上实际存在的元素，消除了此问题。
 
 ### 10.11 性能参数应可配置
-性能敏感参数不应硬编码。默认 500ms 刷新间隔（可配置 100~2000ms）。
+性能敏感参数不应硬编码。默认 200ms 刷新间隔（可配置 100~2000ms）。
 
-### 10.12 即时反馈
-首卡插入加载提示占位符，首段 answer 到达时同一 batch_update 移除（零额外 API 开销）。
+### 10.12 即时反馈 + 预分配
+初始卡片 JSON 中嵌入加载提示占位符 + 预分配所有元素槽位（2 次 API 调用代替 3 次），首段 answer 到达时同一 batch_update 移除加载提示（零额外 API 开销）。
 
-### 10.13 序列冲突≠幂等成功
-300317 表示 sequence 不一致，必须重试或降级。拆卡时先封旧卡再建新卡。
+### 10.13 主动 TTL 延长
+当卡片生存时间接近 540s 时，自动延长 600s，防止 300309 流式关闭。不要等到超时再处理。
+
+### 10.14 向后兼容别名带弃用警告
+`LinearState` → `UnifiedLinearState`、`Segment` → `ReasoningRound`、`session.linear_state` → `session.unified_state`：均保留向后兼容别名，但访问时打印弃用警告，方便渐进迁移。
 
 ---
 
@@ -209,12 +258,12 @@ COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态。
 tests/
   test_version.py              — 版本号读取逻辑
   test_patch.py                — Hook 函数单元测试
-  test_controller.py           — 会话生命周期 + 线性模式
+  test_controller.py           — 会话生命周期 + 统一面板模式
   test_cardkit.py              — 卡片 JSON 构建
   test_config.py               — 配置读取
   test_flush.py                — 节流调度器
   test_text.py                 — 文本增量追踪
-  test_linear.py               — 线性 segment 管理
+  test_unified.py              — 统一面板状态管理
   test_tooluse.py              — 工具调用追踪
   test_monkey_patch.py         — 时间感知/重入守卫/cron 降级
   test_unavailable_guard.py    — 消息不可用保护
@@ -244,7 +293,7 @@ $HERMES_PYTHON -m pytest tests/
 
 # 清理 + 重装
 HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
-$HERMES_PYTHON -m hermes_lark_streaming cleanup
+$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py cleanup
 hermes plugins uninstall hermes-lark-streaming
 hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
 hermes gateway restart
@@ -268,15 +317,16 @@ hermes gateway restart
 | 后台任务纯文本 | `grep "background" agent.log` | patching/gateway.py |
 | 页脚无 cache 字段 | `cache_read_tokens` 是否提取 | patching/callbacks.py |
 | 页脚无 cost 字段 | `session_estimated_cost_usd` 是否提取 | patching/gateway.py |
-| tokens 缺推理数 | `session_reasoning_tokens` 是否提取 | patching/gateway.py |
+| tokens 缺推理数 | `session_reasoning_tokens` 是否提取 | patching/callbacks.py |
 | Apple Silicon 报错 | `grep "conversation_loop" agent.log` | patching/__init__.py |
 | 版本号 unknown | plugin.yaml 路径 | `__init__.py` |
 | 页脚耗时为 0 | `_msg_start_time` 设置 | patching/gateway.py |
 | 消息删除后仍更新 | UnavailableGuard | feishu/guard.py |
-| 拆卡后超元素 | answer 估算=1（方案B）| state/linear_split.py |
-| 卡片卡死不更新 | 元素超限无限重试 | controller/linear_mixin.py |
+| 统一面板不显示 | `show_reasoning` 配置 + `UNIFIED_PANEL_ELEMENT_ID` | cardkit/elements.py |
+| 流式关闭 (300309) | 卡片 TTL + 主动延长 | controller/linear_mixin.py |
+| 封卡后面板状态异常 | 封卡是否更新面板最终状态 | controller/linear_mixin.py |
 | /stop 卡片卡死 | on_aborted/on_completed 路径 | patching/gateway.py / patching/adapter.py |
 
 ---
 
-*Last updated: 2026-06-10 | Version: 1.0.1*
+*Last updated: 2026-06-11 | Version: 1.0.2*

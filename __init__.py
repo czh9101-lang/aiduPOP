@@ -3,8 +3,14 @@
 Architecture Overview
 ────────────────────
 This plugin intercepts Hermes's message pipeline and renders real-time
-streaming cards with typewriter effect, tool panels, reasoning panels,
-and progressive card splitting.
+streaming cards with typewriter effect, unified agent process panels,
+and proactive TTL extension.
+
+The unified panel architecture (v1.1.0+) replaces the old segment-based
+approach with a single collapsible panel element that holds all reasoning
+rounds and tool steps.  This reduces card elements from potentially 50+
+to just 3-4, eliminating the need for element counting, card splitting,
+and progressive degradation.
 
 Module Organization
 ──────────────────
@@ -16,7 +22,7 @@ Configuration:
 Feishu API:
   feishu/                     Sub-package
     __init__.py               Re-exports: FeishuClient, FeishuAPIError, UnavailableGuard, etc.
-    client.py                 FeishuClient (Lark SDK wrapper, transient retry)
+    client.py                 FeishuClient (Lark SDK wrapper, transient retry, TTL extension)
     guard.py                  UnavailableGuard (message-deleted protection)
 
 Flush Throttle:
@@ -29,23 +35,22 @@ Core Controller:
     __init__.py               Re-exports: StreamCardController, CardSession, states
     core.py                   StreamCardController (singleton, manages sessions)
     mixin.py                  ControllerMixin (non-linear card API orchestration)
-    linear_mixin.py           LinearControllerMixin (linear mode API orchestration)
+    linear_mixin.py           UnifiedControllerMixin (unified panel flush/seal)
 
 Card Building:
   cardkit/                    Sub-package
     __init__.py               Re-exports from elements/cards/special
-    elements.py               Primitive element builders (panels, footers, etc.)
-    cards.py                  Card assemblers (streaming, complete, linear)
+    elements.py               Primitive element builders (unified panel, panels, footers)
+    cards.py                  Card assemblers (streaming, complete, unified)
     special.py                Specialized cards (cron, gateway, clarify)
     md.py                     Markdown processing (downgrade, split, optimize)
     i18n.py                   i18n zh/en bilingual text mapping
 
 State & Data:
   state/                      Sub-package
-    __init__.py               Re-exports: CardSession, TextState, LinearState, etc.
-    session.py                CardSession (per-message state)
-    linear.py                 LinearState + Segment (flat segment management)
-    linear_split.py           Element threshold, split estimation helpers
+    __init__.py               Re-exports: CardSession, TextState, UnifiedLinearState, etc.
+    session.py                CardSession (per-message state with element tracking)
+    linear.py                 UnifiedLinearState + ReasoningRound
     text.py                   TextState (incremental text tracking)
     tooluse.py                ToolUseTracker (tool call visualization + redaction)
 
@@ -58,7 +63,7 @@ Runtime Patching:
     hooks.py                  Hook functions (on_message_started, on_answer_delta, etc.)
 
 Entry Points:
-  plugin.py                   Plugin register/unregister (Hermes entry point)
+  plugin.py                   Plugin register/unregister (Hermes entry point + client pre-warm)
   __main__.py                 CLI entry (status, verify, cleanup)
 
 Logging
@@ -68,18 +73,34 @@ Plugin logger name: ``hermes_lark_streaming``
   - Logs to ``agent.log`` (catch-all), NOT routed to ``gateway.log``
   - No explicit ``setLevel()`` — level follows Hermes config automatically
 
-Streaming Mode
-──────────────
-This plugin uses CardKit v2.0 native streaming mode:
-  - Creates cards with ``streaming_mode: True``
-  - Uses ``cardkit_stream_element`` for text increment updates
-  - Uses ``cardkit_batch_update`` for structural changes (add/modify elements)
-  - Uses ``cardkit_close_streaming`` to exit streaming on completion
+Unified Panel Architecture
+──────────────────────────
+Key invariant: The card contains at most 4 top-level elements:
 
-The "linear mode" is a content organization strategy on top of native
-streaming — it renders segments (reasoning → tool → answer) in sequence
-with independent element_ids, supporting card splitting and progressive
-degradation when exceeding Feishu's 200-element limit.
+1. **Unified panel** (``UNIFIED_PANEL_ELEMENT_ID``): A single
+   ``collapsible_panel`` that holds all reasoning rounds and tool steps.
+   Internal children are sub-elements that do NOT count toward the
+   Feishu 200-element card limit.
+
+2. **Answer streaming element** (``ANSWER_ELEMENT_ID``): Receives
+   answer text via ``cardkit_stream_element``.
+
+3. **Loading hint** (``_LOADING_HINT_ELEMENT_ID``): Context loading
+   placeholder, removed when first content arrives.
+
+4. **Loading icon** (``_LOADING_ELEMENT_ID``): Spinner, removed on seal.
+
+This eliminates:
+  - Element counting / thresholds
+  - Card splitting / rollover
+  - Progressive degradation (compact/minimal seal)
+
+Performance improvements:
+  - Initial card pre-allocates all slots (2 API calls instead of 3)
+  - Client pre-warming eliminates first-message latency
+  - Default flush interval reduced from 500ms to 200ms
+  - Proactive TTL extension prevents 300309 stream closure
+  - Element existence tracking eliminates 300314 seal failures
 """
 
 import logging
