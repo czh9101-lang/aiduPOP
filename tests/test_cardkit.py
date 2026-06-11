@@ -1128,27 +1128,22 @@ class TestPartialStatusIndicator:
 
     def test_partial_indicator_in_complete_card(self) -> None:
         """partial=True 时卡片底部出现继续提示."""
-        from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment  # deprecated alias
-        seg = Segment("answer", "answer_0")
-        seg.text = "部分回答内容"
         card = build_linear_complete_card(
-            segments=[seg],
-            all_tool_steps=[],
+            reasoning_rounds=[],
+            tool_steps=[],
+            answer_text="部分回答内容",
             partial=True,
         )
         elements = card["body"]["elements"]
-        # Should have: markdown(answer) + hr + markdown(partial indicator)
         texts = [e.get("content", "") for e in elements if e.get("tag") == "markdown"]
         assert any("Continues" in t for t in texts), f"No partial indicator found in {texts}"
 
     def test_no_partial_indicator_by_default(self) -> None:
         """partial=False (默认) 时无继续提示."""
-        from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment  # deprecated alias
-        seg = Segment("answer", "answer_0")
-        seg.text = "回答内容"
         card = build_linear_complete_card(
-            segments=[seg],
-            all_tool_steps=[],
+            reasoning_rounds=[],
+            tool_steps=[],
+            answer_text="回答内容",
         )
         elements = card["body"]["elements"]
         texts = [e.get("content", "") for e in elements if e.get("tag") == "markdown"]
@@ -1156,14 +1151,17 @@ class TestPartialStatusIndicator:
 
     def test_partial_indicator_in_compact_seal_card(self) -> None:
         """compact seal 卡片也支持 partial 提示."""
-        from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment  # deprecated alias
-        seg = Segment("answer", "answer_0")
-        seg.text = "部分回答"
-        card = build_linear_compact_seal_card(
-            segments=[seg],
-            all_tool_steps=[],
-            partial=True,
-        )
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment
+            seg = Segment("answer", "answer_0")
+            seg.text = "部分回答"
+            card = build_linear_compact_seal_card(
+                segments=[seg],
+                all_tool_steps=[],
+                partial=True,
+            )
         elements = card["body"]["elements"]
         texts = [e.get("content", "") for e in elements if e.get("tag") == "markdown"]
         assert any("Continues" in t for t in texts)
@@ -1188,12 +1186,10 @@ class TestBackgroundReviewPanel:
 
     def test_background_review_in_complete_card(self) -> None:
         """完成态卡片包含后台审查面板."""
-        from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment  # deprecated alias
-        seg = Segment("answer", "answer_0")
-        seg.text = "回答"
         card = build_linear_complete_card(
-            segments=[seg],
-            all_tool_steps=[],
+            reasoning_rounds=[],
+            tool_steps=[],
+            answer_text="回答",
             bg_review_messages=["审查消息1"],
         )
         elements = card["body"]["elements"]

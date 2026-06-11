@@ -182,8 +182,26 @@ class UnifiedControllerMixin:
             session.flush.set_card_message_ready(True)
             if session.state == CREATING:
                 session.state = STREAMING
-            if session.linear and session.unified_state and session.unified_state.has_dirty:
-                self._schedule_linear_flush(session)
+
+            # ── Execute deferred flush immediately after card is ready ──
+            # When reasoning/tool deltas arrived while the card was still
+            # being created, _schedule_linear_flush marked _pending_flush
+            # instead of scheduling (card_message_ready was False).  Now
+            # that the card is ready, execute the flush immediately so the
+            # user sees content without waiting for the next event.
+            if session.linear and session.unified_state and (
+                session.unified_state.has_dirty or session._pending_flush
+            ):
+                session._pending_flush = False
+                if not session._first_flush_done:
+                    # First content → immediate flush (首字即显)
+                    session._first_flush_done = True
+                    asyncio.get_event_loop().create_task(
+                        session.flush.flush_now(lambda: self._do_unified_flush(session))
+                    )
+                else:
+                    # Subsequent content → throttled flush
+                    self._schedule_linear_flush(session)
 
             # ── Signal card readiness ──
             # Must be set AFTER card_id/card_msg_id are assigned and
@@ -218,22 +236,41 @@ class UnifiedControllerMixin:
         content for the session and there are dirty data, skip the
         throttle interval and flush immediately.  This reduces
         first-visible-text latency by 0~500 ms.
+
+        Deferred flush (卡片未就绪): when data arrives before the card
+        is created (``card_message_ready=False``), the flush request is
+        deferred.  The card creation routine will pick it up once the
+        card is ready.
         """
         if session.state == IDLE or session.state in _TERMINAL or session.state == COMPLETING:
             return
         if session.guard.should_skip("_schedule_linear_flush"):
             return
 
+        state = session.unified_state
+        if state is None or not state.has_dirty:
+            return
+
+        # ── Card not ready yet — mark deferred instead of dropping ──
+        # When reasoning/tool deltas arrive before card creation completes,
+        # schedule_update would silently drop them (card_message_ready=False).
+        # Mark the session as needing a flush; the card creation routine
+        # will execute it once the card is ready.
+        if not session.flush._card_message_ready:
+            session._pending_flush = True
+            return
+
         # ── First-Token Immediate Flush (首字即显) ──
-        if (
-            not session._first_flush_done
-            and session.unified_state is not None
-            and session.unified_state.has_dirty
-        ):
+        if not session._first_flush_done:
             session._first_flush_done = True
-            asyncio.get_event_loop().create_task(
-                session.flush.flush_now(lambda: self._do_unified_flush(session))
-            )
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = session._loop
+            if loop is not None and not loop.is_closed():
+                loop.create_task(
+                    session.flush.flush_now(lambda: self._do_unified_flush(session))
+                )
             return
 
         session.flush.schedule_update(lambda: self._do_unified_flush(session))
@@ -316,8 +353,9 @@ class UnifiedControllerMixin:
                     "action": "delete_elements",
                     "params": {"element_ids": [_LOADING_HINT_ELEMENT_ID]},
                 })
-            state.panel_dirty = False
-            state.tool_steps_dirty = False
+            # Note: panel_dirty and tool_steps_dirty are cleared AFTER
+            # the API call succeeds, not before — if the call fails we
+            # want the next flush to retry Phase 2 with fresh content.
 
             # ── Execute Phase 2 batch_update ──
             if actions:
@@ -338,6 +376,9 @@ class UnifiedControllerMixin:
                     session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
                     session.existing_elements.add(ANSWER_ELEMENT_ID)
                     session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
+                    # Clear dirty flags only after API success
+                    state.panel_dirty = False
+                    state.tool_steps_dirty = False
                 except FeishuAPIError as e:
                     if e.code == CARDKIT_STREAMING_CLOSED:
                         _logger.info(
@@ -367,7 +408,14 @@ class UnifiedControllerMixin:
                     if e.code == CARDKIT_STREAMING_CLOSED:
                         return
                     _logger.debug("unified stream_element failed: %s", e)
-            return  # Phase 2 done
+
+            # ── Re-check for new dirty data after Phase 2 ──
+            # While Phase 2 was executing (add_elements + stream_element),
+            # new reasoning/tool deltas may have arrived and set panel_dirty.
+            # Don't return immediately — fall through to Phase 3 so the
+            # panel content is updated in the same flush cycle.
+            if not state.panel_dirty and not state.tool_steps_dirty and not state.answer_dirty:
+                return  # Phase 2 done, nothing more to do
 
         # ── Phase 3: Update existing panel + stream answer ──
         if state.panel_dirty:
@@ -391,8 +439,9 @@ class UnifiedControllerMixin:
                     },
                 },
             })
-            state.panel_dirty = False
-            state.tool_steps_dirty = False
+            # Note: panel_dirty and tool_steps_dirty are cleared AFTER
+            # the API call succeeds, not before — if the call fails we
+            # want the next flush to rebuild the panel content.
 
         # ── Delete loading hint if still present (safety net) ──
         _hint_delete_in_batch = False
@@ -417,6 +466,10 @@ class UnifiedControllerMixin:
                 await self._client.cardkit_batch_update(
                     session.card_id, actions, sequence=session.sequence,
                 )
+                # Clear dirty flags only after API success
+                if state.panel_dirty or state.tool_steps_dirty:
+                    state.panel_dirty = False
+                    state.tool_steps_dirty = False
                 if _hint_delete_in_batch:
                     session._loading_hint_removed = True
                     session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
@@ -459,6 +512,13 @@ class UnifiedControllerMixin:
                     )
                     return
                 _logger.debug("unified stream_element failed: %s", e)
+
+        # ── Re-check: schedule next flush if new data arrived during this flush ──
+        # While we were awaiting API calls, new reasoning/tool deltas may have
+        # set panel_dirty or answer_dirty.  Schedule a follow-up flush so the
+        # panel content stays up-to-date in real-time.
+        if state.panel_dirty or state.answer_dirty or state.tool_steps_dirty:
+            self._schedule_linear_flush(session)
 
     # ===================================================================
     # Thinking handler

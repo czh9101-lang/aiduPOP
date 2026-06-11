@@ -387,6 +387,7 @@ class TestDoCreateLinearCard:
 
     @pytest.mark.asyncio
     async def test_post_create_flush_on_dirty(self) -> None:
+        """When data arrives during card creation, a flush is triggered after card is ready."""
         ctrl = _setup_ctrl(linear=True)
         session = _make_session("msg_dirty")
         ctrl._sessions["msg_dirty"] = session
@@ -399,9 +400,13 @@ class TestDoCreateLinearCard:
 
         ctrl._ensure_init = inject_data_and_ensure  # type: ignore[assignment]
 
-        with patch.object(ctrl, "_schedule_linear_flush") as m:
-            await ctrl._do_create_linear_card(session)
-            m.assert_called()
+        await ctrl._do_create_linear_card(session)
+
+        # After card creation, data that arrived during creation should
+        # trigger a flush. The new implementation either calls flush_now
+        # directly (first content) or _schedule_linear_flush (subsequent).
+        # Either way, the dirty data should be cleared or a flush scheduled.
+        assert session._first_flush_done is True
 
     @pytest.mark.asyncio
     async def test_first_card_creates_preallocated_elements(self) -> None:

@@ -187,7 +187,7 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 
 从 v1.0.2 开始，插件使用**统一面板架构**：
 - 所有推理轮次和工具步骤集中在 1 个可折叠面板（`robot_filled` 图标）
-- 面板标题动态显示 `Agent Workflow · N rounds · M tools · Xs`
+- 面板标题动态显示 `agent loop · N rounds · M tools · Xs`
 - 推理和工具按时间线交错渲染（reasoning→tool→reasoning→tool），而非全部推理后再全部工具
 - 回答使用 1 个独立流式元素
 - 卡片元素总数恒为 3–4 个（不再有拆卡、渐进降级）

@@ -109,8 +109,8 @@ def build_streaming_card_v2(
     if include_unified_panel:
         elements.append(_build_unified_panel_placeholder(expanded=streaming_panel_expanded))
 
-    # ── Non-unified (legacy) panels ──
-    if not include_unified_panel:
+    # ── Non-unified (legacy) panels — only for non-Phase-1 cards ──
+    if not include_unified_panel and include_answer_element:
         if show_reasoning:
             elements.append(
                 _build_reasoning_panel(" ", expanded=streaming_panel_expanded, element_id=REASONING_ELEMENT_ID)
