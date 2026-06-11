@@ -37,6 +37,9 @@ def _find_tables_outside_code_blocks(text: str) -> list[tuple[int, int, str]]:
 
 def _downgrade_tables(text: str, limit: int = _MAX_CARD_TABLES) -> str:
     """超限表格降级为代码块（保留内容可见但飞书不渲染为表格元素）."""
+    # Early return: no tables possible without pipe characters
+    if '|' not in text:
+        return text
     matches = _find_tables_outside_code_blocks(text)
     if len(matches) <= limit:
         return text
@@ -67,6 +70,11 @@ def optimize_markdown_style(text: str) -> str:
     4. 压缩多余空行
     5. 剥离无效图片 key（非 img_xxx 格式）
     """
+    # Early return: short texts without markdown structure don't need
+    # complex regex processing.  Skip only when no headings, code blocks,
+    # images, or excessive blank lines are present.
+    if len(text) < 100 and not re.search(r'^#{1,6} |\n#{1,6} |```|!\[|\n{3,}', text):
+        return text
     try:
         # 1. 提取代码块
         mark = "___CB_"

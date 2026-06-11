@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.2-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.3-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -21,30 +21,6 @@
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >
 > ⚠️ **与上游插件不兼容** — 如已安装原版 `Cheerwhy/hermes-lark-streaming`，请先卸载后再安装本插件。
-
----
-
-## ✨ v1.0.2 新特性 — 统一面板架构
-
-**卡片元素架构完全重新设计** — 用单个统一可折叠面板替代旧的分段式方案，将所有推理轮次和工具步骤集中在同一面板中。
-
-| 指标 | 改前 (v1.0.1) | 改后 (v1.0.2) |
-|------|---------------|---------------|
-| 每条消息卡片元素数 | 50–100+（N 面板 × 4 元素） | 3–4 个总计 |
-| 保留式封卡失败率 | 100%（300314 元素未找到） | 0% |
-| 拆卡频率 | 频繁（生产日志中 22 次） | 已消除 |
-| 级联故障链 | 封卡→重建→300305→精简→极简→拆卡 | 无 |
-| 流式关闭 (300309) | 长对话频繁触发 | 已预防（主动 TTL 延长） |
-| 首 token 延迟 | 基准 | 快约 200–300ms |
-| 默认刷新间隔 | 500ms | 200ms |
-
-**核心架构变更**：1 个统一面板承载所有推理 + 工具调用，1 个回答流式元素 — 无论对话多长。彻底消除了旧分段设计导致的元素数量爆炸问题。
-
-**卡片生命周期（4 阶段）**：
-1. 用户发送消息 → 创建占位卡片，仅含"正在加载上下文..." + 加载图标（2 个元素，无面板，无回答元素）
-2. 首个 LLM token 到达 → 删除加载提示，通过 `add_elements` 添加统一面板 + 回答元素（1 次 `batch_update`）
-3. 在面板中流式更新推理/工具内容，流式更新回答文本
-4. 完成 → 添加页脚
 
 ---
 
@@ -111,10 +87,6 @@ hermes plugins uninstall hermes-lark-streaming
 hermes gateway restart
 ```
 
-> **为什么直接运行 `__main__.py` 而不是 `python3 -m`？** Hermes 插件安装目录名使用连字符（`hermes-lark-streaming`），但 Python 包名要求下划线（`hermes_lark_streaming`）。这种命名不匹配导致 `python -m hermes_lark_streaming` 报错 "No module named"。直接运行 `__main__.py` 可以绕过此限制——脚本会自动注册包。
->
-> 如果插件通过 pip 安装，则 `python -m hermes_lark_streaming` 可以正常使用。
-
 ### 验证安装
 
 ```bash
@@ -133,8 +105,6 @@ $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
 
 所有配置项位于 `~/.hermes/config.yaml` 的 `hermes_lark_streaming:` 节下。插件首次加载时自动注入默认配置；卸载前请先运行 `cleanup` 命令清除。
 
-> **注意**：Hermes 原生的 `display.streaming: false` 控制 CLI/TUI 终端输出，与本插件的流式卡片无关。
-
 ```yaml
 hermes_lark_streaming:
   enabled: true                    # 启用流式卡片
@@ -142,7 +112,7 @@ hermes_lark_streaming:
   panel_expanded: false            # 完成态卡片中面板是否保持展开
   streaming_panel_expanded: false  # 流式态卡片中面板是否保持展开
   print_strategy: delay            # "fast"（即时）或 "delay"（更丝滑打字机，默认）
-  flush_interval_ms: 200           # 卡片刷新间隔（毫秒，100~2000，默认 200）
+  flush_interval_ms: 100           # 卡片刷新间隔（毫秒，50~2000，默认 100）
   card_ttl_sec: 600               # 卡片存活检测超时（秒）
   inject_time: false               # 时间感知模式（详见下方说明）
 
@@ -199,8 +169,7 @@ display:
 
 > 完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
 
-> ⚠️ **重要提醒：** 当前版本（v1.0.2）引入了统一面板架构，与 v1.0.1 及以下版本不兼容，升级请慎重！
-> 如依旧需要升级，请按照卸载流程卸载老版本，重新安装新版本，禁止通过更新方式升级！
+> ⚠️ **重要提醒：** 如从 v1.0.1 及以下版本升级，请按照卸载流程卸载老版本，重新安装新版本，禁止通过更新方式升级！
 
 ---
 

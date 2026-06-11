@@ -87,7 +87,7 @@ CARDKIT_TRANSIENT_CODES = {
 }
 
 # 瞬态错误重试策略 — 指数退避
-_TRANSIENT_RETRY_DELAYS = (0.15, 0.5, 1.0)  # 3 次重试，递增延迟
+_TRANSIENT_RETRY_DELAYS = (0.1, 0.3, 0.6)  # 3 次重试，递增延迟
 _TRANSIENT_MAX_RETRIES = len(_TRANSIENT_RETRY_DELAYS)
 
 
@@ -335,7 +335,8 @@ class FeishuClient:
                     request,
                 )
             elapsed_ms = (_time.monotonic() - t0) * 1000
-            _logger.debug("perf: feishu_stream_element card=%s el=%s elapsed=%.0fms", card_id[:12], element_id[:12], elapsed_ms)
+            if elapsed_ms > 200:
+                _logger.debug("perf: feishu_stream_element card=%s el=%s elapsed=%.0fms", card_id[:12], element_id[:12], elapsed_ms)
             self._check(resp, "cardkit_stream_element")
 
         await self._retry_transient("cardkit_stream_element", _do)

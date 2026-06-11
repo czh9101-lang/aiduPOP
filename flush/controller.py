@@ -17,10 +17,10 @@ from collections.abc import Awaitable, Callable
 _logger = logging.getLogger("hermes_lark_streaming")
 
 
-CARDKIT_MS = 0.100  # CardKit 流式 API 的刷新间隔（与参考项目对齐：100ms）
+CARDKIT_MS = 0.080  # CardKit 流式 API 的刷新间隔（80ms：打字机效果的最佳平衡点）
 PATCH_MS = 1.500  # IM patch 降级通道的刷新间隔
-LONG_GAP_MS = 2.000  # 超过此间隔 → 认为是长时间空闲
-BATCH_AFTER_GAP_MS = 0.300  # 长时间空闲后等待这个时间再 flush
+LONG_GAP_MS = 1.000  # 超过此间隔 → 认为是长时间空闲
+BATCH_AFTER_GAP_MS = 0.100  # 长时间空闲后等待这个时间再 flush
 
 
 class FlushController:

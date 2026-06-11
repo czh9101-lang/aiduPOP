@@ -93,6 +93,14 @@ _logger = logging.getLogger("hermes_lark_streaming")
 _TTL_EXTEND_THRESHOLD_SEC = 540.0  # Extend TTL when card has lived > 540s
 _TTL_EXTEND_DELTA_SEC = 600        # Extend by 600s
 
+# Fast-stream throttle for answer-only updates.
+# When only answer text is dirty (no panel changes), use a shorter
+# throttle interval (50ms) so Feishu's typewriter renders characters
+# smoothly one-by-one instead of in bursts.  When panel content is
+# also dirty, the normal flush interval is used since panel updates
+# are inherently batch operations.
+_ANSWER_FAST_STREAM_MS = 0.050
+
 
 class UnifiedControllerMixin:
     """Unified panel linear mode — phased card lifecycle.
@@ -275,6 +283,17 @@ class UnifiedControllerMixin:
                 )
             return
 
+        # ── Dynamic throttle for typewriter effect ──
+        # When only answer text is dirty (no panel changes), use a shorter
+        # throttle interval so Feishu's typewriter renders characters smoothly
+        # instead of in bursts.  When panel is also dirty, use the normal
+        # flush interval since panel updates are inherently batch operations.
+        _answer_only = state.answer_dirty and not state.panel_dirty and not state.tool_steps_dirty
+        if _answer_only:
+            session.flush.set_throttle(_ANSWER_FAST_STREAM_MS)
+        else:
+            session.flush.set_throttle(self._cfg.flush_interval_sec)
+
         session.flush.schedule_update(lambda: self._do_unified_flush(session))
 
     # ===================================================================
@@ -409,10 +428,12 @@ class UnifiedControllerMixin:
                         return
 
             # ── Stream answer text if also dirty ──
+            # Note: skip markdown optimization during streaming for performance;
+            # it will be applied on seal via _preservative_seal.
             if state.answer_dirty:
-                content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+                content = state.answer_text or " "
                 session.sequence += 1
-                _logger.info(
+                _logger.debug(
                     "unified stream: msg=%s seq=%d type=answer len=%d",
                     (session.message_id or "?")[:12],
                     session.sequence,
@@ -513,10 +534,12 @@ class UnifiedControllerMixin:
                 return
 
         # ── Stream answer text ──
+        # Note: skip markdown optimization during streaming for performance;
+        # it will be applied on seal via _preservative_seal.
         if state.answer_dirty:
-            content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+            content = state.answer_text or " "
             session.sequence += 1
-            _logger.info(
+            _logger.debug(
                 "unified stream: msg=%s seq=%d type=answer len=%d",
                 (session.message_id or "?")[:12],
                 session.sequence,
@@ -656,6 +679,22 @@ class UnifiedControllerMixin:
                     },
                 })
 
+            # ── Step 2b: Update answer element with optimized markdown ──
+            # During streaming, answer text was sent raw (no markdown optimization)
+            # for performance. Now that streaming is closed, update the answer
+            # element with the fully optimized markdown content.
+            if state is not None and state.answer_text:
+                optimized_content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+                seal_actions.append({
+                    "action": "partial_update_element",
+                    "params": {
+                        "element_id": ANSWER_ELEMENT_ID,
+                        "partial_element": {
+                            "content": optimized_content,
+                        },
+                    },
+                })
+
             # ── Step 3: Add footer + delete loading elements ──
             seal_actions.extend(
                 build_preservative_seal_actions(
@@ -672,7 +711,7 @@ class UnifiedControllerMixin:
 
             if seal_actions:
                 session.sequence += 1
-                _logger.info(
+                _logger.debug(
                     "preservative seal: batch_update card=%s seq=%d actions=%d",
                     card_id[:12], session.sequence, len(seal_actions),
                 )
@@ -680,7 +719,7 @@ class UnifiedControllerMixin:
                     card_id, seal_actions, sequence=session.sequence,
                 )
 
-            _logger.info(
+            _logger.debug(
                 "preservative seal: success card=%s partial=%s",
                 card_id[:12], partial,
             )
@@ -717,6 +756,18 @@ class UnifiedControllerMixin:
                                     },
                                 },
                             })
+                            # Update answer element with optimized markdown
+                            if state.answer_text:
+                                optimized_content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+                                retry_actions.append({
+                                    "action": "partial_update_element",
+                                    "params": {
+                                        "element_id": ANSWER_ELEMENT_ID,
+                                        "partial_element": {
+                                            "content": optimized_content,
+                                        },
+                                    },
+                                })
                         retry_actions.extend(
                             build_preservative_seal_actions(
                                 partial=partial,
