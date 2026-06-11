@@ -210,7 +210,7 @@ def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
     """Build empty unified panel placeholder for initial streaming card.
 
     This creates a collapsible panel with the ``robot_filled`` icon and
-    the *Agent Process* title but no content — ready for streaming updates
+    the *agent loop* title but no content — ready for streaming updates
     via ``partial_update_element``.
     """
     en_title, zh_title = _T["agent_process"]
@@ -345,13 +345,10 @@ def build_unified_panel(
                         "content": round_.text,
                         "text_size": "notation",
                     })
-                children.append({"tag": "hr"})
-
             elif kind == "tool" and idx < len(tool_steps):
                 if idx not in rendered_tools:
                     step = tool_steps[idx]
                     children.extend(_build_tool_step_elements(step))
-                    children.append({"tag": "hr"})
                     rendered_tools.add(idx)
 
         # In-progress reasoning (not yet finalised into panel_events)
@@ -381,13 +378,11 @@ def build_unified_panel(
                     "content": current_reasoning_text,
                     "text_size": "notation",
                 })
-            children.append({"tag": "hr"})
 
         # Remaining tool steps not in panel_events (safety fallback)
         for i, step in enumerate(tool_steps):
             if i not in rendered_tools:
                 children.extend(_build_tool_step_elements(step))
-                children.append({"tag": "hr"})
 
     else:
         # ── Fallback: no timeline available, render sequentially ──
@@ -422,7 +417,6 @@ def build_unified_panel(
                         "content": round_.text,
                         "text_size": "notation",
                     })
-                children.append({"tag": "hr"})
 
             # In-progress reasoning
             if current_reasoning_text:
@@ -451,16 +445,10 @@ def build_unified_panel(
                         "content": current_reasoning_text,
                         "text_size": "notation",
                     })
-                children.append({"tag": "hr"})
 
         # Tool steps
         for step in tool_steps:
             children.extend(_build_tool_step_elements(step))
-            children.append({"tag": "hr"})
-
-    # Remove trailing hr
-    if children and children[-1].get("tag") == "hr":
-        children.pop()
 
     # Fallback: empty content
     if not children:
