@@ -76,10 +76,14 @@ class Config:
 
     @property
     def flush_interval_ms(self) -> float:
-        """流式卡片刷新间隔（毫秒），用于诊断日志."""
+        """流式卡片刷新间隔（毫秒），用于诊断日志.
+
+        最小值 70ms：对齐飞书 CardKit 官方默认 print_frequency_ms（70ms），
+        避免服务端 flush 间隔低于客户端渲染间隔导致过度缓冲或频控问题。
+        """
         sec = self._plugin_sec()
         ms = float(sec.get("flush_interval_ms", 100))
-        return max(50.0, min(2000.0, ms))
+        return max(70.0, min(2000.0, ms))
 
     @property
     def flush_interval_sec(self) -> float:

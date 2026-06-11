@@ -112,7 +112,7 @@ hermes_lark_streaming:
   panel_expanded: false            # Keep panels expanded in completed cards
   streaming_panel_expanded: false  # Keep panels expanded during streaming
   print_strategy: delay            # "fast" (instant) or "delay" (smoother typewriter, default)
-  flush_interval_ms: 100           # Card refresh interval in ms (50–2000, default 100)
+  flush_interval_ms: 100           # Card refresh interval in ms (70–2000, default 100)
   card_ttl_sec: 600               # Card alive detection timeout (seconds)
   inject_time: false               # Time awareness mode (see below)
 
