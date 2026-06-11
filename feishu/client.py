@@ -72,6 +72,7 @@ CARDKIT_RATE_LIMITED = 230020  # 频控
 CARDKIT_CONTENT_FAILED = 230099  # 卡片内容创建失败（通用码，需检查子错误）
 CARDKIT_ELEMENT_LIMIT = 11310  # 子码: 卡片元素数量超限
 CARDKIT_ELEMENT_LIMIT_DIRECT = 300305  # 直报码: 卡片元素数量超限（cardkit_update 返回此码）
+CARDKIT_SCHEMA_ERROR = 300315  # 卡片 Schema 非法属性 (unknown property)
 CARDKIT_STREAMING_CLOSED = 300309  # 卡片流式模式已关闭
 CARDKIT_SEQUENCE_CONFLICT = 300317  # sequence 冲突
 MSG_NOT_FOUND = 1000023  # 消息不存在/已删除
@@ -101,6 +102,16 @@ def is_element_limit_error(e: "FeishuAPIError") -> bool:
         e.code == CARDKIT_ELEMENT_LIMIT_DIRECT
         or (e.code == CARDKIT_CONTENT_FAILED and e.extract_sub_code() == CARDKIT_ELEMENT_LIMIT)
     )
+
+
+def is_schema_error(e: "FeishuAPIError") -> bool:
+    """判断 FeishuAPIError 是否为卡片 Schema 非法属性错误。
+
+    飞书 API 返回 code=300315 表示卡片 JSON 包含不支持属性，
+    例如在 ``plain_text`` 标签上放置 ``icon`` 属性。
+    这类错误是永久性的——重试不会成功，需要修正卡片结构。
+    """
+    return e.code == CARDKIT_SCHEMA_ERROR
 
 
 @dataclass(frozen=True)

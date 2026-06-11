@@ -172,13 +172,22 @@ def _streaming_element(content: str = "", *, element_id: str = STREAMING_ELEMENT
 
 
 def _loading_element() -> dict:
+    """Loading spinner element — uses div with icon for schema safety.
+
+    CardKit v2.0 ``div`` elements natively support the ``icon`` property,
+    while ``markdown`` elements' icon support varies across API versions.
+    Using ``div`` guarantees the spinner renders without 300315 errors.
+    """
     return {
-        "tag": "markdown",
-        "content": " ",
+        "tag": "div",
         "icon": {
             "tag": "custom_icon",
             "img_key": _LOADING_IMG_KEY,
             "size": "16px 16px",
+        },
+        "text": {
+            "tag": "plain_text",
+            "content": " ",
         },
         "element_id": _LOADING_ELEMENT_ID,
     }
@@ -209,25 +218,24 @@ def _loading_hint_element() -> dict:
 def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
     """Build empty unified panel placeholder for initial streaming card.
 
-    This creates a collapsible panel with the ``robot_filled`` icon and
-    the *agent loop* title but no content — ready for streaming updates
-    via ``partial_update_element``.
+    This creates a collapsible panel with an emoji-prefixed title and
+    no content — ready for streaming updates via ``partial_update_element``.
+
+    NOTE: We use an emoji prefix (🤖) instead of the ``icon`` property
+    on ``plain_text`` title elements because CardKit v2.0 does NOT support
+    ``icon`` on ``plain_text`` tags.  Using ``icon`` there causes error
+    300315 (``unknown property, property: icon, path: ROOT -> header ->
+    title(tag: plain_text)``).
     """
     en_title, zh_title = _T["agent_process"]
     panel = _collapsible_panel(
         expanded=expanded,
         title_el={
             "tag": "plain_text",
-            "content": en_title,
-            "i18n_content": _i18n(en_title, zh_title),
+            "content": f"🤖 {en_title}",
+            "i18n_content": _i18n(f"🤖 {en_title}", f"🤖 {zh_title}"),
             "text_color": "grey",
             "text_size": "notation",
-            "icon": {
-                "tag": "standard_icon",
-                "token": "robot_filled",
-                "size": "16px 16px",
-                "color": "grey",
-            },
         },
         elements=[{"tag": "markdown", "content": " "}],
     )
@@ -454,20 +462,18 @@ def build_unified_panel(
     if not children:
         children.append({"tag": "markdown", "content": " "})
 
+    # ── Build panel ──
+    # NOTE: We use an emoji prefix (🤖) instead of the ``icon`` property
+    # on the ``plain_text`` title element because CardKit v2.0 does NOT
+    # support ``icon`` on ``plain_text`` tags — it causes error 300315.
     panel = _collapsible_panel(
         expanded=expanded,
         title_el={
             "tag": "plain_text",
-            "content": en_full,
-            "i18n_content": _i18n(en_full, zh_full),
+            "content": f"🤖 {en_full}",
+            "i18n_content": _i18n(f"🤖 {en_full}", f"🤖 {zh_full}"),
             "text_color": "grey",
             "text_size": "notation",
-            "icon": {
-                "tag": "standard_icon",
-                "token": "robot_filled",
-                "size": "16px 16px",
-                "color": "grey",
-            },
         },
         elements=children,
     )
