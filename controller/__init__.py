@@ -17,4 +17,4 @@ from .mixin import (  # noqa: F401
     _TERMINAL,
     ControllerMixin,
 )
-from .linear_mixin import LinearControllerMixin  # noqa: F401
+from .linear_mixin import UnifiedControllerMixin, LinearControllerMixin  # noqa: F401

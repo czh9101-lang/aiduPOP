@@ -78,14 +78,14 @@ class Config:
     def flush_interval_ms(self) -> float:
         """流式卡片刷新间隔（毫秒），用于诊断日志."""
         sec = self._plugin_sec()
-        ms = float(sec.get("flush_interval_ms", 500))
+        ms = float(sec.get("flush_interval_ms", 200))
         return max(100.0, min(2000.0, ms))
 
     @property
     def flush_interval_sec(self) -> float:
         """流式卡片刷新间隔（秒），可配置.
 
-        默认 0.5 秒（500ms）。降低此值使打字效果更流畅但增加API调用量和客户端负担；
+        默认 0.2 秒（200ms）。降低此值使打字效果更流畅但增加API调用量和客户端负担；
         提高此值减少API调用量但文字出现稍有延迟。
 
         注意：此值仅影响 CardKit 流式通道，IM PATCH 降级通道固定为 1.5 秒。

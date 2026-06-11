@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import warnings
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -12,12 +13,13 @@ IDLE = "idle"
 FAILED = "failed"
 
 from ..flush import PATCH_MS, FlushController
+from .linear import UnifiedLinearState
 from .text import TextState
 from .tooluse import ToolUseTracker
 from ..feishu import UnavailableGuard
 
 if TYPE_CHECKING:
-    from .linear import LinearState
+    pass
 
 
 class CardSession:
@@ -29,8 +31,10 @@ class CardSession:
         "_first_flush_done",
         "_loading_hint_removed",
         "_loop",
+        "_panel_element_created",
         "_was_aborted",
         "anchor_id",
+        "card_created_at",
         "card_id",
         "card_msg_id",
         "chat_id",
@@ -38,27 +42,22 @@ class CardSession:
         "deferred_background_review_closed",
         "deferred_background_review_lock",
         "deferred_background_reviews",
-        "element_count",
-        "element_limit_hit",
         "error_message",
+        "existing_elements",
         "flush",
         "footer",
         "guard",
         "last_tool_use_update",
         "linear",
-        "linear_state",
         "message_id",
         "reasoning_dirty",
-        "reasoning_panel_added",
         "reasoning_start",
         "reasoning_text",
         "sequence",
-        "split_disabled",
-        "split_index",
         "state",
         "text",
-        "tool_panel_added",
         "tool_use",
+        "unified_state",
         "use_cardkit",
     )
 
@@ -81,7 +80,6 @@ class CardSession:
         self.reasoning_text = ""
         self.reasoning_start: float = 0.0
         self.reasoning_dirty = False
-        self.reasoning_panel_added = False
         self.footer: dict[str, Any] = {}
         self.sequence = 1
         self._loop = loop
@@ -97,16 +95,37 @@ class CardSession:
             on_terminate=lambda: setattr(self, "state", FAILED),
         )
 
-        self.tool_panel_added = False
         self.linear = False
-        self.linear_state: LinearState | None = None
-        self.element_count: int = 0
-        self.element_limit_hit = False
-        self.split_disabled = False
-        self.split_index: int = 0
+        self.unified_state: UnifiedLinearState | None = None
+        self.existing_elements: set[str] = set()
+        self._panel_element_created: bool = False
+        self.card_created_at: float = 0.0
         self._was_aborted: bool = False
         self.error_message: str = ""
         self._first_flush_done: bool = False
         self._first_answer_time: float = 0.0
         self._loading_hint_removed: bool = False
         self._card_ready: asyncio.Event = asyncio.Event()
+
+    # ------------------------------------------------------------------
+    # Backward compatibility — linear_state → unified_state
+    # ------------------------------------------------------------------
+
+    @property
+    def linear_state(self) -> UnifiedLinearState | None:
+        """DEPRECATED: Use unified_state instead."""
+        warnings.warn(
+            "linear_state is deprecated; use unified_state instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.unified_state
+
+    @linear_state.setter
+    def linear_state(self, value: UnifiedLinearState | None) -> None:
+        warnings.warn(
+            "linear_state is deprecated; use unified_state instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.unified_state = value
