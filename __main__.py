@@ -133,6 +133,15 @@ def _bootstrap_package() -> None:
 def main() -> int:
     _bootstrap_package()
 
+    # After bootstrap, set __package__ so that any relative imports in
+    # this module (or in code called from here) can resolve correctly.
+    # When running ``python /path/to/__main__.py`` directly, Python
+    # leaves __package__ as None, causing "attempted relative import
+    # with no known parent package" errors.
+    global __package__
+    if __name__ == "__main__" and __package__ is None:
+        __package__ = "hermes_lark_streaming"
+
     args = sys.argv[1:]
     if not args:
         _print_usage()
@@ -167,7 +176,7 @@ def _print_usage() -> None:
 
 def _cmd_status() -> int:
     try:
-        from .config import Config
+        from hermes_lark_streaming.config import Config
 
         cfg = Config()
         print(f"Config hermes_lark_streaming.enabled: {cfg.enabled}")
@@ -185,7 +194,7 @@ def _cmd_status() -> int:
 
 def _cmd_verify() -> int:
     try:
-        from .config import Config
+        from hermes_lark_streaming.config import Config
 
         cfg = Config()
         print(f"Config hermes_lark_streaming.enabled: {cfg.enabled}")
@@ -218,7 +227,7 @@ def _cmd_cleanup() -> int:
     to clean up the ``hermes_lark_streaming`` config section and ``plugins.enabled`` entry.
     """
     try:
-        from .plugin import _cleanup_config
+        from hermes_lark_streaming.plugin import _cleanup_config
 
         _cleanup_config()
         print("Cleanup complete. Next steps:")
