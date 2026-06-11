@@ -60,9 +60,11 @@ from ..cardkit.md import _downgrade_tables, optimize_markdown_style
 from ..state.linear import UnifiedLinearState
 from ..state.text import split_reasoning_text
 from ..feishu import (
+    CARDKIT_SCHEMA_ERROR,
     CARDKIT_SEQUENCE_CONFLICT,
     CARDKIT_STREAMING_CLOSED,
     FeishuAPIError,
+    is_schema_error,
 )
 from ..flush import PATCH_MS
 
@@ -386,8 +388,25 @@ class UnifiedControllerMixin:
                             session.card_id[:12],
                         )
                         return
-                    _logger.warning("unified flush phase 2 batch_update failed: %s", e)
-                    return
+                    if is_schema_error(e):
+                        # ── Schema error (300315): permanent, don't retry ──
+                        # This typically means an invalid property on a CardKit
+                        # element.  Log with full error so the developer can
+                        # identify the offending property, then mark panel as
+                        # created to prevent infinite retry loops.
+                        _logger.error(
+                            "unified flush phase 2 SCHEMA ERROR (permanent): %s — "
+                            "marking panel as created to prevent retry loop, card=%s",
+                            e, session.card_id[:12],
+                        )
+                        session._panel_element_created = True  # Prevent retry loop
+                        session._loading_hint_removed = True
+                        # Fall through to Phase 3 (partial_update may still fail
+                        # if panel wasn't actually added, but at least we won't
+                        # loop infinitely on Phase 2)
+                    else:
+                        _logger.warning("unified flush phase 2 batch_update failed: %s", e)
+                        return
 
             # ── Stream answer text if also dirty ──
             if state.answer_dirty:
@@ -479,6 +498,16 @@ class UnifiedControllerMixin:
                         "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
                         session.card_id[:12],
                     )
+                    return
+                if is_schema_error(e):
+                    _logger.error(
+                        "unified flush phase 3 SCHEMA ERROR (permanent): %s — "
+                        "clearing dirty flags to stop retry, card=%s",
+                        e, session.card_id[:12],
+                    )
+                    # Clear dirty to stop retry loop on permanent errors
+                    state.panel_dirty = False
+                    state.tool_steps_dirty = False
                     return
                 _logger.warning("unified flush batch_update failed: %s", e)
                 return
