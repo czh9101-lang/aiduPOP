@@ -2,20 +2,56 @@
 
 兼容非标准安装路径：当 hermes_lark_streaming 不在默认 sys.path 时，
 自动搜索常见安装路径并加入 sys.path。
+
+启动方式
+--------
+1. **pip 安装后**::
+
+       python -m hermes_lark_streaming status
+
+2. **目录插件（非 pip 安装）**::
+
+       # 目录名可能是 hermes-lark-streaming (hyphens)，
+       # 此时 -m 方式不可用，需直接运行 __main__.py：
+       $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status
+
+3. **设置 PYTHONPATH 后**::
+
+       PYTHONPATH=~/.hermes/plugins $HERMES_PYTHON -m hermes_lark_streaming status
+
+原理：``python -m hermes_lark_streaming`` 要求包目录名与 Python 包名
+一致（``hermes_lark_streaming``，下划线）。Hermes 插件目录使用
+``hermes-lark-streaming``（连字符），导致 ``-m`` 无法找到包。
+直接运行 ``__main__.py`` 可绕过此限制——脚本会自注册包到
+``sys.modules``，使后续的相对导入正常工作。
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
 from pathlib import Path
 
+# ── 包目录（本文件所在目录） ──
+_HERE = Path(__file__).resolve().parent
 
-def _ensure_importable() -> None:
-    """确保 hermes_lark_streaming 可被导入。
 
-    非标准安装（如手动部署、Docker、自定义路径）时，包可能不在
-    默认 sys.path 中。此函数搜索常见路径并加入 sys.path。
+def _bootstrap_package() -> None:
+    """当 hermes_lark_streaming 不可导入时，手动注册到 sys.modules。
+
+    场景 1: ``python -m hermes_lark_streaming`` 但目录名不匹配
+            （hermes-lark-streaming vs hermes_lark_streaming）。
+            此时 Python 报 "No module named" 错误，__main__.py
+            根本不会执行——需改用直接运行 __main__.py 方式。
+
+    场景 2: 直接运行 ``python /path/to/__main__.py``。此时
+            ``__name__ == "__main__"``，包未注册到 sys.modules，
+            相对导入 ``from .config import Config`` 会失败。
+            此函数用 importlib 注册包，使相对导入可用。
+
+    场景 3: pip 安装后 ``python -m hermes_lark_streaming``。
+            包已在 sys.path 中，无需处理。
     """
     try:
         import hermes_lark_streaming  # noqa: F401
@@ -23,11 +59,24 @@ def _ensure_importable() -> None:
     except ImportError:
         pass
 
+    # ── 策略 1: 将父目录加入 sys.path ──
+    # 如果父目录下有 hermes_lark_streaming/ 子目录（pip 安装后的结构），
+    # 这就足够了。
+    parent = _HERE.parent
+    if str(parent) not in sys.path:
+        sys.path.insert(0, str(parent))
+
+    try:
+        import hermes_lark_streaming  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    # ── 策略 2: 搜索常见安装路径 ──
     hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 
-    # 搜索路径优先级
     search_paths: list[Path] = [
-        # 1. HERMES_HOME/plugins/
+        # 1. HERMES_HOME/plugins/（可能有 hermes_lark_streaming/ 子目录）
         hermes_home / "plugins",
         # 2. HERMES_HOME 下的 site-packages（lib/python*/site-packages）
         *hermes_home.glob("lib/python*/site-packages"),
@@ -37,8 +86,6 @@ def _ensure_importable() -> None:
         *Path(str(Path.home() / "hermes-agent")).glob("lib/python*/site-packages"),
         # 4. 当前 Python 的 site-packages
         *Path(sys.prefix).glob("lib/python*/site-packages"),
-        # 5. 插件目录（当 __main__.py 直接运行时）
-        Path(__file__).resolve().parent,
     ]
 
     for p in search_paths:
@@ -50,9 +97,50 @@ def _ensure_importable() -> None:
             except ImportError:
                 continue
 
+    # ── 策略 3: 手动注册当前目录为 hermes_lark_streaming 包 ──
+    # 当插件目录名是 hermes-lark-streaming（连字符）时，即使把
+    # 父目录加入 sys.path，Python 也找不到（目录名 ≠ 包名）。
+    # 使用 importlib.util 手动注册。
+    init_file = _HERE / "__init__.py"
+    if init_file.exists():
+        spec = importlib.util.spec_from_file_location(
+            "hermes_lark_streaming",
+            str(init_file),
+            submodule_search_locations=[str(_HERE)],
+        )
+        if spec is not None and spec.loader is not None:
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["hermes_lark_streaming"] = mod
+            try:
+                spec.loader.exec_module(mod)
+                return
+            except Exception:
+                # 注册失败，回滚
+                sys.modules.pop("hermes_lark_streaming", None)
+
+    # ── 所有策略失败 ──
+    print(
+        "Error: Cannot locate hermes_lark_streaming package.\n"
+        "\n"
+        "Possible fixes:\n"
+        "  1. Install via pip:  pip install hermes-lark-streaming\n"
+        "  2. Run directly:     $HERMES_PYTHON /path/to/hermes-lark-streaming/__main__.py status\n"
+        "  3. Set PYTHONPATH:   PYTHONPATH=~/.hermes/plugins $HERMES_PYTHON -m hermes_lark_streaming status",
+        file=sys.stderr,
+    )
+
 
 def main() -> int:
-    _ensure_importable()
+    _bootstrap_package()
+
+    # After bootstrap, set __package__ so that any relative imports in
+    # this module (or in code called from here) can resolve correctly.
+    # When running ``python /path/to/__main__.py`` directly, Python
+    # leaves __package__ as None, causing "attempted relative import
+    # with no known parent package" errors.
+    global __package__
+    if __name__ == "__main__" and __package__ is None:
+        __package__ = "hermes_lark_streaming"
 
     args = sys.argv[1:]
     if not args:
@@ -75,6 +163,7 @@ def main() -> int:
 
 def _print_usage() -> None:
     print("Usage: python -m hermes_lark_streaming <command>")
+    print("   or: python /path/to/hermes-lark-streaming/__main__.py <command>")
     print()
     print("Commands:")
     print("  status     Show current configuration and credentials status")
@@ -87,7 +176,7 @@ def _print_usage() -> None:
 
 def _cmd_status() -> int:
     try:
-        from .config import Config
+        from hermes_lark_streaming.config import Config
 
         cfg = Config()
         print(f"Config hermes_lark_streaming.enabled: {cfg.enabled}")
@@ -105,7 +194,7 @@ def _cmd_status() -> int:
 
 def _cmd_verify() -> int:
     try:
-        from .config import Config
+        from hermes_lark_streaming.config import Config
 
         cfg = Config()
         print(f"Config hermes_lark_streaming.enabled: {cfg.enabled}")
@@ -138,7 +227,7 @@ def _cmd_cleanup() -> int:
     to clean up the ``hermes_lark_streaming`` config section and ``plugins.enabled`` entry.
     """
     try:
-        from .plugin import _cleanup_config
+        from hermes_lark_streaming.plugin import _cleanup_config
 
         _cleanup_config()
         print("Cleanup complete. Next steps:")

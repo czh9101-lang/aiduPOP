@@ -24,7 +24,7 @@
 | Question | `[Question]` | 使用疑问、配置咨询 |
 
 **示例**：
-- `[Bug] 拆卡后旧卡片跑马灯不停`
+- `[Bug] 统一面板内容不更新`
 - `[Feature] 支持自定义卡片主题颜色`
 - `[Improvement] 页脚字段支持自定义排序`
 - `[Question] 多 Profile 部署如何配置飞书凭据`
@@ -73,13 +73,14 @@
 
 | 项目 | 值 |
 |------|-----|
-| 插件版本 | <!-- 如 0.19.1，可通过 `hermes plugins list` 查看 --> |
+| 插件版本 | <!-- 如 1.0.2，可通过 `hermes plugins list` 查看 --> |
 | Hermes 版本 | <!-- 如 0.6.x --> |
 | Python 版本 | <!-- 如 3.11.5 --> |
 | 操作系统 | <!-- 如 Ubuntu 22.04 / macOS 14 / Termux --> |
 | 飞书/Lark | <!-- 国内版 / 国际版 --> |
-| 线性模式 | <!-- 开启 / 关闭（默认开启） --> |
+| 线性模式 | <!-- 开启 / 关闭（默认开启，统一面板架构） --> |
 | 网关卡片 | <!-- 开启 / 关闭（默认开启） --> |
+| 统一面板 | <!-- 是否显示推理内容（display.show_reasoning） --> |
 
 ---
 
@@ -99,11 +100,11 @@ grep hermes_lark_streaming ~/.hermes/logs/gateway.log | tail -200
 # 查看最近 500 行日志
 tail -500 ~/.hermes/logs/gateway.log
 
-# 搜索特定错误码（如 300317、300305）
-grep -E "300317|300305|element_limit" ~/.hermes/logs/gateway.log | tail -50
+# 搜索特定错误码（如 300317、300305、300309）
+grep -E "300317|300305|300309|element_limit" ~/.hermes/logs/gateway.log | tail -50
 
 # 搜索特定模块的日志
-grep -E "controller_linear|flush|cardkit" ~/.hermes/logs/gateway.log | tail -100
+grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.log | tail -100
 ```
 
 **贴日志时请注意**：
@@ -165,24 +166,44 @@ grep -E "controller_linear|flush|cardkit" ~/.hermes/logs/gateway.log | tail -100
 
 4. **卡片状态**：用户看到的具体卡片内容（截图 > 文字描述）。
 
+5. **统一面板配置**：确认 `display.show_reasoning` 是否开启，以及 `panel_expanded` / `streaming_panel_expanded` 的设置。
+
 ### 常见问题快速定位
 
 | 症状 | 优先检查 | 相关日志关键词 |
 |------|----------|----------------|
 | 卡片不出现 | 补丁是否成功应用 | `apply_patches`、`GatewayRunner` |
 | 内容重复 | 回调是否被双重包装 | `_maybe_wrap_callbacks`、`consumed` |
-| 跑马灯不停 | 元素超限 / flush 失败 | `element_limit`、`300305`、`_handle_linear_flush_error` |
+| 统一面板不显示 | `show_reasoning` 配置 + 元素 ID | `UNIFIED_PANEL_ELEMENT_ID`、`unified_panel` |
+| 面板标题不更新 | reasoning/tool 事件是否到达 | `on_reasoning_delta`、`on_tool_updated` |
+| 流式关闭 (300309) | 卡片 TTL + 主动延长 | `300309`、`TTL`、`extend_ttl` |
 | Cron 推送纯文本 | Cron 补丁是否生效 | `cron`、`_wrap_cron_deliver` |
 | 图片不显示 | hermes 原生图片处理配置 | hermes 配置、`media_delivery` |
-| 封卡失败 | 序列冲突 / 元素超限 | `300317`、`300305`、`_preservative_seal` |
+| 封卡后面板状态异常 | 封卡是否更新面板最终状态 | `_preservative_seal`、`unified_panel` |
 | 中断后卡片异常 | card_sent 传播 | `_wrap_run_agent`、`ABORTED`、`card_sent` |
 | 配置不生效 | config.yaml 路径 | `config`、`HERMES_HOME`、`_get_hermes_config_path` |
+
+### 架构背景（v1.0.2+ 统一面板）
+
+从 v1.0.2 开始，插件使用**统一面板架构**：
+- 所有推理轮次和工具步骤集中在 1 个可折叠面板（`robot_filled` 图标）
+- 面板标题动态显示 `Agent Workflow · N rounds · M tools · Xs`
+- 推理和工具按时间线交错渲染（reasoning→tool→reasoning→tool），而非全部推理后再全部工具
+- 回答使用 1 个独立流式元素
+- 卡片元素总数恒为 3–4 个（不再有拆卡、渐进降级）
+- 旧的分段式设计（每轮推理独立面板、元素计数、拆卡逻辑）已完全移除
+- 保留式封卡只删除卡片上实际存在的元素，更新统一面板为最终状态
+- 加载提示"正在加载上下文..."在首内容到达时删除，删除操作在 API 成功后确认
+
+如果用户报告与旧版行为相关的问题（如拆卡、compact seal、element_limit），请确认他们已升级到 v1.0.2+。
 
 ### 日志分析要点
 
 - **WARNING 级别**：通常是关键错误信号（如 `finish_reason=content_filter`、`init failed`）
 - **`code=300317`**：飞书序列冲突，表示并发更新卡片，需关注是否触发幂等处理
-- **`code=300305`**：元素超限，需关注渐进降级是否生效（compact seal → minimal seal）
+- **`code=300305`**：元素超限（v1.0.2+ 统一面板下应极少出现）
+- **`code=300309`**：流式模式关闭，通常是卡片 TTL 超时，检查 TTL 延长逻辑
+- **`300314`**：元素未找到（v1.0.2+ 已通过元素存在追踪修复，若仍出现需排查）
 - **`card_sent=True/False`**：影响 Hermes 是否发送纯文本回复，是排查重复消息的关键
 - **版本号**：日志中 `v{__version__}` 前缀帮助确认是哪个版本产生的日志
 

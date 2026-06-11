@@ -1,29 +1,323 @@
-"""线性单卡模式状态追踪 — 扁平 segments 管理."""
+"""Unified linear state — single-panel reasoning+tool tracking for linear mode.
+
+Replaces the segment-based LinearState. All reasoning rounds and tool calls
+are tracked within a single unified collapsible panel (1 card element).
+
+Design rationale
+----------------
+The old ``LinearState`` managed multiple ``Segment`` objects (reasoning, tool,
+answer segments). Each segment created a separate collapsible panel on the
+Feishu card, leading to element-count explosion near the 200-element card
+limit. ``UnifiedLinearState`` collapses all reasoning rounds and tool calls
+into **one** unified collapsible panel (1 element) plus **one** streaming
+element for the answer — at most 2 top-level elements regardless of
+conversation length.
+
+Backward compatibility
+---------------------
+The old ``Segment`` and ``LinearState`` names are re-exported as deprecated
+aliases pointing to ``ReasoningRound`` and ``UnifiedLinearState`` respectively.
+They will be removed in a future release; migrate all call-sites.
+"""
 
 from __future__ import annotations
 
 import time
+import warnings
 
 
-class Segment:
-    """单个内容段 — reasoning / answer / tool."""
+# ---------------------------------------------------------------------------
+# ReasoningRound
+# ---------------------------------------------------------------------------
+
+class ReasoningRound:
+    """One round of AI reasoning / thinking.
+
+    A round is created when the first ``reasoning_delta`` token arrives after
+    a non-reasoning event (answer, tool, or start of message). It is *not*
+    finalised until either a different event type arrives or the whole message
+    completes.
+
+    Attributes
+    ----------
+    index : int
+        1-based round number (for display purposes).
+    text : str
+        Accumulated reasoning text for this round.
+    elapsed_ms : float
+        Wall-clock duration of this round in milliseconds. Zero while the
+        round is still in progress; populated on finalisation.
+    start_time : float
+        ``time.time()`` when the round started (monotonic-ish).
+    finalized : bool
+        ``True`` once the round has been closed.
+    """
+
+    __slots__ = ("index", "text", "elapsed_ms", "start_time", "finalized")
+
+    def __init__(self, index: int, text: str = "", start_time: float = 0.0) -> None:
+        self.index = index
+        self.text = text
+        self.elapsed_ms: float = 0.0
+        self.start_time = start_time
+        self.finalized: bool = False
+
+    def __repr__(self) -> str:  # pragma: no cover
+        status = "finalized" if self.finalized else "active"
+        preview = self.text[:40].replace("\n", "\\n")
+        return (
+            f"ReasoningRound(index={self.index}, {status}, "
+            f"elapsed_ms={self.elapsed_ms:.0f}, text={preview!r}…)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# UnifiedLinearState
+# ---------------------------------------------------------------------------
+
+class UnifiedLinearState:
+    """Unified panel linear state — all reasoning+tool in 1 panel, 1 answer element.
+
+    Key invariant
+    -------------
+    The unified panel is a single ``collapsible_panel`` element on the card
+    (element_id = ``UNIFIED_PANEL_ELEMENT_ID``). Its internal children
+    (reasoning rounds, tool steps) are sub-elements rendered as markdown
+    inside the panel body — they do **not** count toward the Feishu
+    200-element card limit.
+
+    Dirty flags
+    -----------
+    panel_dirty
+        Reasoning or tool content changed → needs ``partial_update_element``.
+    answer_dirty
+        Answer text changed → needs ``stream_element``.
+    tool_steps_dirty
+        Tool call event arrived (actual step data lives in
+        :class:`ToolUseTracker`; this flag merely signals that the panel
+        content must be regenerated).
+
+    Background review
+    ------------------
+    Background review messages (e.g. "checking response quality", "updating
+    memory") are accumulated in :attr:`bg_review_messages` and rendered as a
+    separate panel once the first message arrives.
+    """
 
     __slots__ = (
-        "created",
-        "dirty",
-        "el_id",
-        "elapsed_ms",
-        "element_estimate",
-        "reasoning_finalized",
-        "start_time",
-        "text",
-        "text_el_id",
-        "tool_end_offset",
-        "tool_offset",
-        "type",
+        "_counter",
+        "reasoning_rounds",
+        "_current_reasoning",
+        "_reasoning_start",
+        "tool_steps_dirty",
+        "answer_text",
+        "panel_dirty",
+        "answer_dirty",
+        "panel_visible",
+        "bg_review_messages",
+        "bg_review_panel_added",
+        "bg_review_panel_id",
+        "_panel_events",
+        "_tool_count",
     )
 
-    def __init__(self, seg_type: str, el_id: str) -> None:
+    def __init__(self) -> None:
+        self._counter: int = 0
+
+        # Reasoning tracking
+        self.reasoning_rounds: list[ReasoningRound] = []
+        self._current_reasoning: str = ""
+        self._reasoning_start: float = 0.0
+
+        # Tool tracking — dirty flag only; actual steps come from ToolUseTracker
+        self.tool_steps_dirty: bool = False
+
+        # Answer tracking
+        self.answer_text: str = ""
+
+        # Dirty flags
+        self.panel_dirty: bool = False
+        self.answer_dirty: bool = False
+
+        # Panel visibility — set to True once the first reasoning or tool
+        # event arrives so the renderer knows to create the element.
+        self.panel_visible: bool = False
+
+        # Background review
+        self.bg_review_messages: list[str] = []
+        self.bg_review_panel_id: str = "bg_review_panel"
+        self.bg_review_panel_added: bool = False
+
+        # Chronological timeline: [("reasoning", idx), ("tool", idx), ...]
+        # Records the order in which reasoning rounds and tool calls
+        # occur, so the unified panel can render them in chronological
+        # order rather than grouping all reasoning before all tools.
+        self._panel_events: list[tuple[str, int]] = []
+        self._tool_count: int = 0
+
+    # ------------------------------------------------------------------
+    # Event handlers
+    # ------------------------------------------------------------------
+
+    def on_reasoning_delta(self, text: str) -> None:
+        """Reasoning text increment. Starts a new round if not already in one."""
+        if not self._current_reasoning:
+            # First token of a new reasoning round
+            self._counter += 1
+            self._reasoning_start = time.time()
+        self._current_reasoning += text
+        self.panel_dirty = True
+        self.panel_visible = True
+
+    def on_answer_delta(self, text: str) -> None:
+        """Answer text increment. Finalizes any in-progress reasoning first."""
+        self._finalize_current_reasoning()
+        self.answer_text += text
+        self.answer_dirty = True
+
+    def on_tool_event(self, is_new_tool: bool = True) -> None:
+        """Tool call event. Finalizes any in-progress reasoning first.
+
+        Parameters
+        ----------
+        is_new_tool : bool
+            True when a new tool starts (``record_start``), False when an
+            existing tool is updated (``record_end``). Only new tools are
+            added to the chronological timeline; tool status updates
+            (success/error) just mark the panel dirty for re-rendering.
+        """
+        self._finalize_current_reasoning()
+        if is_new_tool:
+            self._panel_events.append(("tool", self._tool_count))
+            self._tool_count += 1
+        self.tool_steps_dirty = True
+        self.panel_dirty = True
+        self.panel_visible = True
+
+    def on_background_review(self, message: str) -> None:
+        """Background review message (e.g. quality check, memory update)."""
+        self.bg_review_messages.append(message)
+
+    # ------------------------------------------------------------------
+    # Finalization
+    # ------------------------------------------------------------------
+
+    def _finalize_current_reasoning(self) -> None:
+        """Finalize the current reasoning round, moving it to :attr:`reasoning_rounds`.
+
+        This is a no-op if no reasoning round is in progress.
+        """
+        if not self._current_reasoning:
+            return
+        elapsed = (time.time() - self._reasoning_start) * 1000 if self._reasoning_start else 0.0
+        round_ = ReasoningRound(
+            index=len(self.reasoning_rounds) + 1,
+            text=self._current_reasoning,
+            start_time=self._reasoning_start,
+        )
+        round_.elapsed_ms = elapsed
+        round_.finalized = True
+        self.reasoning_rounds.append(round_)
+        self._panel_events.append(("reasoning", len(self.reasoning_rounds) - 1))
+        self._current_reasoning = ""
+        self._reasoning_start = 0.0
+
+    def finalize(self) -> None:
+        """Finalize any in-progress reasoning (called at message completion)."""
+        self._finalize_current_reasoning()
+
+    # ------------------------------------------------------------------
+    # Read-only properties
+    # ------------------------------------------------------------------
+
+    @property
+    def current_reasoning_text(self) -> str:
+        """Get the in-progress reasoning text (for streaming display)."""
+        return self._current_reasoning
+
+    @property
+    def has_current_reasoning(self) -> bool:
+        """Whether there is an in-progress reasoning round."""
+        return bool(self._current_reasoning)
+
+    @property
+    def total_reasoning_count(self) -> int:
+        """Total reasoning rounds (finalized + in-progress)."""
+        count = len(self.reasoning_rounds)
+        if self._current_reasoning:
+            count += 1
+        return count
+
+    @property
+    def total_reasoning_elapsed_ms(self) -> float:
+        """Total reasoning elapsed time across all rounds (milliseconds)."""
+        total = sum(r.elapsed_ms for r in self.reasoning_rounds)
+        if self._reasoning_start:
+            total += (time.time() - self._reasoning_start) * 1000
+        return total
+
+    @property
+    def panel_events(self) -> list[tuple[str, int]]:
+        """Chronological timeline of panel events.
+
+        Returns a list of ``(kind, index)`` tuples recording the order
+        in which reasoning rounds and tool calls occurred::
+
+            [("reasoning", 0), ("tool", 0), ("reasoning", 1), ("tool", 1), ...]
+
+        The renderer uses this to interleave reasoning and tool elements
+        in chronological order rather than grouping all reasoning before
+        all tools.
+        """
+        return self._panel_events
+
+    @property
+    def has_dirty(self) -> bool:
+        """Whether any dirty data needs flushing to the card."""
+        return (
+            self.panel_dirty
+            or self.answer_dirty
+            or bool(self.bg_review_messages and not self.bg_review_panel_added)
+        )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        parts = [
+            f"rounds={len(self.reasoning_rounds)}",
+            f"answer_len={len(self.answer_text)}",
+            f"panel_dirty={self.panel_dirty}",
+            f"answer_dirty={self.answer_dirty}",
+        ]
+        if self._current_reasoning:
+            parts.append("reasoning=active")
+        return f"UnifiedLinearState({', '.join(parts)})"
+
+
+# ---------------------------------------------------------------------------
+# Deprecated backward-compatible aliases
+# ---------------------------------------------------------------------------
+# These exist solely so that existing imports (tests, sibling modules) do not
+# break immediately.  They will be removed in a future release.
+
+class _DeprecatedSegmentAlias:
+    """Stub that mimics the old Segment constructor signature for import compat.
+
+    DEPRECATED: Use :class:`ReasoningRound` instead.  This class exists only
+    to prevent ``ImportError`` in code that still references ``Segment``.
+    """
+
+    __slots__ = (
+        "type", "el_id", "created", "dirty", "element_estimate",
+        "text", "text_el_id", "tool_offset", "tool_end_offset",
+        "start_time", "elapsed_ms", "reasoning_finalized",
+    )
+
+    def __init__(self, seg_type: str, el_id: str) -> None:  # noqa: D401
+        """DEPRECATED — use ReasoningRound instead."""
+        warnings.warn(
+            "Segment is deprecated; use ReasoningRound instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.type = seg_type
         self.el_id = el_id
         self.created = False
@@ -32,161 +326,13 @@ class Segment:
         self.text: str = ""
         self.text_el_id: str = ""
         self.tool_offset: int = 0
-        self.tool_end_offset: int = 0  # 0 = 未终结；>= 1 表示已终结
+        self.tool_end_offset: int = 0
         self.start_time: float = 0.0
         self.elapsed_ms: float = 0.0
         self.reasoning_finalized: bool = False
 
 
-class LinearState:
-    """管理线性模式下单张卡片的扁平内容段列表.
-
-    纯数据类，不含 IO。每个 segment 是一个内容块（reasoning/answer/tool），
-    按事件到达顺序排列，无需推断轮次边界。
-    """
-
-    __slots__ = (
-        "_counter",
-        "bg_review_messages",
-        "bg_review_panel_added",
-        "bg_review_panel_id",
-        "segments",
-    )
-
-    def __init__(self) -> None:
-        self._counter = 0
-        self.segments: list[Segment] = []
-        self.bg_review_messages: list[str] = []
-        self.bg_review_panel_id: str = "bg_review_panel"
-        self.bg_review_panel_added: bool = False
-
-    def _new_reasoning(self, text: str) -> Segment:
-        c = self._counter
-        self._counter += 1
-        seg = Segment("reasoning", f"reasoning_{c}_panel")
-        seg.text_el_id = f"reasoning_{c}_text"
-        seg.text = text
-        seg.start_time = time.time()
-        self.segments.append(seg)
-        return seg
-
-    def _new_answer(self, text: str) -> Segment:
-        c = self._counter
-        self._counter += 1
-        seg = Segment("answer", f"answer_{c}")
-        seg.text = text
-        seg.start_time = time.time()
-        self._finalize_prev_reasoning(seg.start_time)
-        self.segments.append(seg)
-        return seg
-
-    def _new_tool(self, tool_offset: int) -> Segment:
-        c = self._counter
-        self._counter += 1
-        seg = Segment("tool", f"tools_{c}")
-        seg.tool_offset = tool_offset
-        seg.start_time = time.time()
-        self._finalize_prev_reasoning(seg.start_time)
-        self.segments.append(seg)
-        return seg
-
-    def _finalize_prev_reasoning(self, now: float) -> None:
-        """终结最后一个未计算耗时的 reasoning segment."""
-        for seg in reversed(self.segments):
-            if seg.type == "reasoning" and seg.start_time and not seg.elapsed_ms:
-                seg.elapsed_ms = (now - seg.start_time) * 1000
-                break
-
-    def on_reasoning_delta(self, text: str) -> None:
-        """处理 reasoning 增量，同类型追加否则新建 segment."""
-        if self.segments and self.segments[-1].type == "reasoning":
-            self.segments[-1].text += text
-            self.segments[-1].dirty = True
-        else:
-            self._new_reasoning(text)
-
-    def on_answer_delta(self, text: str) -> None:
-        """处理 answer 增量，同类型追加否则新建 segment."""
-        if self.segments and self.segments[-1].type == "answer":
-            self.segments[-1].text += text
-            self.segments[-1].dirty = True
-        else:
-            self._new_answer(text)
-
-    def on_background_review(self, message: str) -> None:
-        """处理后台审查消息."""
-        self.bg_review_messages.append(message)
-
-    def on_tool_event(self, tool_step_count: int) -> None:
-        """处理工具调用事件，同类型标记 dirty 否则新建 segment 并终结前序 tool segment."""
-        if tool_step_count <= 0:
-            return
-        if self.segments and self.segments[-1].type == "tool":
-            self.segments[-1].dirty = True
-            return
-        for seg in reversed(self.segments):
-            if seg.type == "tool" and seg.tool_end_offset == 0:
-                seg.tool_end_offset = tool_step_count - 1
-                seg.dirty = True
-                break
-        self._new_tool(tool_step_count - 1)
-
-    def split_tool_segment(
-        self,
-        index: int,
-        split_tool_offset: int,
-    ) -> Segment:
-        """在 step 边界拆分一个 tool segment，返回承接后续 steps 的新 segment."""
-        seg = self.segments[index]
-        c = self._counter
-        self._counter += 1
-        new_seg = Segment("tool", f"tools_{c}")
-        new_seg.tool_offset = split_tool_offset
-        new_seg.tool_end_offset = seg.tool_end_offset
-        new_seg.start_time = seg.start_time
-        seg.tool_end_offset = split_tool_offset
-        seg.dirty = True
-        self.segments.insert(index + 1, new_seg)
-        return new_seg
-
-    def split_answer_segment(
-        self,
-        index: int,
-        split_char_offset: int,
-    ) -> Segment:
-        """在指定字符位置拆分一个 answer segment，返回承接后续文本的新 segment.
-
-        将 answer 的文本从 split_char_offset 处切开：
-        - 原 segment 保留 [0, split_char_offset) 的文本
-        - 新 segment 承接 [split_char_offset, ...) 的文本
-        两个 segment 都标记为 dirty 以确保刷新。
-        """
-        seg = self.segments[index]
-        c = self._counter
-        self._counter += 1
-        new_seg = Segment("answer", f"answer_{c}")
-        new_seg.text = seg.text[split_char_offset:]
-        new_seg.start_time = seg.start_time
-        seg.text = seg.text[:split_char_offset]
-        seg.dirty = True
-        new_seg.dirty = True
-        self.segments.insert(index + 1, new_seg)
-        return new_seg
-
-    def finalize_segments(self, total_tool_count: int) -> None:
-        """完成态调用：终结最后一个 tool segment + 补算最后一个 reasoning elapsed_ms."""
-        now = time.time()
-        for seg in reversed(self.segments):
-            if seg.type == "tool" and seg.tool_end_offset == 0:
-                seg.tool_end_offset = total_tool_count
-                break
-
-        for seg in reversed(self.segments):
-            if seg.type == "reasoning" and seg.start_time and not seg.elapsed_ms:
-                seg.elapsed_ms = (now - seg.start_time) * 1000
-                break
-
-    @property
-    def has_dirty(self) -> bool:
-        """是否有需要 flush 的脏段或未渲染的后台审查消息."""
-        return any(seg.dirty for seg in self.segments) or bool(self.bg_review_messages and not self.bg_review_panel_added)
+# Public aliases — importable as ``from .linear import Segment, LinearState``.
+# Both emit DeprecationWarning on first use.
+Segment = _DeprecatedSegmentAlias  # DEPRECATED: use ReasoningRound
+LinearState = UnifiedLinearState   # DEPRECATED: use UnifiedLinearState

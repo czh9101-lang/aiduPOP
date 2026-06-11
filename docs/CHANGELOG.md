@@ -1,3 +1,68 @@
+## v1.0.2 (2026-06-11)
+
+### 🏗️ Architecture: Unified Panel (Breaking Change)
+
+**Complete redesign of the card element architecture** — replaces the old segment-based approach with a single unified collapsible panel that holds all reasoning rounds and tool steps.
+
+#### Why
+The old architecture created a separate collapsible panel for each reasoning round and tool call segment, causing element count to explode near Feishu's 200-element card limit. This led to:
+- 100% preservative seal failure rate (300314 element not found)
+- Frequent card splitting (22 times in production logs)
+- Cascade failures: seal → full rebuild → 300305 → compact → minimal → split
+- Streaming mode closure (300309) when card TTL exceeded 600s
+- Users reporting cards feel significantly slower than native Hermes messages
+
+#### What Changed
+
+**Unified Panel Architecture:**
+- **1 unified panel** = 1 card element for ALL reasoning + tool calls (was: N panels = N×4 elements)
+- **1 answer streaming element** for the answer text
+- **3-4 total elements** regardless of conversation length (was: 50-100+ elements)
+- Panel icon: `robot_filled`, reasoning round icon: `robot-add_outlined` (replacing emoji)
+- Panel title: `agent loop · N rounds · M tools · Xs` (dynamic stats; both Chinese and English use "agent loop", renamed from "Agent Workflow" / "Agent Process" / "AI 过程" / "智能体工作流")
+- `display.show_reasoning` config still controls whether reasoning content appears in the panel
+
+**Performance Optimizations:**
+- Initial card pre-allocates all slots (2 API calls instead of 3) — saves ~150-200ms
+- Loading hint embedded in initial card JSON — eliminates 1 separate API call
+- FeishuClient pre-warming at plugin registration — saves ~50-100ms on first message
+- Default flush interval reduced from 500ms to 200ms — faster text appearance
+
+**Bug Fixes:**
+- **Element existence tracking**: Preservative seal now only deletes elements that actually exist on the card, eliminating 100% failure rate caused by deleting already-removed `context_loading_hint`
+- **Loading hint deletion timing**: `_loading_hint_removed` flag and `existing_elements.discard()` are now set AFTER the `batch_update` API call succeeds, not before. Previously, if `batch_update` failed (e.g., sequence conflict), the flag was already set but the element was never actually deleted, causing the "正在加载上下文..." hint to persist throughout streaming
+- **Chronological panel rendering**: Panel content now interleaves reasoning rounds and tool steps in the order they actually occurred (e.g., reasoning→tool→reasoning→tool) instead of grouping all reasoning before all tools. Added `panel_events` timeline to `UnifiedLinearState` and chronological rendering logic to `build_unified_panel`
+- **Proactive TTL extension**: When card approaches 540s lifetime, automatically extends TTL by 600s, preventing 300309 streaming closure
+- Preservative seal now updates the unified panel to its final state (non-streaming, expanded per config) during seal, ensuring consistent visual presentation
+- **CLI `__main__.py` fix**: Running `$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status` no longer fails with "attempted relative import with no known parent package". Root cause: when Python runs `__main__.py` directly, `__package__` is `None`, making relative imports (`from .config import Config`) impossible even after `_bootstrap_package()` registers the package. Fix: (1) CLI command handlers now use absolute imports (`from hermes_lark_streaming.config import Config`), which work because `_bootstrap_package()` guarantees the package is in `sys.modules`; (2) after bootstrap, `__package__` is set to `"hermes_lark_streaming"` as a belt-and-suspenders measure. Updated README docs to recommend `python /path/to/__main__.py` for directory plugin installs
+
+**Card Lifecycle Redesign (4 Phases):**
+- Phase 1: User sends message → Create placeholder card with only "正在加载上下文..." + loading icon (2 elements, NO panel, NO answer element)
+- Phase 2: First LLM token arrives → Delete "正在加载上下文...", add unified panel + answer element via `add_elements` (1 `batch_update` call)
+- Phase 3: Stream reasoning/tool content in panel, stream answer text
+- Phase 4: Complete → Add footer
+- This replaces the old approach where the initial card pre-allocated all slots including the panel and answer element
+
+**Renamed:**
+- Panel title: "Agent Workflow" / "智能体工作流" / "Agent Process" / "AI 过程" → **"agent loop"** (both Chinese and English use "agent loop")
+
+**Removed Code:**
+- `state/linear_split.py` — No longer needed (no element counting/splitting)
+- `_do_linear_split`, `_maybe_rollover_tool_segment` — No more card splitting
+- `build_linear_compact_seal_card` — No more progressive degradation
+- Element counting fields (`element_count`, `element_limit_hit`, `split_disabled`, `split_index`) removed from `CardSession`
+- 7 skipped test stubs in `TestDoLinearSplit` removed (entirely dead code from old card-split architecture; skipped test count: 7 → 0)
+
+**Migration Notes:**
+- `LinearState` → `UnifiedLinearState` (backward-compat alias maintained)
+- `session.linear_state` → `session.unified_state` (backward-compat property maintained with deprecation warning)
+- `Segment` class → `ReasoningRound` (backward-compat alias maintained with deprecation warning)
+- New i18n keys: `agent_process` (value: "agent loop" in both zh/en), `rounds`, `tools_count`, `round_n`
+- New element IDs: `UNIFIED_PANEL_ELEMENT_ID`, `ANSWER_ELEMENT_ID`
+- Default `flush_interval_ms` changed from 500 to 200
+
+---
+
 ## v1.0.1 (2026-06-10)
 
 | # | 类型 | 问题/功能 | 原因 | 修复/说明 |

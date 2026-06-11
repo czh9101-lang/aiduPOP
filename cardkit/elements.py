@@ -18,6 +18,8 @@ from .md import (
 __all__ = [
     # Element ID constants
     'STREAMING_ELEMENT_ID',
+    'ANSWER_ELEMENT_ID',
+    'UNIFIED_PANEL_ELEMENT_ID',
     'REASONING_ELEMENT_ID',
     'REASONING_TEXT_ELEMENT_ID',
     'TOOL_PANEL_ELEMENT_ID',
@@ -49,6 +51,9 @@ __all__ = [
     '_render_footer_field',
     '_compact',
     '_format_elapsed',
+    # Unified panel builders
+    '_build_unified_panel_placeholder',
+    'build_unified_panel',
 ]
 
 # 匹配 markdown 图片语法: ![alt](url)
@@ -106,9 +111,15 @@ def _extract_images_from_markdown(text: str) -> tuple[str, list[dict]]:
     return cleaned, images
 
 if TYPE_CHECKING:
-    from ..state.linear import Segment
+    from ..state.linear import ReasoningRound
+
+# ---------------------------------------------------------------------------
+# Element ID constants
+# ---------------------------------------------------------------------------
 
 STREAMING_ELEMENT_ID = "streaming_content"
+ANSWER_ELEMENT_ID = "answer_content"
+UNIFIED_PANEL_ELEMENT_ID = "agent_process_panel"
 REASONING_ELEMENT_ID = "reasoning_content"
 REASONING_TEXT_ELEMENT_ID = "reasoning_text"
 TOOL_PANEL_ELEMENT_ID = "tool_panel"
@@ -190,6 +201,295 @@ def _loading_hint_element() -> dict:
         "element_id": _LOADING_HINT_ELEMENT_ID,
     }
 
+
+# ---------------------------------------------------------------------------
+# Unified panel builders
+# ---------------------------------------------------------------------------
+
+def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
+    """Build empty unified panel placeholder for initial streaming card.
+
+    This creates a collapsible panel with the ``robot_filled`` icon and
+    the *Agent Process* title but no content — ready for streaming updates
+    via ``partial_update_element``.
+    """
+    en_title, zh_title = _T["agent_process"]
+    panel = _collapsible_panel(
+        expanded=expanded,
+        title_el={
+            "tag": "plain_text",
+            "content": en_title,
+            "i18n_content": _i18n(en_title, zh_title),
+            "text_color": "grey",
+            "text_size": "notation",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "robot_filled",
+                "size": "16px 16px",
+                "color": "grey",
+            },
+        },
+        elements=[{"tag": "markdown", "content": " "}],
+    )
+    panel["element_id"] = UNIFIED_PANEL_ELEMENT_ID
+    return panel
+
+
+def build_unified_panel(
+    *,
+    reasoning_rounds: list,  # list of ReasoningRound objects
+    current_reasoning_text: str = "",  # in-progress reasoning
+    tool_steps: list[dict],
+    tool_elapsed_ms: float = 0,
+    show_reasoning: bool = True,
+    expanded: bool = False,
+    element_id: str | None = None,
+    panel_events: list[tuple[str, int]] | None = None,
+) -> dict:
+    """Build the full unified panel content for streaming updates and complete cards.
+
+    Combines reasoning rounds and tool steps into a single collapsible panel.
+    The panel title dynamically reflects the current state (round count, tool
+    count, elapsed time).
+
+    Parameters
+    ----------
+    reasoning_rounds : list[ReasoningRound]
+        Finalised reasoning rounds (each has ``.index``, ``.text``, ``.elapsed_ms``).
+    current_reasoning_text : str
+        In-progress reasoning text that has not yet been finalised into a round.
+    tool_steps : list[dict]
+        Tool step dicts consumed by :func:`_build_tool_step_elements`.
+    tool_elapsed_ms : float
+        Total elapsed time for tool execution in milliseconds.
+    show_reasoning : bool
+        Whether to render reasoning content.  When ``False`` the title omits
+        the rounds count and reasoning blocks are hidden.
+    expanded : bool
+        Whether the panel starts expanded.
+    element_id : str | None
+        Override for the panel element_id.  Defaults to
+        :data:`UNIFIED_PANEL_ELEMENT_ID`.
+    panel_events : list[tuple[str, int]] | None
+        Chronological timeline from :attr:`UnifiedLinearState.panel_events`.
+        When provided, reasoning and tool elements are interleaved in the
+        order they actually occurred, instead of grouping all reasoning
+        before all tools.
+    """
+    # ── Title computation ──
+    en_title, zh_title = _T["agent_process"]
+    en_parts: list[str] = [en_title]
+    zh_parts: list[str] = [zh_title]
+
+    # Count reasoning rounds (finalised + in-progress)
+    has_reasoning = show_reasoning and (
+        reasoning_rounds or current_reasoning_text
+    )
+    num_rounds = len(reasoning_rounds) + (1 if current_reasoning_text else 0)
+
+    if has_reasoning and num_rounds > 0:
+        en_rounds, zh_rounds = _T["rounds"]
+        en_parts.append(en_rounds.format(num_rounds))
+        zh_parts.append(zh_rounds.format(num_rounds))
+
+    if tool_steps:
+        en_tools, zh_tools = _T["tools_count"]
+        en_parts.append(en_tools.format(len(tool_steps)))
+        zh_parts.append(zh_tools.format(len(tool_steps)))
+
+    # Total elapsed = reasoning elapsed + tool elapsed
+    reasoning_elapsed_ms = sum(r.elapsed_ms for r in reasoning_rounds)
+    total_elapsed_ms = reasoning_elapsed_ms + tool_elapsed_ms
+    if total_elapsed_ms > 0 and (has_reasoning or tool_steps):
+        elapsed_str = _format_elapsed(total_elapsed_ms)
+        en_parts.append(elapsed_str)
+        zh_parts.append(elapsed_str)
+
+    en_full = " · ".join(en_parts)
+    zh_full = " · ".join(zh_parts)
+
+    # ── Internal elements ──
+    children: list[dict] = []
+
+    if panel_events:
+        # ── Chronological rendering: interleave reasoning and tools ──
+        rendered_tools: set[int] = set()
+        for kind, idx in panel_events:
+            if kind == "reasoning" and show_reasoning and idx < len(reasoning_rounds):
+                round_ = reasoning_rounds[idx]
+                en_round_label, zh_round_label = _T["round_n"]
+                round_elapsed = _format_elapsed(round_.elapsed_ms) if round_.elapsed_ms > 0 else ""
+                en_round_text = en_round_label.format(round_.index)
+                zh_round_text = zh_round_label.format(round_.index)
+                if round_elapsed:
+                    en_round_text += f" · {round_elapsed}"
+                    zh_round_text += f" · {round_elapsed}"
+                children.append({
+                    "tag": "div",
+                    "icon": {
+                        "tag": "standard_icon",
+                        "token": "robot-add_outlined",
+                        "size": "16px 16px",
+                        "color": "grey",
+                    },
+                    "text": {
+                        "tag": "lark_md",
+                        "content": en_round_text,
+                        "i18n_content": _i18n(en_round_text, zh_round_text),
+                        "text_size": "notation",
+                    },
+                })
+                if round_.text.strip():
+                    children.append({
+                        "tag": "markdown",
+                        "content": round_.text,
+                        "text_size": "notation",
+                    })
+                children.append({"tag": "hr"})
+
+            elif kind == "tool" and idx < len(tool_steps):
+                if idx not in rendered_tools:
+                    step = tool_steps[idx]
+                    children.extend(_build_tool_step_elements(step))
+                    children.append({"tag": "hr"})
+                    rendered_tools.add(idx)
+
+        # In-progress reasoning (not yet finalised into panel_events)
+        if current_reasoning_text and show_reasoning:
+            in_progress_idx = num_rounds  # 1-based
+            en_round_label, zh_round_label = _T["round_n"]
+            en_round_text = en_round_label.format(in_progress_idx)
+            zh_round_text = zh_round_label.format(in_progress_idx)
+            children.append({
+                "tag": "div",
+                "icon": {
+                    "tag": "standard_icon",
+                    "token": "robot-add_outlined",
+                    "size": "16px 16px",
+                    "color": "grey",
+                },
+                "text": {
+                    "tag": "lark_md",
+                    "content": en_round_text,
+                    "i18n_content": _i18n(en_round_text, zh_round_text),
+                    "text_size": "notation",
+                },
+            })
+            if current_reasoning_text.strip():
+                children.append({
+                    "tag": "markdown",
+                    "content": current_reasoning_text,
+                    "text_size": "notation",
+                })
+            children.append({"tag": "hr"})
+
+        # Remaining tool steps not in panel_events (safety fallback)
+        for i, step in enumerate(tool_steps):
+            if i not in rendered_tools:
+                children.extend(_build_tool_step_elements(step))
+                children.append({"tag": "hr"})
+
+    else:
+        # ── Fallback: no timeline available, render sequentially ──
+        # Reasoning rounds
+        if has_reasoning:
+            for round_ in reasoning_rounds:
+                en_round_label, zh_round_label = _T["round_n"]
+                round_elapsed = _format_elapsed(round_.elapsed_ms) if round_.elapsed_ms > 0 else ""
+                en_round_text = en_round_label.format(round_.index)
+                zh_round_text = zh_round_label.format(round_.index)
+                if round_elapsed:
+                    en_round_text += f" · {round_elapsed}"
+                    zh_round_text += f" · {round_elapsed}"
+                children.append({
+                    "tag": "div",
+                    "icon": {
+                        "tag": "standard_icon",
+                        "token": "robot-add_outlined",
+                        "size": "16px 16px",
+                        "color": "grey",
+                    },
+                    "text": {
+                        "tag": "lark_md",
+                        "content": en_round_text,
+                        "i18n_content": _i18n(en_round_text, zh_round_text),
+                        "text_size": "notation",
+                    },
+                })
+                if round_.text.strip():
+                    children.append({
+                        "tag": "markdown",
+                        "content": round_.text,
+                        "text_size": "notation",
+                    })
+                children.append({"tag": "hr"})
+
+            # In-progress reasoning
+            if current_reasoning_text:
+                in_progress_idx = num_rounds
+                en_round_label, zh_round_label = _T["round_n"]
+                en_round_text = en_round_label.format(in_progress_idx)
+                zh_round_text = zh_round_label.format(in_progress_idx)
+                children.append({
+                    "tag": "div",
+                    "icon": {
+                        "tag": "standard_icon",
+                        "token": "robot-add_outlined",
+                        "size": "16px 16px",
+                        "color": "grey",
+                    },
+                    "text": {
+                        "tag": "lark_md",
+                        "content": en_round_text,
+                        "i18n_content": _i18n(en_round_text, zh_round_text),
+                        "text_size": "notation",
+                    },
+                })
+                if current_reasoning_text.strip():
+                    children.append({
+                        "tag": "markdown",
+                        "content": current_reasoning_text,
+                        "text_size": "notation",
+                    })
+                children.append({"tag": "hr"})
+
+        # Tool steps
+        for step in tool_steps:
+            children.extend(_build_tool_step_elements(step))
+            children.append({"tag": "hr"})
+
+    # Remove trailing hr
+    if children and children[-1].get("tag") == "hr":
+        children.pop()
+
+    # Fallback: empty content
+    if not children:
+        children.append({"tag": "markdown", "content": " "})
+
+    panel = _collapsible_panel(
+        expanded=expanded,
+        title_el={
+            "tag": "plain_text",
+            "content": en_full,
+            "i18n_content": _i18n(en_full, zh_full),
+            "text_color": "grey",
+            "text_size": "notation",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "robot_filled",
+                "size": "16px 16px",
+                "color": "grey",
+            },
+        },
+        elements=children,
+    )
+    panel["element_id"] = element_id or UNIFIED_PANEL_ELEMENT_ID
+    return panel
+
+
+# ---------------------------------------------------------------------------
+# Tool panel builders (existing — kept for backward compatibility)
+# ---------------------------------------------------------------------------
 
 def _build_tool_panel(
     steps: list[dict],
@@ -490,6 +790,7 @@ def build_preservative_seal_actions(
     error_message: str = "",
     footer_fields: list[list[str]] | None = None,
     footer_show_label: bool = False,
+    existing_elements: set[str] | None = None,
 ) -> list[dict]:
     """构建保留式封卡的 batch_update actions.
 
@@ -499,12 +800,26 @@ def build_preservative_seal_actions(
     操作顺序：
     1. insert_before loading_icon: 添加 error panel（如有）
     2. insert_before loading_icon: 添加 partial indicator 或 footer
-    3. delete_element: 删除 loading_icon
+    3. delete_element: 删除 loading_hint（如存在）
+    4. delete_element: 删除 loading_icon
 
     所有 add_elements 都用 insert_before loading_icon 定位，
     然后删除 loading_icon，最终效果是新增元素出现在卡片底部。
+
+    Parameters
+    ----------
+    existing_elements : set[str] | None
+        If provided, only include ``delete_elements`` actions for element IDs
+        that are actually present in this set.  This avoids 400 errors when
+        trying to delete elements that were never created.  When ``None``
+        (the default), all deletions are included — preserving backward
+        compatibility.
     """
     actions: list[dict] = []
+
+    # Helper: check if an element exists (when tracking is enabled)
+    def _elem_exists(eid: str) -> bool:
+        return existing_elements is None or eid in existing_elements
 
     # ── Error/interrupt panel (if any) ──
     if error_message:
@@ -559,20 +874,22 @@ def build_preservative_seal_actions(
     # ── Delete context loading hint (if still present) ──
     # 占位提示在首字即显时通常已被删除，但如果卡片在 answer
     # 到来前就被封（如超限拆卡），占位提示可能仍在，需要兜底删除。
-    actions.append({
-        "action": "delete_elements",
-        "params": {
-            "element_ids": [_LOADING_HINT_ELEMENT_ID],
-        },
-    })
+    if _elem_exists(_LOADING_HINT_ELEMENT_ID):
+        actions.append({
+            "action": "delete_elements",
+            "params": {
+                "element_ids": [_LOADING_HINT_ELEMENT_ID],
+            },
+        })
 
     # ── Delete loading icon ──
-    actions.append({
-        "action": "delete_elements",
-        "params": {
-            "element_ids": [_LOADING_ELEMENT_ID],
-        },
-    })
+    if _elem_exists(_LOADING_ELEMENT_ID):
+        actions.append({
+            "action": "delete_elements",
+            "params": {
+                "element_ids": [_LOADING_ELEMENT_ID],
+            },
+        })
 
     return actions
 

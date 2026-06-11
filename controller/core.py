@@ -166,7 +166,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         if session is None or session.guard.should_skip("on_thinking"):
             return
 
-        if session.linear and session.linear_state:
+        if session.linear and session.unified_state:
             self._linear_on_thinking(session, text)
             return
 
@@ -205,8 +205,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         if session is None or session.guard.should_skip("on_reasoning"):
             return
 
-        if session.linear and session.linear_state:
-            session.linear_state.on_reasoning_delta(text)
+        if session.linear and session.unified_state:
+            session.unified_state.on_reasoning_delta(text)
             self._schedule_linear_flush(session)
             return
 
@@ -247,8 +247,9 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 output="" if is_error else detail,
             )
 
-        if session.linear and session.linear_state:
-            session.linear_state.on_tool_event(len(session.tool_use.build_display_steps()))
+        if session.linear and session.unified_state:
+            is_new_tool = status in ("running", "started", "tool.started")
+            session.unified_state.on_tool_event(is_new_tool=is_new_tool)
             self._schedule_linear_flush(session)
             return
 
@@ -274,10 +275,10 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 (session._first_answer_time - session.created_at) * 1000,
             )
 
-        if session.linear and session.linear_state:
+        if session.linear and session.unified_state:
             answer_text = strip_reasoning_tags(text)
             if answer_text:
-                session.linear_state.on_answer_delta(answer_text)
+                session.unified_state.on_answer_delta(answer_text)
                 self._schedule_linear_flush(session)
             return
 
@@ -587,8 +588,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             return False
 
         # Try to push into linear state for real-time card display
-        if session.linear and session.linear_state:
-            session.linear_state.on_background_review(text)
+        if session.linear and session.unified_state:
+            session.unified_state.on_background_review(text)
             self._schedule_linear_flush(session)
             return True  # Consumed by card, suppress plain text
 
@@ -657,7 +658,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         等占用的内存。session 仍保留 message_id、
         state、created_at 等元数据直到 _cleanup 清除。
         """
-        session.linear_state = None
+        session.unified_state = None
         if session.text is not None:
             session.text = TextState()  # type: ignore[assignment]
         session.tool_use = ToolUseTracker()  # type: ignore[assignment]
@@ -668,7 +669,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
     def _complete_session(self, session: CardSession) -> None:
         """根据 session 线性/非线性选择完成路径."""
         session.flush.mark_completed()
-        if session.linear and session.linear_state:
+        if session.linear and session.unified_state:
             self._fire_and_forget(self._do_linear_complete_with_fallback(session), session._loop)
         else:
             self._fire_and_forget(self._do_complete_with_fallback(session), session._loop)

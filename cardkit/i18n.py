@@ -49,6 +49,11 @@ _T: dict[str, tuple[str, str]] = {
     "cost_estimated": ("${} (est.)", "${} (估算)"),
     "cost_actual": ("${} (actual)", "${} (实报)"),
     "cost_included": ("Free", "免费"),
+    # ── Unified panel i18n ──
+    "agent_process": ("agent loop", "agent loop"),
+    "rounds": ("{} rounds", "{} 轮"),
+    "tools_count": ("{} tools", "{} 个工具"),
+    "round_n": ("Round {}", "第 {} 轮"),
 }
 
 

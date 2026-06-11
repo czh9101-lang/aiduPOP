@@ -51,7 +51,7 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "panel_expanded": False,
     "streaming_panel_expanded": False,
     "print_strategy": "delay",
-    "flush_interval_ms": 500,
+    "flush_interval_ms": 200,
     "card_ttl_sec": 600,
     "inject_time": False,
     "footer": {
@@ -235,6 +235,25 @@ def register(ctx: "PluginContext") -> None:
         _logger.info("hermes-lark-streaming v%s: patches applied (check logs for per-module status)", __version__)
     except Exception:
         _logger.exception("hermes-lark-streaming v%s: failed to apply patches", __version__)
+
+    # ── Pre-warm FeishuClient ──
+    # Initialize the Feishu API client at plugin registration time instead of
+    # lazily on the first message.  This eliminates ~50-100ms latency on the
+    # first card creation, improving the time-to-first-paint for users.
+    try:
+        from .controller import get_controller
+        import asyncio
+
+        ctrl = get_controller()
+        if ctrl.enabled:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(ctrl._ensure_init())
+                _logger.info("hermes-lark-streaming v%s: FeishuClient pre-warm scheduled", __version__)
+            else:
+                _logger.debug("hermes-lark-streaming v%s: event loop not running, skipping pre-warm", __version__)
+    except Exception:
+        _logger.debug("hermes-lark-streaming v%s: FeishuClient pre-warm skipped", __version__, exc_info=True)
 
 
 def unregister(ctx: "PluginContext") -> None:
