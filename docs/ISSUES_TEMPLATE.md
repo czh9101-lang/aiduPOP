@@ -190,7 +190,7 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 从 v1.0.3 开始，插件使用**统一面板架构 + 打字机效果**：
 - 所有推理轮次和工具步骤集中在 1 个可折叠面板
 - 面板标题动态显示 `agent loop · N rounds · M tools · Xs`
-- 打字机效果：`print_frequency_ms=70`（飞书官方默认，每70ms渲染1字符），`print_step=1`（官方默认，每次1字符），默认刷新间隔100ms，仅回答文本变化时使用70ms快流节流（对齐官方默认值）
+- 打字机效果：`print_frequency_ms=70`（飞书官方默认，每70ms渲染1字符），`print_step=1`（官方默认，每次1字符），默认刷新间隔100ms（最低70ms，对齐官方默认值），仅回答文本变化时使用70ms快流节流（对齐官方默认值），面板变化时使用正常100ms间隔。所有流式参数已验证 ≥ 官方默认值：`_ANSWER_FAST_STREAM_MS=70ms`、`CARDKIT_MS=80ms`
 - 推理和工具按时间线交错渲染（reasoning→tool→reasoning→tool），而非全部推理后再全部工具
 - 回答使用 1 个独立流式元素
 - 卡片元素总数恒为 3–4 个（不再有拆卡、渐进降级）
@@ -198,6 +198,7 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 - 保留式封卡只删除卡片上实际存在的元素，更新统一面板为最终状态
 - 加载提示"正在加载上下文..."在首内容到达时删除，删除操作在 API 成功后确认
 - **完成前排空 (drain)**：v1.0.3 修复了页脚早于内容出现的 bug——`_do_linear_complete()` 在关闭流式模式前先 drain 所有剩余脏数据，确保内容完整输出后才封卡
+- **COMPLETING 状态修正**：v1.0.3 将 `COMPLETING` 从 `_TERMINAL` 集合中移除（它是过渡状态而非终态），使晚到的 `on_answer`/`on_thinking` 回调不再被静默丢弃；drain 循环增加最多 5 轮迭代 + `asyncio.sleep(0)` yield 以捕获工作线程晚到内容
 
 如果用户报告与旧版行为相关的问题（如拆卡、compact seal、element_limit），请确认他们已升级到 v1.0.3+。
 

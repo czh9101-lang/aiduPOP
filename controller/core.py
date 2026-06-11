@@ -521,7 +521,9 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         # ── 状态转移: → COMPLETING ──
         # 在 _complete_session 的 await 之前同步设置，防止 hermes 双调竞态。
-        # COMPLETING 加入 _TERMINAL，确保后续 on_answer/on_reasoning 等跳过。
+        # COMPLETING 不在 _TERMINAL 中：on_answer/on_thinking 等回调在
+        # COMPLETING 期间仍可更新 unified_state（确保迟到的内容不被丢弃），
+        # 但 _schedule_linear_flush 会拒绝调度新 flush（drain 负责排空）。
         session.state = COMPLETING
 
         self._complete_session(session)
@@ -616,7 +618,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 _logger.debug("background review sender failed", exc_info=True)
 
     def _schedule_card_update(self, session: CardSession) -> None:
-        if session.state == IDLE or session.state in _TERMINAL:
+        if session.state == IDLE or session.state in _TERMINAL or session.state == COMPLETING:
             return
         if session.guard.should_skip("_schedule_card_update"):
             return

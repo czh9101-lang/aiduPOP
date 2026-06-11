@@ -2,8 +2,10 @@
 
 ### 🐛 Bug Fixes
 
+- **Streaming parameters hardened — `flush_interval_ms` minimum raised from 50ms to 70ms**: Aligned with Feishu CardKit official `print_frequency_ms` default (70ms). This prevents users from configuring server-side flush intervals below the client-side rendering interval, which could cause over-buffering or frequency control issues. All streaming parameters now verified ≥ official defaults: `print_frequency_ms=70`, `print_step=1`, `_ANSWER_FAST_STREAM_MS=70ms`, `CARDKIT_MS=80ms`.
+- **Fixed premature card finalization — `COMPLETING` removed from `_TERMINAL` state set (CRITICAL)**: Root cause was `COMPLETING` being in `_TERMINAL`, causing `_get_active_session()` to return `None` during the COMPLETING state. Late-arriving `on_answer`/`on_thinking` callbacks were silently dropped, resulting in incomplete answer content on the card when the footer appeared. Fix: (1) Removed `COMPLETING` from `_TERMINAL` — it is a transitional state, not a true terminal state. Now `on_answer`/`on_thinking` can still update `unified_state` during COMPLETING, while `_schedule_linear_flush` still refuses to schedule new flushes (the drain handles it). (2) Enhanced drain loop in `_do_linear_complete`: iterative drain with `asyncio.sleep(0)` yield between rounds (max 5 rounds) to catch late-arriving content from the agent worker thread. (3) Added content completeness guard in `_preservative_seal`: detects and warns if dirty data remains at seal time. (4) `_schedule_card_update` (non-linear mode) now also explicitly blocks during COMPLETING state.
 - **Fixed streaming parameters below official defaults**: `print_frequency_ms` raised from 10ms to 70ms (official Feishu CardKit default). The previous value was too aggressive and could cause rendering instability. Per Feishu documentation, the default streaming update interval is 70ms and default step is 1 character.
-- **Fixed premature card finalization (footer appears before content completes)**: Root cause was `_complete_session()` calling `flush.mark_completed()` prematurely, which cancelled the pending flush timer and dropped the last chunk of answer text. Fix: removed premature `mark_completed()` from `_complete_session()`, and added a **drain step** in `_do_linear_complete()` that explicitly flushes any remaining dirty answer/panel data BEFORE closing streaming and adding the footer. This ensures ALL content reaches Feishu before the card is sealed.
+- **Fixed premature card finalization — drain step added**: Root cause was `_complete_session()` calling `flush.mark_completed()` prematurely, which cancelled the pending flush timer and dropped the last chunk of answer text. Fix: removed premature `mark_completed()` from `_complete_session()`, and added a **drain step** in `_do_linear_complete()` that explicitly flushes any remaining dirty answer/panel data BEFORE closing streaming and adding the footer. This ensures ALL content reaches Feishu before the card is sealed.
 - **Answer-only fast-stream throttle aligned to official default**: `_ANSWER_FAST_STREAM_MS` raised from 50ms to 70ms, matching the official `print_frequency_ms` default. Server-side flush interval and client-side render interval now work in harmony.
 
 ### ✨ Typewriter Effect (打字机效果)
@@ -13,7 +15,7 @@ Streaming card output now renders character-by-character instead of chunk-by-chu
 - `print_frequency_ms` set to 70ms (official default) — Feishu client renders 1 character every 70ms
 - `print_step` set to 1 (official default) — one character per render tick
 - Default `flush_interval_ms` reduced from 200ms to 100ms — content reaches the card faster
-- Flush interval range widened: 50–2000ms (was 100–2000ms)
+- Flush interval range widened: 70–2000ms (was 100–2000ms)
 - Answer-only flush uses 70ms fast-stream throttle (aligned with `print_frequency_ms`)
 
 ### 🚀 Performance Optimization
@@ -37,6 +39,6 @@ Streaming card output now renders character-by-character instead of chunk-by-chu
 | Parameter | Old Default | New Default |
 |-----------|-------------|-------------|
 | `flush_interval_ms` | 200 | 100 |
-| `flush_interval_ms` range | 100–2000 | 50–2000 |
+| `flush_interval_ms` range | 100–2000 | 70–2000 |
 | `print_frequency_ms` (CardKit) | 10 | 70 |
 | `_ANSWER_FAST_STREAM_MS` (internal) | 50ms | 70ms |

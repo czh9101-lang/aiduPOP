@@ -53,7 +53,15 @@ COMPLETED = "completed"
 FAILED = "failed"
 ABORTED = "aborted"
 
-_TERMINAL = {COMPLETING, COMPLETED, FAILED, ABORTED}
+# True terminal states — session is done and will never accept updates.
+# COMPLETING is intentionally NOT a terminal state: it is a transitional
+# state during which late-arriving on_answer / on_thinking callbacks
+# must still be able to update unified_state.  The drain logic in
+# _do_linear_complete will flush any remaining dirty data before
+# closing streaming.  If COMPLETING were in _TERMINAL, _get_active_session
+# would return None and those callbacks would silently drop content,
+# causing the "footer appears before content finishes streaming" bug.
+_TERMINAL = {COMPLETED, FAILED, ABORTED}
 
 __all__ = [
     "ControllerMixin",
