@@ -244,6 +244,7 @@ def build_unified_panel(
     show_reasoning: bool = True,
     expanded: bool = False,
     element_id: str | None = None,
+    panel_events: list[tuple[str, int]] | None = None,
 ) -> dict:
     """Build the full unified panel content for streaming updates and complete cards.
 
@@ -269,6 +270,11 @@ def build_unified_panel(
     element_id : str | None
         Override for the panel element_id.  Defaults to
         :data:`UNIFIED_PANEL_ELEMENT_ID`.
+    panel_events : list[tuple[str, int]] | None
+        Chronological timeline from :attr:`UnifiedLinearState.panel_events`.
+        When provided, reasoning and tool elements are interleaved in the
+        order they actually occurred, instead of grouping all reasoning
+        before all tools.
     """
     # ── Title computation ──
     en_title, zh_title = _T["agent_process"]
@@ -305,43 +311,51 @@ def build_unified_panel(
     # ── Internal elements ──
     children: list[dict] = []
 
-    # Reasoning rounds
-    if has_reasoning:
-        for round_ in reasoning_rounds:
-            # Round header: icon + "Round N · Xs"
-            en_round_label, zh_round_label = _T["round_n"]
-            round_elapsed = _format_elapsed(round_.elapsed_ms) if round_.elapsed_ms > 0 else ""
-            en_round_text = en_round_label.format(round_.index)
-            zh_round_text = zh_round_label.format(round_.index)
-            if round_elapsed:
-                en_round_text += f" · {round_elapsed}"
-                zh_round_text += f" · {round_elapsed}"
-            children.append({
-                "tag": "div",
-                "icon": {
-                    "tag": "standard_icon",
-                    "token": "robot-add_outlined",
-                    "size": "16px 16px",
-                    "color": "grey",
-                },
-                "text": {
-                    "tag": "lark_md",
-                    "content": en_round_text,
-                    "i18n_content": _i18n(en_round_text, zh_round_text),
-                    "text_size": "notation",
-                },
-            })
-            # Reasoning text
-            if round_.text.strip():
+    if panel_events:
+        # ── Chronological rendering: interleave reasoning and tools ──
+        rendered_tools: set[int] = set()
+        for kind, idx in panel_events:
+            if kind == "reasoning" and show_reasoning and idx < len(reasoning_rounds):
+                round_ = reasoning_rounds[idx]
+                en_round_label, zh_round_label = _T["round_n"]
+                round_elapsed = _format_elapsed(round_.elapsed_ms) if round_.elapsed_ms > 0 else ""
+                en_round_text = en_round_label.format(round_.index)
+                zh_round_text = zh_round_label.format(round_.index)
+                if round_elapsed:
+                    en_round_text += f" · {round_elapsed}"
+                    zh_round_text += f" · {round_elapsed}"
                 children.append({
-                    "tag": "markdown",
-                    "content": round_.text,
-                    "text_size": "notation",
+                    "tag": "div",
+                    "icon": {
+                        "tag": "standard_icon",
+                        "token": "robot-add_outlined",
+                        "size": "16px 16px",
+                        "color": "grey",
+                    },
+                    "text": {
+                        "tag": "lark_md",
+                        "content": en_round_text,
+                        "i18n_content": _i18n(en_round_text, zh_round_text),
+                        "text_size": "notation",
+                    },
                 })
-            children.append({"tag": "hr"})
+                if round_.text.strip():
+                    children.append({
+                        "tag": "markdown",
+                        "content": round_.text,
+                        "text_size": "notation",
+                    })
+                children.append({"tag": "hr"})
 
-        # In-progress reasoning (not yet finalised)
-        if current_reasoning_text:
+            elif kind == "tool" and idx < len(tool_steps):
+                if idx not in rendered_tools:
+                    step = tool_steps[idx]
+                    children.extend(_build_tool_step_elements(step))
+                    children.append({"tag": "hr"})
+                    rendered_tools.add(idx)
+
+        # In-progress reasoning (not yet finalised into panel_events)
+        if current_reasoning_text and show_reasoning:
             in_progress_idx = num_rounds  # 1-based
             en_round_label, zh_round_label = _T["round_n"]
             en_round_text = en_round_label.format(in_progress_idx)
@@ -369,11 +383,80 @@ def build_unified_panel(
                 })
             children.append({"tag": "hr"})
 
-    # Tool steps
-    for step in tool_steps:
-        step_elements = _build_tool_step_elements(step)
-        children.extend(step_elements)
-        children.append({"tag": "hr"})
+        # Remaining tool steps not in panel_events (safety fallback)
+        for i, step in enumerate(tool_steps):
+            if i not in rendered_tools:
+                children.extend(_build_tool_step_elements(step))
+                children.append({"tag": "hr"})
+
+    else:
+        # ── Fallback: no timeline available, render sequentially ──
+        # Reasoning rounds
+        if has_reasoning:
+            for round_ in reasoning_rounds:
+                en_round_label, zh_round_label = _T["round_n"]
+                round_elapsed = _format_elapsed(round_.elapsed_ms) if round_.elapsed_ms > 0 else ""
+                en_round_text = en_round_label.format(round_.index)
+                zh_round_text = zh_round_label.format(round_.index)
+                if round_elapsed:
+                    en_round_text += f" · {round_elapsed}"
+                    zh_round_text += f" · {round_elapsed}"
+                children.append({
+                    "tag": "div",
+                    "icon": {
+                        "tag": "standard_icon",
+                        "token": "robot-add_outlined",
+                        "size": "16px 16px",
+                        "color": "grey",
+                    },
+                    "text": {
+                        "tag": "lark_md",
+                        "content": en_round_text,
+                        "i18n_content": _i18n(en_round_text, zh_round_text),
+                        "text_size": "notation",
+                    },
+                })
+                if round_.text.strip():
+                    children.append({
+                        "tag": "markdown",
+                        "content": round_.text,
+                        "text_size": "notation",
+                    })
+                children.append({"tag": "hr"})
+
+            # In-progress reasoning
+            if current_reasoning_text:
+                in_progress_idx = num_rounds
+                en_round_label, zh_round_label = _T["round_n"]
+                en_round_text = en_round_label.format(in_progress_idx)
+                zh_round_text = zh_round_label.format(in_progress_idx)
+                children.append({
+                    "tag": "div",
+                    "icon": {
+                        "tag": "standard_icon",
+                        "token": "robot-add_outlined",
+                        "size": "16px 16px",
+                        "color": "grey",
+                    },
+                    "text": {
+                        "tag": "lark_md",
+                        "content": en_round_text,
+                        "i18n_content": _i18n(en_round_text, zh_round_text),
+                        "text_size": "notation",
+                    },
+                })
+                if current_reasoning_text.strip():
+                    children.append({
+                        "tag": "markdown",
+                        "content": current_reasoning_text,
+                        "text_size": "notation",
+                    })
+                children.append({"tag": "hr"})
+
+        # Tool steps
+        for step in tool_steps:
+            children.extend(_build_tool_step_elements(step))
+            children.append({"tag": "hr"})
 
     # Remove trailing hr
     if children and children[-1].get("tag") == "hr":

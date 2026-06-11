@@ -248,7 +248,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             )
 
         if session.linear and session.unified_state:
-            session.unified_state.on_tool_event()
+            is_new_tool = status in ("running", "started", "tool.started")
+            session.unified_state.on_tool_event(is_new_tool=is_new_tool)
             self._schedule_linear_flush(session)
             return
 

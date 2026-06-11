@@ -16,7 +16,7 @@
 <a href="README.md">English</a> | 中文版
 </p>
 
-为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、统一可折叠面板、工具步骤、推理过程、后台任务卡片等。
+为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、统一可折叠面板、按时间线交错显示推理与工具调用等。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >

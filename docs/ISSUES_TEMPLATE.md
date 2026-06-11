@@ -187,11 +187,13 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 
 从 v1.0.2 开始，插件使用**统一面板架构**：
 - 所有推理轮次和工具步骤集中在 1 个可折叠面板（`robot_filled` 图标）
-- 面板标题动态显示 `Agent Process · N rounds · M tools · Xs`
+- 面板标题动态显示 `Agent Workflow · N rounds · M tools · Xs`
+- 推理和工具按时间线交错渲染（reasoning→tool→reasoning→tool），而非全部推理后再全部工具
 - 回答使用 1 个独立流式元素
 - 卡片元素总数恒为 3–4 个（不再有拆卡、渐进降级）
 - 旧的分段式设计（每轮推理独立面板、元素计数、拆卡逻辑）已完全移除
 - 保留式封卡只删除卡片上实际存在的元素，更新统一面板为最终状态
+- 加载提示"正在加载上下文..."在首内容到达时删除，删除操作在 API 成功后确认
 
 如果用户报告与旧版行为相关的问题（如拆卡、compact seal、element_limit），请确认他们已升级到 v1.0.2+。
 

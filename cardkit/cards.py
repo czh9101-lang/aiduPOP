@@ -553,6 +553,7 @@ def build_unified_complete_card(
     footer_show_label: bool = True,
     panel_expanded: bool = False,
     header_enabled: bool = False,
+    panel_events: list[tuple[str, int]] | None = None,
 ) -> dict[str, Any]:
     """Unified panel complete card — single panel for reasoning+tools, plus answer.
 
@@ -610,6 +611,7 @@ def build_unified_complete_card(
             tool_elapsed_ms=tool_elapsed_ms,
             show_reasoning=show_reasoning,
             expanded=panel_expanded,
+            panel_events=panel_events,
         ))
 
     # ── Answer text ──

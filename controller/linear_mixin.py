@@ -301,6 +301,7 @@ class UnifiedControllerMixin:
                 tool_elapsed_ms=session.tool_use.elapsed_ms,
                 show_reasoning=self._cfg.show_reasoning,
                 expanded=self._cfg.streaming_panel_expanded,
+                panel_events=state.panel_events,
             )
             actions.append({
                 "action": "partial_update_element",
@@ -318,29 +319,34 @@ class UnifiedControllerMixin:
         # ── 2. Delete loading hint on first content ──
         # When the first reasoning/tool/answer content arrives, remove
         # the "context loading" hint in the same batch_update call.
+        # NOTE: _loading_hint_removed and existing_elements.discard are set
+        # AFTER the batch_update succeeds, so we can retry on failure.
+        _hint_delete_in_batch = False
         if not session._loading_hint_removed and (state.panel_visible or state.answer_text):
             actions.append({
                 "action": "delete_elements",
                 "params": {"element_ids": [_LOADING_HINT_ELEMENT_ID]},
             })
-            session._loading_hint_removed = True
-            session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
+            _hint_delete_in_batch = True
 
         # ── 3. Execute batch_update for panel + hint deletion ──
         if actions:
             session.sequence += 1
             _logger.info(
-                "unified flush: msg=%s seq=%d actions=%d panel=%s hint=%s",
+                "unified flush: msg=%s seq=%d actions=%d hint_delete=%s",
                 (session.message_id or "?")[:12],
                 session.sequence,
                 len(actions),
-                state.panel_dirty,
-                not session._loading_hint_removed,
+                _hint_delete_in_batch,
             )
             try:
                 await self._client.cardkit_batch_update(
                     session.card_id, actions, sequence=session.sequence,
                 )
+                # ── Mark hint as removed only after successful API call ──
+                if _hint_delete_in_batch:
+                    session._loading_hint_removed = True
+                    session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
             except FeishuAPIError as e:
                 if e.code == CARDKIT_STREAMING_CLOSED:
                     _logger.info(
@@ -475,6 +481,7 @@ class UnifiedControllerMixin:
                     tool_elapsed_ms=session.tool_use.elapsed_ms,
                     show_reasoning=self._cfg.show_reasoning,
                     expanded=self._cfg.panel_expanded,
+                    panel_events=state.panel_events,
                 )
                 seal_actions.append({
                     "action": "partial_update_element",
@@ -683,6 +690,7 @@ class UnifiedControllerMixin:
                     footer_show_label=self._cfg.footer_show_label,
                     panel_expanded=self._cfg.panel_expanded,
                     header_enabled=self._cfg.header_enabled,
+                    panel_events=state.panel_events if state else None,
                 )
                 session.sequence += 1
                 assert self._client is not None

@@ -90,7 +90,7 @@ Background: _run_background_task ── [Hook 1/2]
 
 **4.5 时间感知格式**: XML 标签 `<time>HH:MM:SS</time>`，LLM 不模仿，无日期/时区后缀。
 
-**4.6 统一面板架构 (v1.0.2)**: 所有推理轮次和工具步骤放在 1 个可折叠面板中（图标 `robot_filled`），回答使用 1 个流式元素。无论对话多长，卡片始终只有 3–4 个元素。面板标题动态显示 `Agent Process · N rounds · M tools · Xs`。`display.show_reasoning` 控制推理内容是否出现在面板中。
+**4.6 统一面板架构 (v1.0.2)**: 所有推理轮次和工具步骤放在 1 个可折叠面板中（图标 `robot_filled`），回答使用 1 个流式元素。无论对话多长，卡片始终只有 3–4 个元素。面板标题动态显示 `Agent Workflow · N rounds · M tools · Xs`。`display.show_reasoning` 控制推理内容是否出现在面板中。`panel_events` 时间线记录事件发生顺序，面板内容按时间线交错渲染（reasoning→tool→reasoning→tool），而非全部推理后再全部工具。
 
 ---
 
@@ -130,7 +130,7 @@ v1.0.2 引入统一面板架构，取代旧的分段式设计。
 **统一面板结构**:
 ```
 ┌─ 统一面板 (robot_filled) ──────────────────────────────┐
-│ Agent Process · 3 rounds · 5 tools · 12.5s              │
+│ Agent Workflow · 3 rounds · 5 tools · 12.5s              │
 │                                                          │
 │ 🔄 Round 1 (3.2s)                                      │
 │   推理内容...                                             │
@@ -226,8 +226,8 @@ hermes_lark_streaming:
 ### 10.6 FlushController 线程安全
 worker 线程必须用 `call_soon_threadsafe()`，`call_soon()` 不唤醒事件循环→flush 永不执行。
 
-### 10.7 统一面板消除元素爆炸
-v1.0.2 之前，每个 reasoning round / tool segment 创建独立面板（4 元素/面板），元素数随对话线性增长接近 200 硬限。统一面板架构将所有内容集中在 1 个面板 + 1 个回答元素 = 3–4 元素恒定，彻底消除拆卡和渐进降级需求。
+### 10.7 统一面板消除元素爆炸 + 按时间线交错渲染
+v1.0.2 之前，每个 reasoning round / tool segment 创建独立面板（4 元素/面板），元素数随对话线性增长接近 200 硬限。统一面板架构将所有内容集中在 1 个面板 + 1 个回答元素 = 3–4 元素恒定，彻底消除拆卡和渐进降级需求。v1.0.2 中期修复：`panel_events` 时间线记录事件发生顺序，面板内容按时间线交错渲染（reasoning→tool→reasoning→tool），而非全部推理后再全部工具。
 
 ### 10.8 幂等守卫 = 同步状态转移 + 错误码容错
 COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态。
@@ -238,16 +238,19 @@ COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态。
 ### 10.10 封卡只删除实际存在的元素
 v1.0.2 之前，保留式封卡盲目删除所有已知元素 ID（包括已被飞书删除的 `context_loading_hint`），导致 100% 的 300314 失败。现在封卡只删除卡片上实际存在的元素，消除了此问题。
 
-### 10.11 性能参数应可配置
+### 10.11 状态标志必须在 API 成功后设置
+`_loading_hint_removed` 等标志必须在 `batch_update` API 调用成功后才设置，不能在调用前设置。如果在 API 调用前设置，一旦 API 失败（如 sequence conflict），标志已设但实际未生效，后续不会再重试，导致"正在加载上下文..."永久残留。
+
+### 10.12 性能参数应可配置
 性能敏感参数不应硬编码。默认 200ms 刷新间隔（可配置 100~2000ms）。
 
-### 10.12 即时反馈 + 预分配
+### 10.13 即时反馈 + 预分配
 初始卡片 JSON 中嵌入加载提示占位符 + 预分配所有元素槽位（2 次 API 调用代替 3 次），首段 answer 到达时同一 batch_update 移除加载提示（零额外 API 开销）。
 
-### 10.13 主动 TTL 延长
+### 10.14 主动 TTL 延长
 当卡片生存时间接近 540s 时，自动延长 600s，防止 300309 流式关闭。不要等到超时再处理。
 
-### 10.14 向后兼容别名带弃用警告
+### 10.15 向后兼容别名带弃用警告
 `LinearState` → `UnifiedLinearState`、`Segment` → `ReasoningRound`、`session.linear_state` → `session.unified_state`：均保留向后兼容别名，但访问时打印弃用警告，方便渐进迁移。
 
 ---
