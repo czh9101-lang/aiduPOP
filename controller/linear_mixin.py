@@ -1,39 +1,39 @@
-"""Unified panel linear mode — create, flush, and seal a single-card streaming session.
+"""
+Unified panel linear mode — create, flush, and seal a single-card streaming session.
 
 Architecture
 -----------
-The unified panel architecture replaces the old segment-based approach:
+Card lifecycle (v1.0.2+):
 
-- **1 unified panel** (``UNIFIED_PANEL_ELEMENT_ID``): A single
-  ``collapsible_panel`` element that holds *all* reasoning rounds and
-  tool steps.  Its internal children are sub-elements that do **not**
-  count toward the Feishu 200-element card limit.
+Phase 1 — **Placeholder card** (_do_create_linear_card):
+    When the user sends a message, create a placeholder card with only
+    "正在加载上下文..." + loading icon (2 elements). No panel, no
+    answer element — just a clean loading state.
 
-- **1 answer streaming element** (``ANSWER_ELEMENT_ID``): Receives
-  answer text via ``cardkit_stream_element``.
+Phase 2 — **First LLM token** (_do_unified_flush):
+    When the first reasoning/tool/answer content arrives, delete the
+    loading hint and add the unified panel + answer element via
+    add_elements in a single batch_update call.
 
-- **1 loading icon** (``_LOADING_ELEMENT_ID``): Deleted on seal.
+Phase 3 — **Streaming updates** (_do_unified_flush):
+    Subsequent content updates the panel via partial_update_element
+    and answer text via stream_element. Max 2 API calls per flush.
 
-- **1 loading hint** (``_LOADING_HINT_ELEMENT_ID``): Deleted when the
-  first content (reasoning, tool, or answer) arrives.
+Phase 4 — **Complete** (_preservative_seal):
+    Close streaming mode, update panel to final state, add footer.
 
-Total: at most 4 top-level elements, regardless of conversation length.
-This eliminates the need for:
-
-- Element counting / thresholds
-- Card splitting / rollover
-- Progressive degradation (compact/minimal seal)
-
-The initial card is created with all slots pre-allocated, so no later
-``add_elements`` calls are needed during streaming.  Updates are
-performed exclusively via ``partial_update_element`` (for the unified
-panel) and ``stream_element`` (for answer text).
+Key elements:
+- **1 unified panel** (UNIFIED_PANEL_ELEMENT_ID): holds all
+  reasoning rounds and tool steps in a single collapsible panel.
+- **1 answer streaming element** (ANSWER_ELEMENT_ID): receives
+  answer text via cardkit_stream_element.
+- **1 loading icon** (_LOADING_ELEMENT_ID): deleted on seal.
 
 Migration
 ---------
-``LinearControllerMixin`` is kept as a backward-compatible alias for
-``UnifiedControllerMixin``.  All removed methods (``_do_linear_split``,
-``_maybe_rollover_tool_segment``, etc.) are no longer present.
+LinearControllerMixin is kept as a backward-compatible alias for
+UnifiedControllerMixin. All removed methods (_do_linear_split,
+_maybe_rollover_tool_segment, etc.) are no longer present.
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ from ..cardkit import (
     UNIFIED_PANEL_ELEMENT_ID,
     _LOADING_ELEMENT_ID,
     _LOADING_HINT_ELEMENT_ID,
+    _streaming_element,
     build_streaming_card_v2,
     build_im_fallback_card,
     build_unified_panel,
@@ -92,7 +93,7 @@ _TTL_EXTEND_DELTA_SEC = 600        # Extend by 600s
 
 
 class UnifiedControllerMixin:
-    """Unified panel linear mode — single card, single panel, single answer.
+    """Unified panel linear mode — phased card lifecycle.
 
     This mixin is designed to be inherited by :class:`StreamCardController`
     alongside :class:`ControllerMixin`.  It provides the linear-mode
@@ -100,15 +101,11 @@ class UnifiedControllerMixin:
     architecture where all reasoning rounds and tool steps live in **one**
     collapsible panel element.
 
-    Key simplifications vs. the old ``LinearControllerMixin``:
-
-    * No element counting — the card always has exactly 3–4 elements.
-    * No splitting — no ``_do_linear_split``, ``_maybe_rollover_tool_segment``.
-    * No progressive degradation — ``_preservative_seal`` always works
-      because the element count never exceeds the card limit.
-    * The initial card already contains all slots (unified panel,
-      answer element, loading hint, loading icon), so no
-      ``add_elements`` calls are needed during streaming.
+    Card lifecycle:
+    Phase 1 — Placeholder card ("正在加载上下文..." only)
+    Phase 2 — First token: add panel + answer element, delete loading hint
+    Phase 3 — Stream panel + answer updates
+    Phase 4 — Complete: close streaming, add footer
     """
 
     # ── Instance attributes provided by StreamCardController ──
@@ -125,17 +122,15 @@ class UnifiedControllerMixin:
     # ===================================================================
 
     async def _do_create_linear_card(self, session: CardSession) -> None:
-        """Create the initial streaming card with all slots pre-allocated.
+        """Create the initial placeholder card — loading hint only, no panel.
 
-        The card contains:
-        1. Unified panel placeholder (``UNIFIED_PANEL_ELEMENT_ID``)
-        2. Answer streaming element (``ANSWER_ELEMENT_ID``)
-        3. Loading hint (``_LOADING_HINT_ELEMENT_ID``)
-        4. Loading icon (``_LOADING_ELEMENT_ID``)
-
-        Because all slots are pre-allocated, no ``add_elements`` calls
-        are needed during streaming — only ``partial_update_element``
-        and ``stream_element``.
+        Card lifecycle (v1.0.2+):
+        Phase 1 — This method: Create placeholder card with only
+        "正在加载上下文..." + loading icon (2 elements).
+        Phase 2 — First LLM token: Delete loading hint, add unified
+        panel + answer element via ``add_elements``.
+        Phase 3 — Stream panel content + answer text.
+        Phase 4 — Complete: Add footer.
         """
         if session.state != IDLE:
             return
@@ -151,8 +146,9 @@ class UnifiedControllerMixin:
             try:
                 reply_to = session.anchor_id or session.message_id
                 card = build_streaming_card_v2(
-                    include_unified_panel=True,   # Unified panel placeholder
-                    include_loading_hint=True,     # Loading hint (no separate API needed!)
+                    include_unified_panel=False,   # Panel added on first token
+                    include_answer_element=False,   # Answer element added with panel
+                    include_loading_hint=True,      # "正在加载上下文..."
                     streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                     print_strategy=self._cfg.print_strategy,
                     header_enabled=self._cfg.header_enabled,
@@ -166,14 +162,12 @@ class UnifiedControllerMixin:
                 session.card_created_at = _time.time()
                 session.flush.set_throttle(self._cfg.flush_interval_sec)
 
-                # Track existing elements — all 4 are pre-allocated
+                # Track existing elements — only 2 are pre-allocated
                 session.existing_elements = {
-                    UNIFIED_PANEL_ELEMENT_ID,
-                    ANSWER_ELEMENT_ID,
                     _LOADING_HINT_ELEMENT_ID,
                     _LOADING_ELEMENT_ID,
                 }
-                session._panel_element_created = True  # Panel is in initial card
+                session._panel_element_created = False  # Panel NOT in initial card
 
             except FeishuAPIError:
                 _logger.info("linear CardKit create failed, falling back to non-linear")
@@ -251,16 +245,23 @@ class UnifiedControllerMixin:
     async def _do_unified_flush(self, session: CardSession) -> None:
         """Unified panel flush — max 2 API calls per flush cycle.
 
-        1. ``cardkit_batch_update``: update the unified panel content
-           (``partial_update_element``) and optionally delete the
-           loading hint (``delete_elements``).
+        Card lifecycle phases handled here:
 
-        2. ``cardkit_stream_element``: stream answer text to the
-           ``ANSWER_ELEMENT_ID`` element.
+        Phase 2 (first LLM token):
+            When the first reasoning/tool/answer content arrives and the
+            panel hasn't been created yet, this flush:
+            1. Builds the unified panel with initial content
+            2. Adds panel + answer element via ``add_elements``
+            3. Deletes the "正在加载上下文..." loading hint
+            All in a single ``batch_update`` call.
 
-        Because the initial card already contains all slots, we never
-        need ``add_elements`` during streaming.  This keeps the flush
-        logic simple and deterministic.
+        Phase 3 (streaming):
+            Subsequent flushes update existing elements:
+            1. ``partial_update_element`` for panel content
+            2. ``stream_element`` for answer text
+
+        Phase 4 (complete):
+            Handled by ``_preservative_seal``.
         """
         if session.state in _TERMINAL or session.state == COMPLETING or not session.card_id:
             return
@@ -270,9 +271,6 @@ class UnifiedControllerMixin:
         assert self._client is not None
 
         # ── TTL proactive extension ──
-        # If the card has been alive for > 540s, extend the TTL before
-        # the next flush to prevent the Feishu platform from closing
-        # the streaming session.
         if session.card_created_at and _time.time() - session.card_created_at > _TTL_EXTEND_THRESHOLD_SEC:
             try:
                 session.sequence += 1
@@ -291,7 +289,87 @@ class UnifiedControllerMixin:
 
         actions: list[dict[str, Any]] = []
 
-        # ── 1. Update unified panel if dirty ──
+        # ── Phase 2: First content — add panel + answer element, delete loading hint ──
+        if not session._panel_element_created and (state.panel_visible or state.answer_dirty or state.answer_text):
+            all_tool_steps = session.tool_use.build_display_steps()
+            panel = build_unified_panel(
+                reasoning_rounds=state.reasoning_rounds,
+                current_reasoning_text=state.current_reasoning_text,
+                tool_steps=all_tool_steps,
+                tool_elapsed_ms=session.tool_use.elapsed_ms,
+                show_reasoning=self._cfg.show_reasoning,
+                expanded=self._cfg.streaming_panel_expanded,
+                panel_events=state.panel_events,
+            )
+            # Add panel + answer element before loading hint
+            actions.append({
+                "action": "add_elements",
+                "params": {
+                    "type": "insert_before",
+                    "target_element_id": _LOADING_HINT_ELEMENT_ID,
+                    "elements": [panel, _streaming_element(element_id=ANSWER_ELEMENT_ID)],
+                },
+            })
+            # Delete loading hint
+            if _LOADING_HINT_ELEMENT_ID in session.existing_elements:
+                actions.append({
+                    "action": "delete_elements",
+                    "params": {"element_ids": [_LOADING_HINT_ELEMENT_ID]},
+                })
+            state.panel_dirty = False
+            state.tool_steps_dirty = False
+
+            # ── Execute Phase 2 batch_update ──
+            if actions:
+                session.sequence += 1
+                _logger.info(
+                    "unified flush (phase 2 — add panel): msg=%s seq=%d actions=%d",
+                    (session.message_id or "?")[:12],
+                    session.sequence,
+                    len(actions),
+                )
+                try:
+                    await self._client.cardkit_batch_update(
+                        session.card_id, actions, sequence=session.sequence,
+                    )
+                    # Update tracking after success
+                    session._panel_element_created = True
+                    session._loading_hint_removed = True
+                    session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
+                    session.existing_elements.add(ANSWER_ELEMENT_ID)
+                    session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
+                except FeishuAPIError as e:
+                    if e.code == CARDKIT_STREAMING_CLOSED:
+                        _logger.info(
+                            "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
+                            session.card_id[:12],
+                        )
+                        return
+                    _logger.warning("unified flush phase 2 batch_update failed: %s", e)
+                    return
+
+            # ── Stream answer text if also dirty ──
+            if state.answer_dirty:
+                content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+                session.sequence += 1
+                _logger.info(
+                    "unified stream: msg=%s seq=%d type=answer len=%d",
+                    (session.message_id or "?")[:12],
+                    session.sequence,
+                    len(content),
+                )
+                try:
+                    await self._client.cardkit_stream_element(
+                        session.card_id, ANSWER_ELEMENT_ID, content, sequence=session.sequence,
+                    )
+                    state.answer_dirty = False
+                except FeishuAPIError as e:
+                    if e.code == CARDKIT_STREAMING_CLOSED:
+                        return
+                    _logger.debug("unified stream_element failed: %s", e)
+            return  # Phase 2 done
+
+        # ── Phase 3: Update existing panel + stream answer ──
         if state.panel_dirty:
             all_tool_steps = session.tool_use.build_display_steps()
             panel = build_unified_panel(
@@ -316,20 +394,16 @@ class UnifiedControllerMixin:
             state.panel_dirty = False
             state.tool_steps_dirty = False
 
-        # ── 2. Delete loading hint on first content ──
-        # When the first reasoning/tool/answer content arrives, remove
-        # the "context loading" hint in the same batch_update call.
-        # NOTE: _loading_hint_removed and existing_elements.discard are set
-        # AFTER the batch_update succeeds, so we can retry on failure.
+        # ── Delete loading hint if still present (safety net) ──
         _hint_delete_in_batch = False
-        if not session._loading_hint_removed and (state.panel_visible or state.answer_text):
+        if not session._loading_hint_removed and _LOADING_HINT_ELEMENT_ID in session.existing_elements:
             actions.append({
                 "action": "delete_elements",
                 "params": {"element_ids": [_LOADING_HINT_ELEMENT_ID]},
             })
             _hint_delete_in_batch = True
 
-        # ── 3. Execute batch_update for panel + hint deletion ──
+        # ── Execute Phase 3 batch_update ──
         if actions:
             session.sequence += 1
             _logger.info(
@@ -343,7 +417,6 @@ class UnifiedControllerMixin:
                 await self._client.cardkit_batch_update(
                     session.card_id, actions, sequence=session.sequence,
                 )
-                # ── Mark hint as removed only after successful API call ──
                 if _hint_delete_in_batch:
                     session._loading_hint_removed = True
                     session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
@@ -353,11 +426,11 @@ class UnifiedControllerMixin:
                         "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
                         session.card_id[:12],
                     )
-                    return  # Streaming closed, will be handled by TTL or seal
+                    return
                 _logger.warning("unified flush batch_update failed: %s", e)
                 return
 
-        # ── 4. Stream answer text ──
+        # ── Stream answer text ──
         if state.answer_dirty:
             content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
             session.sequence += 1

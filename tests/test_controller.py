@@ -26,6 +26,7 @@ from hermes_lark_streaming.feishu import (
     FeishuAPIError,
     FeishuClient,
 )
+from hermes_lark_streaming.cardkit import _LOADING_HINT_ELEMENT_ID, _LOADING_ELEMENT_ID
 from hermes_lark_streaming.state.linear import UnifiedLinearState
 
 
@@ -404,16 +405,20 @@ class TestDoCreateLinearCard:
 
     @pytest.mark.asyncio
     async def test_first_card_creates_preallocated_elements(self) -> None:
-        """首卡创建后所有 slots 已预分配（unified panel + answer + loading hint + loading icon）."""
+        """首卡创建后仅预分配 loading hint + loading icon (2 elements).
+
+        Panel and answer element are added dynamically when the first
+        LLM token arrives (Phase 2 of card lifecycle).
+        """
         ctrl = _setup_ctrl(linear=True)
         session = _make_session("msg_hint")
         ctrl._sessions["msg_hint"] = session
 
         await ctrl._do_create_linear_card(session)
 
-        # existing_elements should contain the 4 pre-allocated elements
-        assert len(session.existing_elements) == 4
-        assert session._panel_element_created is True
+        # existing_elements should contain only 2 pre-allocated elements
+        assert len(session.existing_elements) == 2
+        assert session._panel_element_created is False
 
     @pytest.mark.asyncio
     async def test_card_created_at_set(self) -> None:
@@ -433,7 +438,7 @@ class TestDoCreateLinearCard:
 class TestDoUnifiedFlush:
     @pytest.mark.asyncio
     async def test_reasoning_and_answer_flush(self) -> None:
-        """reasoning + answer flush — panel partial_update + stream_element."""
+        """reasoning + answer flush — Phase 2: add panel + delete hint + stream answer."""
         ctrl = _setup_ctrl()
         session = _make_session("msg_flush", linear=True)
         session.state = STREAMING
@@ -448,10 +453,12 @@ class TestDoUnifiedFlush:
         assert session.unified_state.panel_dirty is False
         # answer dirty should be cleared
         assert session.unified_state.answer_dirty is False
-        # batch_update should have been called
+        # batch_update should have been called (Phase 2: add panel + delete hint)
         ctrl._client.cardkit_batch_update.assert_called()
         # stream_element should have been called for answer
         ctrl._client.cardkit_stream_element.assert_called()
+        # Panel should now be created
+        assert session._panel_element_created is True
 
     @pytest.mark.asyncio
     async def test_no_api_calls_when_no_card_id(self) -> None:
@@ -483,12 +490,13 @@ class TestDoUnifiedFlush:
 
     @pytest.mark.asyncio
     async def test_no_api_calls_when_no_dirty(self) -> None:
-        """无 dirty 时跳过 API 调用 (but loading hint deletion may still fire)."""
+        """无 dirty 时跳过 API 调用 (panel already created, no pending content)."""
         ctrl = _setup_ctrl()
         session = _make_session("m2", linear=True)
         session.state = STREAMING
         session.card_id = "c"
-        session._loading_hint_removed = True  # Prevent hint deletion from firing
+        session._loading_hint_removed = True
+        session._panel_element_created = True  # Panel already exists (Phase 2 done)
         session.unified_state.on_reasoning_delta("t")
         session.unified_state.panel_dirty = False
         session.unified_state.answer_dirty = False
@@ -498,7 +506,8 @@ class TestDoUnifiedFlush:
         await ctrl._do_unified_flush(session)
 
         ctrl._client.cardkit_stream_element.assert_not_called()
-        # batch_update may still fire for loading hint deletion, but no panel/answer updates
+        # batch_update should not be called (no dirty data, panel already created)
+        ctrl._client.cardkit_batch_update.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_tool_event_flush(self) -> None:
@@ -521,12 +530,13 @@ class TestDoUnifiedFlush:
 
     @pytest.mark.asyncio
     async def test_loading_hint_removed_on_first_content(self) -> None:
-        """首字即显时同一批 batch_update 中删除 loading hint."""
+        """首字即显时 Phase 2 的 batch_update 中添加 panel + 删除 loading hint."""
         ctrl = _setup_ctrl()
         session = _make_session("msg_hint_del", linear=True)
         session.state = STREAMING
         session.card_id = "card_hint"
         session._loading_hint_removed = False
+        session.existing_elements = {_LOADING_HINT_ELEMENT_ID, _LOADING_ELEMENT_ID}
         session.unified_state.on_answer_delta("hello")
         ctrl._sessions["msg_hint_del"] = session
 
@@ -539,24 +549,28 @@ class TestDoUnifiedFlush:
 
         await ctrl._do_unified_flush(session)
 
-        # Should include delete loading hint action
+        # Should include add_elements (panel + answer) and delete loading hint
         assert len(batch_actions) >= 1
         all_actions = batch_actions[0]
+        add_actions = [a for a in all_actions if a["action"] == "add_elements"]
         delete_hint_actions = [
             a for a in all_actions
             if a["action"] == "delete_elements"
         ]
-        assert len(delete_hint_actions) == 1
+        assert len(add_actions) == 1  # Phase 2: add panel + answer element
+        assert len(delete_hint_actions) == 1  # Delete loading hint
         assert session._loading_hint_removed is True
+        assert session._panel_element_created is True
 
     @pytest.mark.asyncio
     async def test_loading_hint_removed_on_reasoning(self) -> None:
-        """reasoning 到达时删除 loading hint."""
+        """reasoning 到达时 Phase 2: add panel + delete loading hint."""
         ctrl = _setup_ctrl()
         session = _make_session("msg_hint_reasoning", linear=True)
         session.state = STREAMING
         session.card_id = "card_hint_r"
         session._loading_hint_removed = False
+        session.existing_elements = {_LOADING_HINT_ELEMENT_ID, _LOADING_ELEMENT_ID}
         session.unified_state.on_reasoning_delta("thinking")
         ctrl._sessions["msg_hint_reasoning"] = session
 
@@ -571,12 +585,15 @@ class TestDoUnifiedFlush:
 
         assert len(batch_actions) >= 1
         all_actions = batch_actions[0]
+        add_actions = [a for a in all_actions if a["action"] == "add_elements"]
         delete_hint_actions = [
             a for a in all_actions
             if a["action"] == "delete_elements"
         ]
+        assert len(add_actions) == 1  # Phase 2: add panel + answer element
         assert len(delete_hint_actions) == 1
         assert session._loading_hint_removed is True
+        assert session._panel_element_created is True
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("code", [230020, 300309])
@@ -610,45 +627,10 @@ class TestDoUnifiedFlush:
 # ── Split/rollover tests — REMOVED in unified panel architecture ──
 
 
-class TestDoLinearSplit:
-    """Split tests are removed in the unified panel architecture.
-
-    The unified panel architecture eliminates the need for:
-    - Element counting / thresholds
-    - Card splitting / rollover
-    - Progressive degradation (compact/minimal seal)
-
-    All card content lives in a single panel (1 element) + 1 answer
-    element, so there is never a need to split across multiple cards.
-    """
-
-    @pytest.mark.skip(reason="Removed in unified panel architecture v1.0.2")
-    def test_split_flushes_pending_actions_then_moves_to_next_card(self) -> None:
-        pass
-
-    @pytest.mark.skip(reason="Removed in unified panel architecture v1.0.2")
-    def test_tool_growth_rolls_over_at_step_boundary(self) -> None:
-        pass
-
-    @pytest.mark.skip(reason="Removed in unified panel architecture v1.0.2")
-    def test_oversized_new_tool_segment_splits_across_multiple_cards(self) -> None:
-        pass
-
-    @pytest.mark.skip(reason="Removed in unified panel architecture v1.0.2")
-    def test_tool_rollover_create_failure_falls_back_on_current_card(self) -> None:
-        pass
-
-    @pytest.mark.skip(reason="Removed in unified panel architecture v1.0.2")
-    def test_split_create_failure_falls_back_to_current_card(self) -> None:
-        pass
-
-    @pytest.mark.skip(reason="Removed in unified panel architecture v1.0.2")
-    def test_no_split_keeps_original_single_card_flow(self) -> None:
-        pass
-
-    @pytest.mark.skip(reason="Removed in unified panel architecture v1.0.2")
-    def test_split_new_card_no_loading_hint(self) -> None:
-        pass
+# NOTE: TestDoLinearSplit has been removed entirely.
+# The unified panel architecture (v1.0.2) eliminates card splitting —
+# all content lives in a single panel + 1 answer element, so there
+# is never a need to split across multiple cards.
 
 
 # ── Reasoning finalization tests ──
@@ -685,6 +667,7 @@ class TestReasoningFinalization:
         session = _make_session("msg_title", linear=True)
         session.state = STREAMING
         session.card_id = "card_title"
+        session.existing_elements = {_LOADING_HINT_ELEMENT_ID, _LOADING_ELEMENT_ID}
         session.unified_state.on_reasoning_delta("think")
         time.sleep(0.01)
         session.unified_state.on_answer_delta("reply")
@@ -692,10 +675,10 @@ class TestReasoningFinalization:
 
         await ctrl._do_unified_flush(session)
 
-        # The panel should have been updated
+        # The panel should have been updated (Phase 2: add_elements)
         assert len(batch_calls) >= 1
-        partials = [a for a in batch_calls[0] if a["action"] == "partial_update_element"]
-        assert len(partials) == 1
+        add_actions = [a for a in batch_calls[0] if a["action"] == "add_elements"]
+        assert len(add_actions) == 1
 
 
 # ── _do_linear_complete 集成测试 ──
