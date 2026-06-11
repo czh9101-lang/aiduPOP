@@ -495,14 +495,14 @@ class TestGetHermesConfigPath:
 
 
     def test_flush_interval_ms_default(self) -> None:
-        """flush_interval_ms 默认 200ms."""
+        """flush_interval_ms 默认 100ms."""
         cfg = Config()
-        assert cfg.flush_interval_ms == 200.0
+        assert cfg.flush_interval_ms == 100.0
 
     def test_flush_interval_sec_default(self) -> None:
-        """flush_interval_sec 默认 0.2 秒."""
+        """flush_interval_sec 默认 0.1 秒."""
         cfg = Config()
-        assert cfg.flush_interval_sec == 0.2
+        assert cfg.flush_interval_sec == 0.1
 
     def test_flush_interval_ms_custom(self, tmp_path: object) -> None:
         """flush_interval_ms 可配置."""
@@ -520,17 +520,17 @@ class TestGetHermesConfigPath:
             assert cfg.flush_interval_sec == 0.3
 
     def test_flush_interval_ms_clamped(self, tmp_path: object) -> None:
-        """flush_interval_ms 限制在 100~2000ms."""
+        """flush_interval_ms 限制在 70~2000ms（70ms = 飞书官方 print_frequency_ms 默认值）."""
         import yaml
         from pathlib import Path
         from unittest.mock import patch
         config_path = Path(str(tmp_path)) / "config.yaml"
         config_path.write_text(yaml.dump({
-            "hermes_lark_streaming": {"enabled": True, "flush_interval_ms": 50},
+            "hermes_lark_streaming": {"enabled": True, "flush_interval_ms": 30},
         }))
         with patch("hermes_lark_streaming.config.reader._get_hermes_config_path", return_value=config_path):
             cfg = Config()
-            assert cfg.flush_interval_ms == 100.0  # clamped to min
+            assert cfg.flush_interval_ms == 70.0  # clamped to min (≈ official print_frequency_ms)
 
         config_path.write_text(yaml.dump({
             "hermes_lark_streaming": {"enabled": True, "flush_interval_ms": 5000},

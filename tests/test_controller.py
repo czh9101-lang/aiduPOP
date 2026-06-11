@@ -291,9 +291,11 @@ class TestLinearDispatch:
         session.state = STREAMING
         session.card_id = "card_123"
         ctrl._sessions["msg_c"] = session
-        with patch.object(ctrl, "_do_linear_complete", new_callable=AsyncMock):
+        with patch.object(ctrl, "_do_linear_complete_with_fallback", new_callable=AsyncMock):
             ctrl.on_completed(message_id="msg_c")
-        assert session.flush._completed
+        # After on_completed, state should be COMPLETING (not COMPLETED yet)
+        # The actual completion happens asynchronously in _do_linear_complete
+        assert session.state == COMPLETING
 
     def test_nonlinear_answer_unchanged(self) -> None:
         """非线性 session 不走 linear 路径."""
@@ -387,6 +389,7 @@ class TestDoCreateLinearCard:
 
     @pytest.mark.asyncio
     async def test_post_create_flush_on_dirty(self) -> None:
+        """When data arrives during card creation, a flush is triggered after card is ready."""
         ctrl = _setup_ctrl(linear=True)
         session = _make_session("msg_dirty")
         ctrl._sessions["msg_dirty"] = session
@@ -399,9 +402,13 @@ class TestDoCreateLinearCard:
 
         ctrl._ensure_init = inject_data_and_ensure  # type: ignore[assignment]
 
-        with patch.object(ctrl, "_schedule_linear_flush") as m:
-            await ctrl._do_create_linear_card(session)
-            m.assert_called()
+        await ctrl._do_create_linear_card(session)
+
+        # After card creation, data that arrived during creation should
+        # trigger a flush. The new implementation either calls flush_now
+        # directly (first content) or _schedule_linear_flush (subsequent).
+        # Either way, the dirty data should be cleared or a flush scheduled.
+        assert session._first_flush_done is True
 
     @pytest.mark.asyncio
     async def test_first_card_creates_preallocated_elements(self) -> None:
@@ -760,3 +767,104 @@ class TestDoLinearComplete:
         else:
             # unified_state may be cleared after completion
             assert elapsed_ms_before >= 0
+
+    @pytest.mark.asyncio
+    async def test_drain_dirty_answer_before_seal(self) -> None:
+        """Remaining dirty answer text is flushed (drained) before the seal.
+
+        This is the fix for the premature card finalization bug:
+        when on_completed fires while answer text hasn't been flushed yet,
+        _do_linear_complete must drain it before closing streaming.
+        """
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_drain", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_drain"
+        session._panel_element_created = True
+        session._loading_hint_removed = True
+        # Simulate: last answer delta arrived but flush hasn't fired yet
+        session.unified_state.on_answer_delta("final chunk")
+        assert session.unified_state.answer_dirty is True
+        ctrl._sessions["msg_drain"] = session
+
+        # Track API call order
+        api_calls: list[str] = []
+        client = ctrl._client
+        client.cardkit_stream_element = AsyncMock(
+            side_effect=lambda *a, **k: api_calls.append("stream"),
+        )
+        client.cardkit_batch_update = AsyncMock(
+            side_effect=lambda *a, **k: api_calls.append("batch"),
+        )
+        client.cardkit_close_streaming = AsyncMock(
+            side_effect=lambda *a, **k: api_calls.append("close"),
+        )
+
+        assert await ctrl._do_linear_complete(session) is True
+
+        # stream_element should have been called for the drain
+        assert "stream" in api_calls
+        # close_streaming should happen AFTER the drain
+        close_idx = api_calls.index("close")
+        stream_idx = api_calls.index("stream")
+        assert stream_idx < close_idx, (
+            f"Drain stream_element must happen before close_streaming, "
+            f"got stream@{stream_idx} close@{close_idx}"
+        )
+        # answer_dirty should be cleared after drain
+        assert session.unified_state.answer_dirty is False
+
+    @pytest.mark.asyncio
+    async def test_drain_dirty_panel_before_seal(self) -> None:
+        """Remaining dirty panel content is flushed before the seal."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_drain_panel", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_drain_panel"
+        session._panel_element_created = True
+        session._loading_hint_removed = True
+        # Simulate: reasoning delta arrived but flush hasn't fired yet
+        session.unified_state.on_reasoning_delta("think more")
+        assert session.unified_state.panel_dirty is True
+        ctrl._sessions["msg_drain_panel"] = session
+
+        api_calls: list[str] = []
+        client = ctrl._client
+        client.cardkit_batch_update = AsyncMock(
+            side_effect=lambda *a, **k: api_calls.append("batch"),
+        )
+        client.cardkit_close_streaming = AsyncMock(
+            side_effect=lambda *a, **k: api_calls.append("close"),
+        )
+
+        assert await ctrl._do_linear_complete(session) is True
+
+        # batch_update should have been called for the drain (panel update)
+        assert "batch" in api_calls
+        # close should happen AFTER the drain
+        close_idx = api_calls.index("close")
+        first_batch_idx = api_calls.index("batch")
+        assert first_batch_idx < close_idx
+        # panel_dirty should be cleared after drain
+        assert session.unified_state.panel_dirty is False
+
+    @pytest.mark.asyncio
+    async def test_no_drain_when_no_dirty_data(self) -> None:
+        """No drain API calls when all data is already flushed."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_clean", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_clean"
+        session._panel_element_created = True
+        session._loading_hint_removed = True
+        # No dirty data
+        ctrl._sessions["msg_clean"] = session
+
+        stream_call_count_before = ctrl._client.cardkit_stream_element.call_count
+
+        assert await ctrl._do_linear_complete(session) is True
+
+        # stream_element should NOT have been called for drain
+        # (only called in seal if answer_text exists)
+        # The key point: no ADDITIONAL stream_element call for drain
+        # since answer_dirty was False

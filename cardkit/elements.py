@@ -20,9 +20,6 @@ __all__ = [
     'STREAMING_ELEMENT_ID',
     'ANSWER_ELEMENT_ID',
     'UNIFIED_PANEL_ELEMENT_ID',
-    'REASONING_ELEMENT_ID',
-    'REASONING_TEXT_ELEMENT_ID',
-    'TOOL_PANEL_ELEMENT_ID',
     '_LOADING_ELEMENT_ID',
     '_LOADING_HINT_ELEMENT_ID',
     '_LOADING_IMG_KEY',
@@ -33,7 +30,6 @@ __all__ = [
     '_streaming_element',
     '_loading_element',
     '_loading_hint_element',
-    '_build_tool_panel',
     '_build_tool_step_elements',
     '_build_tool_step_title',
     '_build_tool_step_detail',
@@ -42,7 +38,6 @@ __all__ = [
     '_format_code_block',
     '_longest_backtick_run',
     '_escape_md',
-    '_build_reasoning_panel',
     '_build_error_panel',
     '_build_header',
     '_build_background_review_panel',
@@ -172,13 +167,22 @@ def _streaming_element(content: str = "", *, element_id: str = STREAMING_ELEMENT
 
 
 def _loading_element() -> dict:
+    """Loading spinner element — uses div with icon for schema safety.
+
+    CardKit v2.0 ``div`` elements natively support the ``icon`` property,
+    while ``markdown`` elements' icon support varies across API versions.
+    Using ``div`` guarantees the spinner renders without 300315 errors.
+    """
     return {
-        "tag": "markdown",
-        "content": " ",
+        "tag": "div",
         "icon": {
             "tag": "custom_icon",
             "img_key": _LOADING_IMG_KEY,
             "size": "16px 16px",
+        },
+        "text": {
+            "tag": "plain_text",
+            "content": " ",
         },
         "element_id": _LOADING_ELEMENT_ID,
     }
@@ -209,9 +213,8 @@ def _loading_hint_element() -> dict:
 def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
     """Build empty unified panel placeholder for initial streaming card.
 
-    This creates a collapsible panel with the ``robot_filled`` icon and
-    the *Agent Process* title but no content — ready for streaming updates
-    via ``partial_update_element``.
+    This creates a collapsible panel with no content — ready for
+    streaming updates via ``partial_update_element``.
     """
     en_title, zh_title = _T["agent_process"]
     panel = _collapsible_panel(
@@ -222,12 +225,6 @@ def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
             "i18n_content": _i18n(en_title, zh_title),
             "text_color": "grey",
             "text_size": "notation",
-            "icon": {
-                "tag": "standard_icon",
-                "token": "robot_filled",
-                "size": "16px 16px",
-                "color": "grey",
-            },
         },
         elements=[{"tag": "markdown", "content": " "}],
     )
@@ -345,13 +342,10 @@ def build_unified_panel(
                         "content": round_.text,
                         "text_size": "notation",
                     })
-                children.append({"tag": "hr"})
-
             elif kind == "tool" and idx < len(tool_steps):
                 if idx not in rendered_tools:
                     step = tool_steps[idx]
                     children.extend(_build_tool_step_elements(step))
-                    children.append({"tag": "hr"})
                     rendered_tools.add(idx)
 
         # In-progress reasoning (not yet finalised into panel_events)
@@ -381,13 +375,11 @@ def build_unified_panel(
                     "content": current_reasoning_text,
                     "text_size": "notation",
                 })
-            children.append({"tag": "hr"})
 
         # Remaining tool steps not in panel_events (safety fallback)
         for i, step in enumerate(tool_steps):
             if i not in rendered_tools:
                 children.extend(_build_tool_step_elements(step))
-                children.append({"tag": "hr"})
 
     else:
         # ── Fallback: no timeline available, render sequentially ──
@@ -422,7 +414,6 @@ def build_unified_panel(
                         "content": round_.text,
                         "text_size": "notation",
                     })
-                children.append({"tag": "hr"})
 
             # In-progress reasoning
             if current_reasoning_text:
@@ -451,21 +442,16 @@ def build_unified_panel(
                         "content": current_reasoning_text,
                         "text_size": "notation",
                     })
-                children.append({"tag": "hr"})
 
         # Tool steps
         for step in tool_steps:
             children.extend(_build_tool_step_elements(step))
-            children.append({"tag": "hr"})
-
-    # Remove trailing hr
-    if children and children[-1].get("tag") == "hr":
-        children.pop()
 
     # Fallback: empty content
     if not children:
         children.append({"tag": "markdown", "content": " "})
 
+    # ── Build panel ──
     panel = _collapsible_panel(
         expanded=expanded,
         title_el={
@@ -474,12 +460,6 @@ def build_unified_panel(
             "i18n_content": _i18n(en_full, zh_full),
             "text_color": "grey",
             "text_size": "notation",
-            "icon": {
-                "tag": "standard_icon",
-                "token": "robot_filled",
-                "size": "16px 16px",
-                "color": "grey",
-            },
         },
         elements=children,
     )
@@ -516,8 +496,8 @@ def _build_tool_panel(
         expanded=expanded,
         title_el={
             "tag": "plain_text",
-            "content": f"🛠️ {' · '.join(en_parts)}",
-            "i18n_content": _i18n(f"🛠️ {' · '.join(en_parts)}", f"🛠️ {' · '.join(zh_parts)}"),
+            "content": ' · '.join(en_parts),
+            "i18n_content": _i18n(' · '.join(en_parts), ' · '.join(zh_parts)),
             "text_color": "grey",
             "text_size": "notation",
         },
@@ -645,8 +625,8 @@ def _build_reasoning_panel(
         expanded=expanded,
         title_el={
             "tag": "plain_text",
-            "content": f"💭 {en_label}",
-            "i18n_content": _i18n(f"💭 {en_label}", f"💭 {zh_label}"),
+            "content": en_label,
+            "i18n_content": _i18n(en_label, zh_label),
             "text_color": "grey",
             "text_size": "notation",
         },
@@ -723,8 +703,8 @@ def _build_background_review_panel(
         expanded=expanded,
         title_el={
             "tag": "plain_text",
-            "content": f"🔄 {en_title}",
-            "i18n_content": _i18n(f"🔄 {en_title}", f"🔄 {zh_title}"),
+            "content": en_title,
+            "i18n_content": _i18n(en_title, zh_title),
             "text_color": "grey",
             "text_size": "notation",
         },
