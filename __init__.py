@@ -79,14 +79,17 @@ Key invariant: The card contains at most 4 top-level elements:
 
 1. **Unified panel** (``UNIFIED_PANEL_ELEMENT_ID``): A single
    ``collapsible_panel`` that holds all reasoning rounds and tool steps.
-   Internal children are sub-elements that do NOT count toward the
-   Feishu 200-element card limit.
+   Internal children are rendered in **chronological order** (via
+   ``panel_events`` timeline), interleaving reasoning and tools as they
+   actually occurred, rather than grouping all reasoning before all tools.
+   Sub-elements do NOT count toward the Feishu 200-element card limit.
 
 2. **Answer streaming element** (``ANSWER_ELEMENT_ID``): Receives
    answer text via ``cardkit_stream_element``.
 
 3. **Loading hint** (``_LOADING_HINT_ELEMENT_ID``): Context loading
-   placeholder, removed when first content arrives.
+   placeholder, removed when first content arrives (deletion confirmed
+   only after API success).
 
 4. **Loading icon** (``_LOADING_ELEMENT_ID``): Spinner, removed on seal.
 

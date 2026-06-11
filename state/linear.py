@@ -117,6 +117,8 @@ class UnifiedLinearState:
         "bg_review_messages",
         "bg_review_panel_added",
         "bg_review_panel_id",
+        "_panel_events",
+        "_tool_count",
     )
 
     def __init__(self) -> None:
@@ -146,6 +148,13 @@ class UnifiedLinearState:
         self.bg_review_panel_id: str = "bg_review_panel"
         self.bg_review_panel_added: bool = False
 
+        # Chronological timeline: [("reasoning", idx), ("tool", idx), ...]
+        # Records the order in which reasoning rounds and tool calls
+        # occur, so the unified panel can render them in chronological
+        # order rather than grouping all reasoning before all tools.
+        self._panel_events: list[tuple[str, int]] = []
+        self._tool_count: int = 0
+
     # ------------------------------------------------------------------
     # Event handlers
     # ------------------------------------------------------------------
@@ -166,9 +175,21 @@ class UnifiedLinearState:
         self.answer_text += text
         self.answer_dirty = True
 
-    def on_tool_event(self) -> None:
-        """Tool call event. Finalizes any in-progress reasoning first."""
+    def on_tool_event(self, is_new_tool: bool = True) -> None:
+        """Tool call event. Finalizes any in-progress reasoning first.
+
+        Parameters
+        ----------
+        is_new_tool : bool
+            True when a new tool starts (``record_start``), False when an
+            existing tool is updated (``record_end``). Only new tools are
+            added to the chronological timeline; tool status updates
+            (success/error) just mark the panel dirty for re-rendering.
+        """
         self._finalize_current_reasoning()
+        if is_new_tool:
+            self._panel_events.append(("tool", self._tool_count))
+            self._tool_count += 1
         self.tool_steps_dirty = True
         self.panel_dirty = True
         self.panel_visible = True
@@ -197,6 +218,7 @@ class UnifiedLinearState:
         round_.elapsed_ms = elapsed
         round_.finalized = True
         self.reasoning_rounds.append(round_)
+        self._panel_events.append(("reasoning", len(self.reasoning_rounds) - 1))
         self._current_reasoning = ""
         self._reasoning_start = 0.0
 
@@ -233,6 +255,21 @@ class UnifiedLinearState:
         if self._reasoning_start:
             total += (time.time() - self._reasoning_start) * 1000
         return total
+
+    @property
+    def panel_events(self) -> list[tuple[str, int]]:
+        """Chronological timeline of panel events.
+
+        Returns a list of ``(kind, index)`` tuples recording the order
+        in which reasoning rounds and tool calls occurred::
+
+            [("reasoning", 0), ("tool", 0), ("reasoning", 1), ("tool", 1), ...]
+
+        The renderer uses this to interleave reasoning and tool elements
+        in chronological order rather than grouping all reasoning before
+        all tools.
+        """
+        return self._panel_events
 
     @property
     def has_dirty(self) -> bool:

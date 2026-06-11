@@ -50,7 +50,7 @@ _T: dict[str, tuple[str, str]] = {
     "cost_actual": ("${} (actual)", "${} (实报)"),
     "cost_included": ("Free", "免费"),
     # ── Unified panel i18n ──
-    "agent_process": ("Agent Process", "AI 过程"),
+    "agent_process": ("Agent Workflow", "智能体工作流"),
     "rounds": ("{} rounds", "{} 轮"),
     "tools_count": ("{} tools", "{} 个工具"),
     "round_n": ("Round {}", "第 {} 轮"),
