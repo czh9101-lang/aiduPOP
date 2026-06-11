@@ -667,8 +667,14 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         session.footer = {}
 
     def _complete_session(self, session: CardSession) -> None:
-        """根据 session 线性/非线性选择完成路径."""
-        session.flush.mark_completed()
+        """根据 session 线性/非线性选择完成路径.
+
+        Note: We intentionally do NOT call session.flush.mark_completed() here.
+        That call cancels any pending flush timer, which would drop the
+        last chunk of answer text that hasn't been flushed yet.  Instead,
+        the completion methods (_do_linear_complete / _do_complete) handle
+        mark_completed() themselves after draining remaining dirty data.
+        """
         if session.linear and session.unified_state:
             self._fire_and_forget(self._do_linear_complete_with_fallback(session), session._loop)
         else:
