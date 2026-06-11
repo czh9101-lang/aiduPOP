@@ -93,6 +93,22 @@ _logger = logging.getLogger("hermes_lark_streaming")
 _TTL_EXTEND_THRESHOLD_SEC = 540.0  # Extend TTL when card has lived > 540s
 _TTL_EXTEND_DELTA_SEC = 600        # Extend by 600s
 
+# Fast-stream throttle for answer-only updates.
+# When only answer text is dirty (no panel changes), use a shorter
+# throttle interval so Feishu's typewriter renders characters
+# smoothly one-by-one instead of in bursts.  When panel content is
+# also dirty, the normal flush interval is used since panel updates
+# are inherently batch operations.
+#
+# NOTE: This is the *server-side flush interval* (how often we send
+# stream_element API calls).  It is NOT the same as Feishu's client-
+# side print_frequency_ms (which controls the typewriter render speed
+# on the user's device).  The two work together: we flush content to
+# Feishu at this interval, and Feishu renders it character-by-character
+# at print_frequency_ms pace.  We keep this at 70ms to align with the
+# official print_frequency_ms default, avoiding over-buffering.
+_ANSWER_FAST_STREAM_MS = 0.070
+
 
 class UnifiedControllerMixin:
     """Unified panel linear mode — phased card lifecycle.
@@ -275,6 +291,17 @@ class UnifiedControllerMixin:
                 )
             return
 
+        # ── Dynamic throttle for typewriter effect ──
+        # When only answer text is dirty (no panel changes), use a shorter
+        # throttle interval so Feishu's typewriter renders characters smoothly
+        # instead of in bursts.  When panel is also dirty, use the normal
+        # flush interval since panel updates are inherently batch operations.
+        _answer_only = state.answer_dirty and not state.panel_dirty and not state.tool_steps_dirty
+        if _answer_only:
+            session.flush.set_throttle(_ANSWER_FAST_STREAM_MS)
+        else:
+            session.flush.set_throttle(self._cfg.flush_interval_sec)
+
         session.flush.schedule_update(lambda: self._do_unified_flush(session))
 
     # ===================================================================
@@ -409,10 +436,12 @@ class UnifiedControllerMixin:
                         return
 
             # ── Stream answer text if also dirty ──
+            # Note: skip markdown optimization during streaming for performance;
+            # it will be applied on seal via _preservative_seal.
             if state.answer_dirty:
-                content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+                content = state.answer_text or " "
                 session.sequence += 1
-                _logger.info(
+                _logger.debug(
                     "unified stream: msg=%s seq=%d type=answer len=%d",
                     (session.message_id or "?")[:12],
                     session.sequence,
@@ -513,10 +542,12 @@ class UnifiedControllerMixin:
                 return
 
         # ── Stream answer text ──
+        # Note: skip markdown optimization during streaming for performance;
+        # it will be applied on seal via _preservative_seal.
         if state.answer_dirty:
-            content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+            content = state.answer_text or " "
             session.sequence += 1
-            _logger.info(
+            _logger.debug(
                 "unified stream: msg=%s seq=%d type=answer len=%d",
                 (session.message_id or "?")[:12],
                 session.sequence,
@@ -656,6 +687,22 @@ class UnifiedControllerMixin:
                     },
                 })
 
+            # ── Step 2b: Update answer element with optimized markdown ──
+            # During streaming, answer text was sent raw (no markdown optimization)
+            # for performance. Now that streaming is closed, update the answer
+            # element with the fully optimized markdown content.
+            if state is not None and state.answer_text:
+                optimized_content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+                seal_actions.append({
+                    "action": "partial_update_element",
+                    "params": {
+                        "element_id": ANSWER_ELEMENT_ID,
+                        "partial_element": {
+                            "content": optimized_content,
+                        },
+                    },
+                })
+
             # ── Step 3: Add footer + delete loading elements ──
             seal_actions.extend(
                 build_preservative_seal_actions(
@@ -672,7 +719,7 @@ class UnifiedControllerMixin:
 
             if seal_actions:
                 session.sequence += 1
-                _logger.info(
+                _logger.debug(
                     "preservative seal: batch_update card=%s seq=%d actions=%d",
                     card_id[:12], session.sequence, len(seal_actions),
                 )
@@ -680,7 +727,7 @@ class UnifiedControllerMixin:
                     card_id, seal_actions, sequence=session.sequence,
                 )
 
-            _logger.info(
+            _logger.debug(
                 "preservative seal: success card=%s partial=%s",
                 card_id[:12], partial,
             )
@@ -717,6 +764,18 @@ class UnifiedControllerMixin:
                                     },
                                 },
                             })
+                            # Update answer element with optimized markdown
+                            if state.answer_text:
+                                optimized_content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+                                retry_actions.append({
+                                    "action": "partial_update_element",
+                                    "params": {
+                                        "element_id": ANSWER_ELEMENT_ID,
+                                        "partial_element": {
+                                            "content": optimized_content,
+                                        },
+                                    },
+                                })
                         retry_actions.extend(
                             build_preservative_seal_actions(
                                 partial=partial,
@@ -774,9 +833,17 @@ class UnifiedControllerMixin:
 
         Strategy:
         1. Wait for any pending flush to finish.
-        2. Finalize the unified state (close any in-progress reasoning).
-        3. Try preservative seal (close streaming + update panel + footer).
-        4. If preservative seal fails, fall back to full card rebuild
+        2. **Drain**: Flush any remaining dirty data (answer text, panel
+           content) that arrived before ``on_completed`` but hasn't been
+           sent to Feishu yet.  This is critical — the state machine
+           transitions to COMPLETING before the last flush fires, and
+           ``_complete_session`` no longer calls ``mark_completed()``
+           prematurely (which would cancel the pending timer).  We must
+           ensure ALL content reaches Feishu before closing streaming.
+        3. Mark flush as completed (no more updates accepted).
+        4. Finalize the unified state (close any in-progress reasoning).
+        5. Try preservative seal (close streaming + update panel + footer).
+        6. If preservative seal fails, fall back to full card rebuild
            (``build_unified_complete_card`` + ``cardkit_update``).
 
         Returns ``True`` on success, ``False`` on failure.
@@ -784,7 +851,90 @@ class UnifiedControllerMixin:
         if session.guard.should_skip("_do_linear_complete"):
             return False
 
+        # ── Step 1: Wait for any in-progress flush to finish ──
         await session.flush.wait_for_flush()
+
+        # ── Step 2: Drain remaining dirty data ──
+        # After on_completed sets state=COMPLETING, no new on_answer/
+        # on_thinking callbacks will fire.  But there may be dirty data
+        # from the last few on_answer calls whose flush hasn't fired yet
+        # (it was throttled/scheduled).  We must flush it NOW, before
+        # closing streaming, or the user sees incomplete content.
+        state = session.unified_state
+        if (
+            state is not None
+            and session.card_id
+            and session._panel_element_created
+            and (state.answer_dirty or state.panel_dirty or state.tool_steps_dirty)
+        ):
+            _logger.info(
+                "linear complete: draining remaining dirty data "
+                "answer_dirty=%s panel_dirty=%s tool_steps_dirty=%s msg=%s",
+                state.answer_dirty, state.panel_dirty, state.tool_steps_dirty,
+                (session.message_id or "?")[:12],
+            )
+            assert self._client is not None
+
+            # ── Drain panel content ──
+            if state.panel_dirty and session._panel_element_created:
+                all_tool_steps = session.tool_use.build_display_steps()
+                panel = build_unified_panel(
+                    reasoning_rounds=state.reasoning_rounds,
+                    current_reasoning_text=state.current_reasoning_text,
+                    tool_steps=all_tool_steps,
+                    tool_elapsed_ms=session.tool_use.elapsed_ms,
+                    show_reasoning=self._cfg.show_reasoning,
+                    expanded=self._cfg.streaming_panel_expanded,
+                    panel_events=state.panel_events,
+                )
+                drain_actions: list[dict[str, Any]] = [{
+                    "action": "partial_update_element",
+                    "params": {
+                        "element_id": UNIFIED_PANEL_ELEMENT_ID,
+                        "partial_element": {
+                            "header": panel["header"],
+                            "elements": panel["elements"],
+                        },
+                    },
+                }]
+                try:
+                    session.sequence += 1
+                    await self._client.cardkit_batch_update(
+                        session.card_id, drain_actions, sequence=session.sequence,
+                    )
+                    state.panel_dirty = False
+                    state.tool_steps_dirty = False
+                except FeishuAPIError as e:
+                    if e.code == CARDKIT_STREAMING_CLOSED:
+                        _logger.info("drain: streaming already closed, skipping")
+                    elif is_schema_error(e):
+                        _logger.error("drain SCHEMA ERROR: %s", e)
+                        state.panel_dirty = False
+                        state.tool_steps_dirty = False
+                    else:
+                        _logger.warning("drain panel failed: %s", e)
+
+            # ── Drain answer text ──
+            if state.answer_dirty and session._panel_element_created:
+                content = state.answer_text or " "
+                try:
+                    session.sequence += 1
+                    _logger.info(
+                        "linear complete: draining answer text len=%d msg=%s",
+                        len(content), (session.message_id or "?")[:12],
+                    )
+                    await self._client.cardkit_stream_element(
+                        session.card_id, ANSWER_ELEMENT_ID, content,
+                        sequence=session.sequence,
+                    )
+                    state.answer_dirty = False
+                except FeishuAPIError as e:
+                    if e.code == CARDKIT_STREAMING_CLOSED:
+                        _logger.info("drain: streaming already closed, skipping")
+                    else:
+                        _logger.warning("drain answer failed: %s", e)
+
+        # ── Step 3: Mark flush as completed — no more updates accepted ──
         session.flush.mark_completed()
 
         # ── Wait for card creation to finish ──
@@ -799,8 +949,7 @@ class UnifiedControllerMixin:
             session.state = FAILED
             return False
 
-        # ── Finalize state ──
-        state = session.unified_state
+        # ── Step 4: Finalize state ──
         if state:
             state.finalize()
 
@@ -810,7 +959,7 @@ class UnifiedControllerMixin:
         is_aborted = getattr(session, "_was_aborted", False) or session.state == ABORTED
         error_message = getattr(session, "error_message", "")
 
-        # ── Try preservative seal ──
+        # ── Step 5: Try preservative seal ──
         seal_ok = await self._preservative_seal(
             session,
             footer_data=footer_data,

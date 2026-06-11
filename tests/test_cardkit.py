@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 from hermes_lark_streaming.cardkit import (
-    REASONING_ELEMENT_ID,
-    REASONING_TEXT_ELEMENT_ID,
-    TOOL_PANEL_ELEMENT_ID,
     _LOADING_HINT_ELEMENT_ID,
     _build_error_panel,
     _build_footer_elements,
-    _build_reasoning_panel,
-    _build_tool_panel,
     _compact,
     _escape_md,
     _extract_images_from_markdown,
@@ -21,10 +16,16 @@ from hermes_lark_streaming.cardkit import (
     build_complete_card,
     build_im_fallback_card,
     build_linear_complete_card,
-    build_linear_compact_seal_card,
     build_preservative_seal_actions,
     build_streaming_card,
     build_streaming_card_v2,
+)
+from hermes_lark_streaming.cardkit.elements import (
+    REASONING_ELEMENT_ID,
+    REASONING_TEXT_ELEMENT_ID,
+    TOOL_PANEL_ELEMENT_ID,
+    _build_reasoning_panel,
+    _build_tool_panel,
 )
 from hermes_lark_streaming.cardkit.md import (
     _downgrade_tables,
@@ -499,46 +500,6 @@ class TestBuildStreamingCardV2:
         from hermes_lark_streaming.cardkit import UNIFIED_PANEL_ELEMENT_ID
         card = build_streaming_card_v2(tool_steps=[_STEP_RUNNING], elapsed_ms=100)
         assert any(e.get("element_id") == UNIFIED_PANEL_ELEMENT_ID for e in card["body"]["elements"])
-
-    def test_no_unified_panel_shows_legacy_tool_use(self) -> None:
-        """With include_unified_panel=False and tool_steps, legacy tool panel is used."""
-        card = build_streaming_card_v2(include_unified_panel=False, show_tool_use=True, tool_steps=[_STEP_RUNNING])
-        assert any(e.get("element_id") == TOOL_PANEL_ELEMENT_ID for e in card["body"]["elements"])
-
-    def test_no_unified_panel_no_tool_use(self) -> None:
-        card = build_streaming_card_v2(include_unified_panel=False, show_tool_use=False)
-        assert not any(e.get("element_id") == TOOL_PANEL_ELEMENT_ID for e in card["body"]["elements"])
-
-    def test_show_reasoning_adds_panel_legacy(self) -> None:
-        card = build_streaming_card_v2(include_unified_panel=False, show_reasoning=True)
-        assert any(e.get("element_id") == REASONING_ELEMENT_ID for e in card["body"]["elements"])
-
-    def test_show_reasoning_default_no_panel_legacy(self) -> None:
-        card = build_streaming_card_v2(include_unified_panel=False)
-        assert not any(e.get("element_id") == REASONING_ELEMENT_ID for e in card["body"]["elements"])
-
-    def test_reasoning_before_tool_before_answer_legacy(self) -> None:
-        card = build_streaming_card_v2(
-            include_unified_panel=False,
-            show_reasoning=True,
-            tool_steps=[_STEP_RUNNING],
-            elapsed_ms=100,
-            show_tool_use=True,
-        )
-        ids = [e.get("element_id") for e in card["body"]["elements"]]
-        reasoning_idx = ids.index(REASONING_ELEMENT_ID)
-        tool_idx = ids.index(TOOL_PANEL_ELEMENT_ID)
-        assert reasoning_idx < tool_idx
-
-    def test_reasoning_panel_expanded_legacy(self) -> None:
-        card = build_streaming_card_v2(include_unified_panel=False, show_reasoning=True)
-        panel = next(e for e in card["body"]["elements"] if e.get("element_id") == REASONING_ELEMENT_ID)
-        assert panel["expanded"] is True
-
-    def test_reasoning_panel_collapsed_in_streaming_legacy(self) -> None:
-        card = build_streaming_card_v2(include_unified_panel=False, show_reasoning=True, streaming_panel_expanded=False)
-        panel = next(e for e in card["body"]["elements"] if e.get("element_id") == REASONING_ELEMENT_ID)
-        assert panel["expanded"] is False
 
     def test_unified_panel_expanded(self) -> None:
         """Unified panel placeholder respects streaming_panel_expanded."""
@@ -1149,22 +1110,7 @@ class TestPartialStatusIndicator:
         texts = [e.get("content", "") for e in elements if e.get("tag") == "markdown"]
         assert not any("Continues" in t for t in texts)
 
-    def test_partial_indicator_in_compact_seal_card(self) -> None:
-        """compact seal 卡片也支持 partial 提示."""
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            from hermes_lark_streaming.state.linear import _DeprecatedSegmentAlias as Segment
-            seg = Segment("answer", "answer_0")
-            seg.text = "部分回答"
-            card = build_linear_compact_seal_card(
-                segments=[seg],
-                all_tool_steps=[],
-                partial=True,
-            )
-        elements = card["body"]["elements"]
-        texts = [e.get("content", "") for e in elements if e.get("tag") == "markdown"]
-        assert any("Continues" in t for t in texts)
+
 
 
 class TestBackgroundReviewPanel:

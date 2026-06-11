@@ -47,7 +47,6 @@ __all__ = [
     'build_streaming_card',
     'build_complete_card',
     'build_linear_complete_card',
-    'build_linear_compact_seal_card',
     'build_unified_complete_card',
 ]
 
@@ -109,19 +108,6 @@ def build_streaming_card_v2(
     if include_unified_panel:
         elements.append(_build_unified_panel_placeholder(expanded=streaming_panel_expanded))
 
-    # ── Non-unified (legacy) panels — only for non-Phase-1 cards ──
-    if not include_unified_panel and include_answer_element:
-        if show_reasoning:
-            elements.append(
-                _build_reasoning_panel(" ", expanded=streaming_panel_expanded, element_id=REASONING_ELEMENT_ID)
-            )
-
-        if show_tool_use:
-            if tool_steps:
-                elements.append(_build_tool_panel(tool_steps, elapsed_ms, expanded=streaming_panel_expanded))
-            else:
-                elements.append(build_streaming_tool_use_pending_panel())
-
     # ── Streaming answer element ──
     if show_streaming_element and include_answer_element:
         elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
@@ -138,7 +124,7 @@ def build_streaming_card_v2(
         "config": {
             "streaming_mode": True,
             "streaming_config": {
-                "print_frequency_ms": {"default": 15},
+                "print_frequency_ms": {"default": 70},
                 "print_step": {"default": 1},
                 "print_strategy": print_strategy,
             },
@@ -689,84 +675,4 @@ def build_unified_complete_card(
     return card
 
 
-def build_linear_compact_seal_card(
-    *,
-    segments: list[Segment],
-    all_tool_steps: list[dict],
-    panel_expanded: bool = False,
-    partial: bool = False,
-) -> dict[str, Any]:
-    """Compact seal card — preserves all panel types but truncates content to reduce elements.
 
-    Used when the full seal_card exceeds the 200-element limit (300305).
-    Keeps reasoning/tool/answer panels but with truncated content to reduce elements.
-
-    Progressive degradation level 1: full seal → compact seal → minimal seal.
-    """
-    elements: list[dict] = []
-    has_answer = False
-
-    _MAX_REASONING_CHARS = 2000
-    _MAX_ANSWER_CHARS = 4000
-
-    for seg in segments:
-        if seg.type == "reasoning":
-            if seg.text:
-                truncated_text = seg.text[:_MAX_REASONING_CHARS]
-                if len(seg.text) > _MAX_REASONING_CHARS:
-                    truncated_text += "\n\n... (truncated)"
-                elements.append(_build_reasoning_panel(
-                    truncated_text, seg.elapsed_ms, expanded=panel_expanded,
-                    element_id=None, text_element_id=None,
-                ))
-        elif seg.type == "tool":
-            start = seg.tool_offset
-            end = seg.tool_end_offset if seg.tool_end_offset else len(all_tool_steps)
-            steps = all_tool_steps[start:end]
-            if steps:
-                # Compact: only keep step titles, remove detail and result_block
-                compact_steps = []
-                for s in steps:
-                    compact_steps.append({
-                        "name": s.get("name", "tool"),
-                        "title": s.get("title", s.get("name", "tool")),
-                        "status": s.get("status", "success"),
-                        "icon": s.get("icon", "tool_02"),
-                    })
-                elements.append(_build_tool_panel(compact_steps, expanded=panel_expanded, element_id=None))
-        elif seg.type == "answer" and seg.text:
-            has_answer = True
-            content = _downgrade_tables(optimize_markdown_style(seg.text))
-            content, img_elements = _extract_images_from_markdown(content)
-            # Don't add img elements in compact mode to save element count
-            truncated = content[:_MAX_ANSWER_CHARS]
-            if len(content) > _MAX_ANSWER_CHARS:
-                truncated += "\n\n... (truncated)"
-            for chunk in _split_long_text(truncated):
-                if chunk.strip():
-                    elements.append({"tag": "markdown", "content": chunk})
-
-    if not has_answer:
-        elements.append({"tag": "markdown", "content": _T["done"][0]})
-
-    # ── Partial indicator (split card: content continues) ──
-    if partial:
-        elements.append({"tag": "hr"})
-        en_text, zh_text = _T["partial_continues"]
-        elements.append({
-            "tag": "markdown",
-            "content": f"▸ {en_text} ↩",
-            "i18n_content": _i18n(f"▸ {en_text} ↩", f"▸ {zh_text} ↩"),
-        })
-
-    card: dict[str, Any] = {
-        "schema": "2.0",
-        "config": {
-            "wide_screen_mode": True,
-            "update_multi": True,
-            "streaming_mode": False,
-            "locales": _LOCALES,
-        },
-    }
-    card["body"] = {"elements": elements}
-    return card

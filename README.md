@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.2-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.3-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -21,30 +21,6 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 > Based on [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0, with extensive refactoring and optimizations
 >
 > ⚠️ **Incompatible with the upstream plugin** — if you have the original `Cheerwhy/hermes-lark-streaming` installed, please uninstall it first before installing this version.
-
----
-
-## ✨ What's New in v1.0.2 — Unified Panel Architecture
-
-**Complete redesign of the card element architecture** — replaces the old segment-based approach with a single unified collapsible panel that holds all reasoning rounds and tool steps.
-
-| Metric | Before (v1.0.1) | After (v1.0.2) |
-|--------|-----------------|-----------------|
-| Card elements per message | 50–100+ (N panels × 4 elements) | 3–4 total |
-| Preservative seal failure rate | 100% (300314 element not found) | 0% |
-| Card splitting frequency | Frequent (22 times in production) | Eliminated |
-| Cascade failure chain | seal → rebuild → 300305 → compact → minimal → split | N/A |
-| Streaming closure (300309) | Frequent on long conversations | Prevented (proactive TTL extension) |
-| First token latency | Baseline | ~200–300ms faster |
-| Default flush interval | 500ms | 200ms |
-
-**Key architectural change**: 1 unified panel for ALL reasoning + tool calls, 1 answer streaming element — regardless of conversation length. This eliminates the element count explosion that plagued the old segment-based design.
-
-**Card lifecycle (4 phases)**:
-1. User sends message → Create placeholder card with only "正在加载上下文..." + loading icon (2 elements, no panel, no answer)
-2. First LLM token → Delete loading hint, add unified panel + answer element via `add_elements` (1 `batch_update`)
-3. Stream reasoning/tool content in panel, stream answer text
-4. Complete → Add footer
 
 ---
 
@@ -111,10 +87,6 @@ hermes plugins uninstall hermes-lark-streaming
 hermes gateway restart
 ```
 
-> **Why direct `__main__.py` instead of `python3 -m`?** Hermes plugins are installed in directories named with hyphens (`hermes-lark-streaming`), but Python packages require underscores (`hermes_lark_streaming`). This naming mismatch means `python -m hermes_lark_streaming` fails with "No module named". Running `__main__.py` directly works around this — the script auto-registers the package.
->
-> If the plugin was installed via pip, `python -m hermes_lark_streaming` works normally.
-
 ### Verify Installation
 
 ```bash
@@ -133,8 +105,6 @@ $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
 
 All settings go under the `hermes_lark_streaming:` section in `~/.hermes/config.yaml`. The plugin auto-injects defaults on first load; run `cleanup` before uninstalling to remove them.
 
-> **Note**: Hermes's native `display.streaming: false` controls CLI/TUI output — unrelated to this plugin.
-
 ```yaml
 hermes_lark_streaming:
   enabled: true                    # Enable streaming cards
@@ -142,7 +112,7 @@ hermes_lark_streaming:
   panel_expanded: false            # Keep panels expanded in completed cards
   streaming_panel_expanded: false  # Keep panels expanded during streaming
   print_strategy: delay            # "fast" (instant) or "delay" (smoother typewriter, default)
-  flush_interval_ms: 200           # Card refresh interval in ms (100–2000, default 200)
+  flush_interval_ms: 100           # Card refresh interval in ms (50–2000, default 100)
   card_ttl_sec: 600               # Card alive detection timeout (seconds)
   inject_time: false               # Time awareness mode (see below)
 
@@ -199,8 +169,7 @@ display:
 
 > For the full version history, see [CHANGELOG.md](docs/CHANGELOG.md)
 
-> ⚠️ **Important Notice:** The current version (v1.0.2) introduces the Unified Panel architecture, which is a breaking change from v1.0.1 and below. Please upgrade with caution!
-> If you still wish to upgrade, please follow the uninstallation process to remove the old version and freshly install the new one. Do NOT upgrade via the update command!
+> ⚠️ **Important Notice:** If upgrading from v1.0.1 or below, please follow the uninstallation process to remove the old version and freshly install the new one. Do NOT upgrade via the update command!
 
 ---
 

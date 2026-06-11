@@ -73,7 +73,7 @@
 
 | 项目 | 值 |
 |------|-----|
-| 插件版本 | <!-- 如 1.0.2，可通过 `hermes plugins list` 查看 --> |
+| 插件版本 | <!-- 如 1.0.3，可通过 `hermes plugins list` 查看 --> |
 | Hermes 版本 | <!-- 如 0.6.x --> |
 | Python 版本 | <!-- 如 3.11.5 --> |
 | 操作系统 | <!-- 如 Ubuntu 22.04 / macOS 14 / Termux --> |
@@ -180,22 +180,26 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 | Cron 推送纯文本 | Cron 补丁是否生效 | `cron`、`_wrap_cron_deliver` |
 | 图片不显示 | hermes 原生图片处理配置 | hermes 配置、`media_delivery` |
 | 封卡后面板状态异常 | 封卡是否更新面板最终状态 | `_preservative_seal`、`unified_panel` |
+| 页脚早于内容出现 | drain 步骤是否执行 | `drain`、`answer_dirty`、`_do_linear_complete` |
+| 内容不完整就封卡 | `answer_dirty` 是否在 seal 前被 drain | `drain`、`stream_element` |
 | 中断后卡片异常 | card_sent 传播 | `_wrap_run_agent`、`ABORTED`、`card_sent` |
 | 配置不生效 | config.yaml 路径 | `config`、`HERMES_HOME`、`_get_hermes_config_path` |
 
-### 架构背景（v1.0.2+ 统一面板）
+### 架构背景（v1.0.3+ 统一面板 + 打字机效果）
 
-从 v1.0.2 开始，插件使用**统一面板架构**：
-- 所有推理轮次和工具步骤集中在 1 个可折叠面板（`robot_filled` 图标）
+从 v1.0.3 开始，插件使用**统一面板架构 + 打字机效果**：
+- 所有推理轮次和工具步骤集中在 1 个可折叠面板
 - 面板标题动态显示 `agent loop · N rounds · M tools · Xs`
+- 打字机效果：`print_frequency_ms=70`（飞书官方默认，每70ms渲染1字符），`print_step=1`（官方默认，每次1字符），默认刷新间隔100ms，仅回答文本变化时使用70ms快流节流（对齐官方默认值）
 - 推理和工具按时间线交错渲染（reasoning→tool→reasoning→tool），而非全部推理后再全部工具
 - 回答使用 1 个独立流式元素
 - 卡片元素总数恒为 3–4 个（不再有拆卡、渐进降级）
 - 旧的分段式设计（每轮推理独立面板、元素计数、拆卡逻辑）已完全移除
 - 保留式封卡只删除卡片上实际存在的元素，更新统一面板为最终状态
 - 加载提示"正在加载上下文..."在首内容到达时删除，删除操作在 API 成功后确认
+- **完成前排空 (drain)**：v1.0.3 修复了页脚早于内容出现的 bug——`_do_linear_complete()` 在关闭流式模式前先 drain 所有剩余脏数据，确保内容完整输出后才封卡
 
-如果用户报告与旧版行为相关的问题（如拆卡、compact seal、element_limit），请确认他们已升级到 v1.0.2+。
+如果用户报告与旧版行为相关的问题（如拆卡、compact seal、element_limit），请确认他们已升级到 v1.0.3+。
 
 ### 日志分析要点
 
