@@ -652,26 +652,85 @@ class UnifiedControllerMixin:
         assert card_id is not None
 
         try:
-            # ── Content completeness guard ──
-            # Before closing streaming, verify that no dirty data remains.
-            # In normal operation, the drain loop in _do_linear_complete
-            # should have flushed everything.  But in extreme edge cases
-            # (e.g. a very late on_answer callback arriving after
-            # mark_completed but before seal), dirty flags might still
-            # be set.  Log a warning and clear them to prevent the seal
-            # from using stale partial content.
+            # ── Content completeness guard — FLUSH, don't drop ──
+            # Before closing streaming, we MUST flush any remaining dirty
+            # data to the card.  The drain loop in _do_linear_complete
+            # handles the common case, but in edge cases (e.g. a very
+            # late on_answer callback arriving after mark_completed but
+            # before seal), dirty flags might still be set.  Unlike the
+            # previous implementation which merely logged and cleared the
+            # flags (silently dropping content), we now actually flush
+            # the remaining content BEFORE close_streaming, because once
+            # streaming is closed, stream_element can no longer be called
+            # and the content would be permanently lost — causing the
+            # "footer appears before content finishes" bug.
             state = session.unified_state
             if state is not None and (state.answer_dirty or state.panel_dirty or state.tool_steps_dirty):
                 _logger.warning(
                     "preservative seal: dirty data detected at seal time "
                     "answer_dirty=%s panel_dirty=%s tool_steps_dirty=%s card=%s — "
-                    "clearing (content may be incomplete on card)",
+                    "flushing before close",
                     state.answer_dirty, state.panel_dirty, state.tool_steps_dirty,
                     card_id[:12],
                 )
-                state.answer_dirty = False
-                state.panel_dirty = False
-                state.tool_steps_dirty = False
+                # ── Flush remaining panel content ──
+                if (state.panel_dirty or state.tool_steps_dirty) and session._panel_element_created:
+                    all_tool_steps = session.tool_use.build_display_steps()
+                    panel = build_unified_panel(
+                        reasoning_rounds=state.reasoning_rounds,
+                        current_reasoning_text=state.current_reasoning_text,
+                        tool_steps=all_tool_steps,
+                        tool_elapsed_ms=session.tool_use.elapsed_ms,
+                        show_reasoning=self._cfg.show_reasoning,
+                        expanded=self._cfg.streaming_panel_expanded,
+                        panel_events=state.panel_events,
+                    )
+                    try:
+                        session.sequence += 1
+                        await self._client.cardkit_batch_update(
+                            session.card_id,
+                            [{
+                                "action": "partial_update_element",
+                                "params": {
+                                    "element_id": UNIFIED_PANEL_ELEMENT_ID,
+                                    "partial_element": {
+                                        "header": panel["header"],
+                                        "elements": panel["elements"],
+                                    },
+                                },
+                            }],
+                            sequence=session.sequence,
+                        )
+                        state.panel_dirty = False
+                        state.tool_steps_dirty = False
+                    except FeishuAPIError as e:
+                        if e.code == CARDKIT_STREAMING_CLOSED:
+                            _logger.info("seal drain: streaming already closed, skipping panel flush")
+                        else:
+                            _logger.warning("seal drain panel failed: %s", e)
+                        state.panel_dirty = False
+                        state.tool_steps_dirty = False
+
+                # ── Flush remaining answer text ──
+                if state.answer_dirty and session._panel_element_created:
+                    content = state.answer_text or " "
+                    try:
+                        session.sequence += 1
+                        _logger.info(
+                            "seal drain: flushing answer text len=%d card=%s",
+                            len(content), card_id[:12],
+                        )
+                        await self._client.cardkit_stream_element(
+                            session.card_id, ANSWER_ELEMENT_ID, content,
+                            sequence=session.sequence,
+                        )
+                        state.answer_dirty = False
+                    except FeishuAPIError as e:
+                        if e.code == CARDKIT_STREAMING_CLOSED:
+                            _logger.info("seal drain: streaming already closed, skipping answer flush")
+                        else:
+                            _logger.warning("seal drain answer failed: %s", e)
+                        state.answer_dirty = False
 
             # ── Step 1: Close streaming mode ──
             session.sequence += 1
@@ -882,12 +941,17 @@ class UnifiedControllerMixin:
         # without being flushed.  We must drain it ALL here, before
         # closing streaming, or the user sees incomplete content.
         #
-        # The loop yields between iterations (via asyncio.sleep(0)) to
-        # allow any late-arriving on_answer callbacks from the agent
-        # worker thread to execute and update the state before we check
-        # again.  Maximum 5 drain rounds to prevent infinite loops.
+        # The loop yields between iterations to allow any late-arriving
+        # on_answer callbacks from the agent worker thread to execute
+        # and update the state before we check again.  We use a small
+        # sleep (20ms) instead of sleep(0) because sleep(0) only yields
+        # to the event loop but doesn't give worker threads enough time
+        # to deliver their last callbacks — this was the root cause of
+        # the "footer appears before content finishes" bug.
+        # Maximum 8 drain rounds to prevent infinite loops.
         state = session.unified_state
-        _MAX_DRAIN_ROUNDS = 5
+        _MAX_DRAIN_ROUNDS = 8
+        _DRAIN_YIELD_SEC = 0.020  # 20ms yield — enough for worker thread callbacks
         for _drain_round in range(_MAX_DRAIN_ROUNDS):
             if not (
                 state is not None
@@ -968,17 +1032,23 @@ class UnifiedControllerMixin:
             # ── Yield to allow late-arriving callbacks to execute ──
             # on_answer/on_thinking may be called from the agent worker
             # thread and update unified_state between our check and the
-            # next iteration.  Yielding gives the event loop a chance to
-            # process those updates before we re-check.
+            # next iteration.  A small sleep (20ms) gives the event loop
+            # time to process call_soon_threadsafe callbacks from worker
+            # threads — sleep(0) is insufficient because it only yields
+            # to the event loop's task queue without allowing worker
+            # threads to deliver their pending updates.
             if _drain_round < _MAX_DRAIN_ROUNDS - 1:
-                await asyncio.sleep(0)
+                await asyncio.sleep(_DRAIN_YIELD_SEC)
 
         # ── Final drain check: log warning if dirty data remains ──
+        # If dirty data persists after all drain rounds, the preservative
+        # seal's content completeness guard will flush it before close_streaming,
+        # so this is not a content loss — just a performance concern.
         if state is not None and (state.answer_dirty or state.panel_dirty or state.tool_steps_dirty):
             _logger.warning(
                 "linear complete: dirty data remains after %d drain rounds "
                 "answer_dirty=%s panel_dirty=%s tool_steps_dirty=%s msg=%s — "
-                "proceeding to seal (content may be incomplete)",
+                "will be flushed by preservative seal before close_streaming",
                 _MAX_DRAIN_ROUNDS,
                 state.answer_dirty, state.panel_dirty, state.tool_steps_dirty,
                 (session.message_id or "?")[:12],
