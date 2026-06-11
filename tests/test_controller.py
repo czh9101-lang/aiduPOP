@@ -868,3 +868,37 @@ class TestDoLinearComplete:
         # (only called in seal if answer_text exists)
         # The key point: no ADDITIONAL stream_element call for drain
         # since answer_dirty was False
+
+    @pytest.mark.asyncio
+    async def test_close_streaming_passes_summary(self) -> None:
+        """close_streaming is called with summary text from answer.
+
+        This is the fix for the "处理中..." stays in conversation list bug:
+        when close_streaming is called, the card's summary must be updated
+        from the initial "处理中..." to the actual answer text, so the
+        Feishu conversation list shows the answer preview instead of
+        "处理中...".
+        """
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_summary", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_summary"
+        session._panel_element_created = True
+        session._loading_hint_removed = True
+        session.unified_state.on_answer_delta("Hello, this is the answer text")
+        # Clear dirty flag (simulates already-flushed content)
+        session.unified_state.answer_dirty = False
+        ctrl._sessions["msg_summary"] = session
+
+        close_kwargs: list[dict] = []
+        ctrl._client.cardkit_close_streaming = AsyncMock(
+            side_effect=lambda *a, **k: close_kwargs.append(k),
+        )
+
+        assert await ctrl._do_linear_complete(session) is True
+
+        # close_streaming should have been called with summary kwarg
+        assert len(close_kwargs) >= 1
+        summary = close_kwargs[0].get("summary", "")
+        assert "Hello" in summary
+        assert "处理中" not in summary

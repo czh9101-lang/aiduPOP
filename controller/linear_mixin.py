@@ -732,13 +732,30 @@ class UnifiedControllerMixin:
                             _logger.warning("seal drain answer failed: %s", e)
                         state.answer_dirty = False
 
-            # ── Step 1: Close streaming mode ──
+            # ── Step 1: Close streaming mode + update summary ──
+            # When closing streaming, we MUST also update the card's summary
+            # text.  During streaming, the summary shows "处理中..."; after
+            # close_streaming, Feishu displays the summary in the conversation
+            # list.  Without updating it, the conversation list would forever
+            # show "处理中..." even though the card is completed — the exact
+            # bug the user reported.
+            seal_summary = ""
+            if state is not None:
+                summary_text = state.answer_text
+                if not summary_text and state.reasoning_rounds:
+                    summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
+                if summary_text:
+                    seal_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
+
             session.sequence += 1
             _logger.info(
-                "preservative seal: closing streaming card=%s seq=%d",
+                "preservative seal: closing streaming card=%s seq=%d summary=%s",
                 card_id[:12], session.sequence,
+                repr(seal_summary[:40]) if seal_summary else "(empty)",
             )
-            await self._client.cardkit_close_streaming(card_id, sequence=session.sequence)
+            await self._client.cardkit_close_streaming(
+                card_id, sequence=session.sequence, summary=seal_summary,
+            )
 
             # ── Step 2: Update unified panel to final state (non-streaming) ──
             seal_actions: list[dict[str, Any]] = []
@@ -827,7 +844,7 @@ class UnifiedControllerMixin:
                     try:
                         session.sequence += 1
                         await self._client.cardkit_close_streaming(
-                            card_id, sequence=session.sequence,
+                            card_id, sequence=session.sequence, summary=seal_summary,
                         )
 
                         # Rebuild seal actions
@@ -1098,9 +1115,19 @@ class UnifiedControllerMixin:
             )
             try:
                 # Close streaming first (may already be closed by the failed seal attempt)
+                # Also update summary for the conversation list
+                fallback_summary = ""
+                if state is not None:
+                    summary_text = state.answer_text
+                    if not summary_text and state.reasoning_rounds:
+                        summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
+                    if summary_text:
+                        fallback_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
                 session.sequence += 1
                 try:
-                    await self._client.cardkit_close_streaming(session.card_id, sequence=session.sequence)  # type: ignore[union-attr]
+                    await self._client.cardkit_close_streaming(
+                        session.card_id, sequence=session.sequence, summary=fallback_summary,  # type: ignore[union-attr]
+                    )
                 except FeishuAPIError as e:
                     if e.code != CARDKIT_STREAMING_CLOSED:
                         raise

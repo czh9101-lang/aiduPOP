@@ -378,10 +378,31 @@ class FeishuClient:
 
         await self._retry_transient("cardkit_batch_update", _do)
 
-    async def cardkit_close_streaming(self, card_id: str, sequence: int = 0) -> None:
-        """关闭 CardKit 卡片的流式模式."""
+    async def cardkit_close_streaming(
+        self,
+        card_id: str,
+        sequence: int = 0,
+        *,
+        summary: str = "",
+    ) -> None:
+        """关闭 CardKit 卡片的流式模式，并可选更新会话摘要.
+
+        关闭流式模式后，飞书会话列表会显示卡片的 summary 文本。
+        如果不更新 summary，会话列表会一直显示创建时设置的"处理中..."，
+        即使卡片内容已完成。
+
+        Parameters
+        ----------
+        summary : str
+            完成后的会话摘要文本（截断至 120 字符）。
+            为空时不更新 summary（保持原值）。
+        """
+        settings: dict[str, Any] = {"streaming_mode": False}
+        if summary:
+            settings["summary"] = {"content": summary[:120]}
+
         async def _do():
-            body_builder = SettingsCardRequestBody.builder().settings(self._dumps({"streaming_mode": False}))
+            body_builder = SettingsCardRequestBody.builder().settings(self._dumps(settings))
             body_builder = body_builder.sequence(sequence)
             request = SettingsCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
             resp = await self._client.cardkit.v1.card.asettings(request)
