@@ -40,6 +40,12 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 
 **Key architectural change**: 1 unified panel for ALL reasoning + tool calls, 1 answer streaming element — regardless of conversation length. This eliminates the element count explosion that plagued the old segment-based design.
 
+**Card lifecycle (4 phases)**:
+1. User sends message → Create placeholder card with only "正在加载上下文..." + loading icon (2 elements, no panel, no answer)
+2. First LLM token → Delete loading hint, add unified panel + answer element via `add_elements` (1 `batch_update`)
+3. Stream reasoning/tool content in panel, stream answer text
+4. Complete → Add footer
+
 ---
 
 ## Effect Preview

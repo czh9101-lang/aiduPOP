@@ -77,20 +77,31 @@ def build_streaming_card_v2(
     header_enabled: bool = False,
     include_unified_panel: bool = True,
     include_loading_hint: bool = True,
+    include_answer_element: bool = True,
 ) -> dict[str, Any]:
-    """CardKit 2.0 流式占位卡片 — 含工具面板 + streaming + loading 元素.
+    """CardKit 2.0 流式占位卡片 — placeholder card for streaming mode.
+
+    Card lifecycle (v1.0.2+):
+        Phase 1 — User sends message → Create placeholder card with only
+        "正在加载上下文..." + loading icon (no panel, no answer element).
+        Phase 2 — First LLM token arrives → Delete loading hint, add
+        unified panel + answer element via ``add_elements``.
+        Phase 3 — Stream reasoning/tool content in panel, stream answer text.
+        Phase 4 — Complete → Add footer.
 
     Parameters
     ----------
     include_unified_panel : bool
-        When ``True`` (default), adds the unified panel placeholder element
-        at the top of the card.  This is the single collapsible panel that
-        holds all reasoning rounds and tool steps in linear mode — the card
-        is created with all slots pre-allocated so no later
-        ``batch_update`` is needed to add elements.
+        When ``True``, adds the unified panel placeholder element.
+        In the new lifecycle (default for linear mode), this is ``False``
+        — the panel is added dynamically when the first content arrives.
     include_loading_hint : bool
         When ``True`` (default), adds the context-loading hint element.
-        This hint is removed once the first answer token arrives.
+        This hint is removed once the first LLM token arrives.
+    include_answer_element : bool
+        When ``True``, adds the answer streaming element to the initial card.
+        In the new lifecycle, this is ``False`` — the answer element is
+        added alongside the panel when the first content arrives.
     """
     elements: list[dict] = []
 
@@ -112,10 +123,10 @@ def build_streaming_card_v2(
                 elements.append(build_streaming_tool_use_pending_panel())
 
     # ── Streaming answer element ──
-    if show_streaming_element:
+    if show_streaming_element and include_answer_element:
         elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
 
-    # ── Loading hint (context loading placeholder, removed on first answer token) ──
+    # ── Loading hint (context loading placeholder, removed on first LLM token) ──
     if include_loading_hint:
         elements.append(_loading_hint_element())
 
