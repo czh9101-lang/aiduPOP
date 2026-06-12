@@ -609,25 +609,6 @@ class UnifiedControllerMixin:
 
         Splits the incoming text into reasoning and answer components,
         updates the unified state, and schedules a flush.
-
-        Dedup note (v1.0.3):
-          When stream_delta_callback is active, answer text arrives
-          incrementally via on_answer → state.on_answer_delta.  The
-          interim_assistant_callback may also deliver the same text in
-          accumulated form.  We skip the answer portion here if the
-          streaming path already delivered content, to prevent doubling.
-          The callbacks.py layer now also checks the already_streamed
-          kwarg from Hermes, providing a first line of defense.
-
-        Native reasoning dedup:
-          When the model provides a dedicated reasoning_callback (e.g.
-          DeepSeek, QwQ), reasoning text arrives incrementally via
-          on_reasoning → state.on_reasoning_delta, and
-          state._native_reasoning_active is set to True.  The
-          interim_assistant_callback also delivers the same reasoning in
-          accumulated form.  Without this guard, we'd double the
-          reasoning content in the panel (Bug: "TheThe user user is is
-          saying saying...").
         """
         state = session.unified_state
         if state is None:
@@ -635,19 +616,6 @@ class UnifiedControllerMixin:
         split = split_reasoning_text(text)
         reasoning = split.get("reasoning_text")
         answer = split.get("answer_text")
-
-        # ── Skip reasoning if native reasoning_callback is active ──
-        # The same reasoning has already been delivered incrementally
-        # via on_reasoning → state.on_reasoning_delta.  Adding it again
-        # here would cause doubled content in the collapsible panel.
-        if reasoning and state._native_reasoning_active:
-            _logger.debug(
-                "_linear_on_thinking: skip reasoning (native reasoning active, "
-                "len=%d) msg=%s",
-                len(reasoning),
-                (session.message_id or "?")[:12],
-            )
-            reasoning = None
 
         if reasoning and self._cfg.show_reasoning:
             state.on_reasoning_delta(reasoning)
@@ -660,12 +628,6 @@ class UnifiedControllerMixin:
             _has_streamed_answer = bool(state.answer_text)
             if not _has_streamed_answer:
                 state.on_answer_delta(answer)
-            else:
-                _logger.debug(
-                    "_linear_on_thinking: skip answer dedup (streamed=%d chars) msg=%s",
-                    len(state.answer_text),
-                    (session.message_id or "?")[:12],
-                )
         if (reasoning and self._cfg.show_reasoning) or answer:
             self._schedule_linear_flush(session)
 
@@ -807,6 +769,11 @@ class UnifiedControllerMixin:
             # server-side sequence has already advanced past our local
             # sequence number.  The _streaming_closed flag ensures we
             # never call close_streaming twice.
+            #
+            # Bug fix (v1.0.3): The Feishu settings API may not reliably
+            # process the summary field when streaming_mode: false is in the
+            # same request.  We now close streaming WITHOUT the summary,
+            # then update summary as a separate API call for reliability.
             seal_summary = ""
             if state is not None:
                 summary_text = state.answer_text
@@ -822,10 +789,39 @@ class UnifiedControllerMixin:
                     card_id[:12], session.sequence,
                     repr(seal_summary[:40]) if seal_summary else "(empty)",
                 )
+                # Note: Don't pass summary in close_streaming — Feishu API
+                # doesn't reliably update summary when combined with
+                # streaming_mode:false in the same settings call.
+                # We update it separately below for reliability.
                 await self._client.cardkit_close_streaming(
-                    card_id, sequence=session.sequence, summary=seal_summary,
+                    card_id, sequence=session.sequence, summary="",
                 )
                 session._streaming_closed = True
+
+                # ── Always update summary as a separate API call ──
+                # Bug fix (v1.0.3): The Feishu settings API may not
+                # process the summary field when streaming_mode is being
+                # set to false in the same request.  Calling it separately
+                # after close_streaming ensures the conversation list
+                # updates from "处理中..." to the actual answer text.
+                if seal_summary:
+                    try:
+                        session.sequence += 1
+                        await self._client.cardkit_update_summary(
+                            card_id, seal_summary, sequence=session.sequence,
+                        )
+                        _logger.info(
+                            "preservative seal: summary updated (after close_streaming) "
+                            "card=%s seq=%d summary=%s",
+                            card_id[:12], session.sequence,
+                            repr(seal_summary[:40]),
+                        )
+                    except FeishuAPIError as e:
+                        _logger.warning(
+                            "preservative seal: summary update failed (after close) "
+                            "card=%s error=%s",
+                            card_id[:12], e,
+                        )
             else:
                 _logger.info(
                     "preservative seal: streaming already closed, skipping close_streaming card=%s",
@@ -851,7 +847,7 @@ class UnifiedControllerMixin:
                         )
                     except FeishuAPIError as e:
                         _logger.warning(
-                            "preservative seal: summary update failed (streaming already closed) "
+                            "preservative seal: summary update failed (already closed) "
                             "card=%s error=%s",
                             card_id[:12], e,
                         )
@@ -1262,8 +1258,11 @@ class UnifiedControllerMixin:
                             fallback_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
                     session.sequence += 1
                     try:
+                        # Bug fix (v1.0.3): Don't pass summary in close_streaming —
+                        # Feishu API may not process it reliably in the same request.
+                        # We update it separately below.
                         await self._client.cardkit_close_streaming(
-                            session.card_id, sequence=session.sequence, summary=fallback_summary,  # type: ignore[union-attr]
+                            session.card_id, sequence=session.sequence, summary="",  # type: ignore[union-attr]
                         )
                         session._streaming_closed = True
                     except FeishuAPIError as e:
@@ -1272,14 +1271,30 @@ class UnifiedControllerMixin:
                             session._streaming_closed = True
                         else:
                             raise
+
+                    # ── Update summary separately (v1.0.3 bug fix) ──
+                    if fallback_summary:
+                        try:
+                            session.sequence += 1
+                            await self._client.cardkit_update_summary(
+                                session.card_id, fallback_summary, sequence=session.sequence,  # type: ignore[union-attr]
+                            )
+                            _logger.info(
+                                "fallback: summary updated card=%s seq=%d summary=%s",
+                                session.card_id[:12], session.sequence,
+                                repr(fallback_summary[:40]),
+                            )
+                        except FeishuAPIError as e:
+                            _logger.warning(
+                                "fallback: summary update failed card=%s error=%s",
+                                session.card_id[:12], e,
+                            )
                 else:
                     _logger.info(
                         "fallback: streaming already closed, skipping close_streaming card=%s",
                         (session.card_id or "")[:12],
                     )
                     # ── Update summary even when streaming is already closed ──
-                    # Same fix as in preservative seal: when streaming was
-                    # auto-closed by Feishu TTL, the summary was never updated.
                     fallback_summary = ""
                     if state is not None:
                         summary_text = state.answer_text
@@ -1291,13 +1306,17 @@ class UnifiedControllerMixin:
                         try:
                             session.sequence += 1
                             await self._client.cardkit_update_summary(
-                                session.card_id, fallback_summary,  # type: ignore[union-attr]
-                                sequence=session.sequence,
+                                session.card_id, fallback_summary, sequence=session.sequence,  # type: ignore[union-attr]
+                            )
+                            _logger.info(
+                                "fallback: summary updated (already closed) card=%s seq=%d summary=%s",
+                                session.card_id[:12], session.sequence,
+                                repr(fallback_summary[:40]),
                             )
                         except FeishuAPIError as e:
                             _logger.warning(
-                                "fallback: summary update failed card=%s error=%s",
-                                (session.card_id or "")[:12], e,
+                                "fallback: summary update failed (already closed) card=%s error=%s",
+                                session.card_id[:12], e,
                             )
 
                 complete_card = build_unified_complete_card(

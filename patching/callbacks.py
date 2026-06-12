@@ -57,16 +57,18 @@ def _maybe_wrap_callbacks(agent) -> None:
         bool(getattr(agent, "background_review_callback", None)),
     )
 
-    # ── Guard: skip if stream_delta_callback is already wrapped ──
-    # Hermes resets stream_delta_callback per message in _run_agent, so we
-    # check the function itself for our wrapper mark rather than a global
-    # agent flag. This ensures new messages get freshly wrapped callbacks
-    # while preventing double-wrapping within a single run_conversation.
+    # ── Guard: skip if ANY callback is already wrapped ──
+    # Bug fix (v1.0.3): The old guard only checked stream_delta_callback.
+    # When stream_delta_callback is None (e.g. DeepSeek models that use
+    # interim_assistant_callback but not stream_delta_callback), the guard
+    # never triggered, causing interim_assistant_callback to be wrapped
+    # TWICE — each invocation processed the same text twice, producing
+    # doubled content in the collapsible panel ("TheThe user user is is
+    # saying saying...").
     #
-    # EXCEPTION: When a recursive interrupt follow-up occurs, the
-    # event_message_id changes but the agent object is reused. We must
-    # re-wrap the callbacks with the new eid so that streaming text goes
-    # to the new message's card, not the old one.
+    # Now we check BOTH stream_delta_callback AND interim_assistant_callback
+    # for the _hls_wrapper mark. If either is already wrapped (and we are
+    # not forcing a re-wrap for interrupt follow-ups), we skip.
     _current_stream = getattr(agent, "stream_delta_callback", None)
     _current_interim = getattr(agent, "interim_assistant_callback", None)
     _current_tool = getattr(agent, "tool_progress_callback", None)
@@ -74,18 +76,28 @@ def _maybe_wrap_callbacks(agent) -> None:
     _current_bg = getattr(agent, "background_review_callback", None)
     _force_rewrap = bool(ctx and ctx.get("_force_rewrap")) if (ctx := _msg_ctx.get()) else False
     _logger.debug(
-        "HLS_WRAP: guard check stream=%s(hls=%s) interim=%s tool=%s reasoning=%s bg=%s eid=%s force_rewrap=%s",
+        "HLS_WRAP: guard check stream=%s(hls=%s) interim=%s(hls=%s) tool=%s reasoning=%s bg=%s eid=%s force_rewrap=%s",
         bool(_current_stream),
         getattr(_current_stream, "_hls_wrapper", False) if _current_stream else "N/A",
         bool(_current_interim),
+        getattr(_current_interim, "_hls_wrapper", False) if _current_interim else "N/A",
         bool(_current_tool),
         bool(_current_reasoning),
         bool(_current_bg),
         eid[:12] if eid else "?",
         _force_rewrap,
     )
-    if _current_stream and getattr(_current_stream, "_hls_wrapper", False) and not _force_rewrap:
-        _logger.debug("HLS_WRAP: guard SKIP — stream_delta already wrapped")
+    _any_wrapped = (
+        (_current_stream and getattr(_current_stream, "_hls_wrapper", False))
+        or (_current_interim and getattr(_current_interim, "_hls_wrapper", False))
+    )
+    if _any_wrapped and not _force_rewrap:
+        _logger.debug(
+            "HLS_WRAP: guard SKIP — callbacks already wrapped (stream=%s interim=%s) eid=%s",
+            bool(_current_stream and getattr(_current_stream, "_hls_wrapper", False)),
+            bool(_current_interim and getattr(_current_interim, "_hls_wrapper", False)),
+            eid[:12] if eid else "?",
+        )
         return
 
     # ── ANSWER: wrap stream_delta_callback ──

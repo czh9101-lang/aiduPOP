@@ -18,7 +18,7 @@ English | <a href="README.zh-CN.md">中文版</a>
 
 Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, unified collapsible panel, chronological reasoning/tool display, and more.
 
-> **Note**: When a streaming card completes, the card's summary text (shown in the Feishu conversation list) is automatically updated from "处理中..." to a snippet of the answer content (or reasoning text as fallback). Both `content` and `i18n_content` (zh_cn + en_us) are updated to ensure the conversation list reflects the completed card's actual content for all users, regardless of their Feishu language setting.
+> **Note**: When a streaming card completes, the card's summary text (shown in the Feishu conversation list) is automatically updated from "处理中..." to a snippet of the answer content (or reasoning text as fallback). The update is performed as a two-step process: first close streaming, then update the summary via a separate API call — this ensures reliable summary updates even if streaming was already closed (e.g., due to TTL timeout). Both `content` and `i18n_content` (zh_cn + en_us) are updated to ensure the conversation list reflects the completed card's actual content for all users, regardless of their Feishu language setting.
 
 > Based on [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0, with extensive refactoring and optimizations
 >

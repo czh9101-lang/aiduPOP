@@ -439,9 +439,11 @@ class FeishuClient:
         method does NOT set ``streaming_mode: False`` — it only updates
         the ``summary`` field.
 
-        This fixes the bug where the conversation list permanently shows
-        "处理中..." when Feishu auto-closes streaming before the
-        preservative seal can call ``cardkit_close_streaming``.
+        Bug fix (v1.0.3): The Feishu settings API may not reliably
+        process the ``summary`` field when ``streaming_mode: false`` is
+        in the same request.  Calling it separately after
+        ``cardkit_close_streaming`` ensures the conversation list
+        updates from "处理中..." to the actual answer text.
         """
         if not summary:
             return

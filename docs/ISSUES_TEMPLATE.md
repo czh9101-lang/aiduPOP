@@ -174,6 +174,7 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 |------|----------|----------------|
 | 卡片不出现 | 补丁是否成功应用 | `apply_patches`、`GatewayRunner` |
 | 内容重复 | 回调是否被双重包装 | `_maybe_wrap_callbacks`、`consumed` |
+| 面板思考内容重复（DeepSeek 模型） | `_maybe_wrap_callbacks` 是否同时检查两个回调的 `_hls_wrapper` 标记 | `_maybe_wrap_callbacks`、`_thinking_wrapper`、`_hls_wrapper` |
 | 统一面板不显示 | `show_reasoning` 配置 + 元素 ID | `UNIFIED_PANEL_ELEMENT_ID`、`unified_panel` |
 | 面板标题不更新 | reasoning/tool 事件是否到达 | `on_reasoning_delta`、`on_tool_updated` |
 | 流式关闭 (300309) | 卡片 TTL + 主动延长 | `300309`、`TTL`、`extend_ttl` |
@@ -182,7 +183,8 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 | 封卡后面板状态异常 | 封卡是否更新面板最终状态 | `_preservative_seal`、`unified_panel` |
 | 页脚早于内容出现 | drain 步骤是否执行 + seal 前是否flush脏数据 | `drain`、`answer_dirty`、`_do_linear_complete`、`_preservative_seal` |
 | 内容不完整就封卡 | `answer_dirty` 是否在 seal 前被 flush（非仅清除标记） | `drain`、`stream_element`、`preservative_seal` |
-| 会话列表永久显示"处理中..." | `close_streaming` 是否传入 `summary` + `i18n_content` 是否同时更新 + `_streaming_closed` 守卫 | `close_streaming`、`summary`、`i18n_content`、`_streaming_closed`
+| 会话列表永久显示"处理中..." | `close_streaming` 是否传入 `summary` + `i18n_content` 是否同时更新 + `_streaming_closed` 守卫 + 是否使用两步更新 | `close_streaming`、`summary`、`i18n_content`、`_streaming_closed`、`cardkit_update_summary` |
+| 会话列表完成后仍显示"处理中..." | 是否使用两步更新（先关流式，再 `cardkit_update_summary`）+ 流式已关闭时是否仍更新摘要 | `cardkit_update_summary`、`_streaming_closed`、`summary` |
 | 300317 序列冲突反复出现 | `_streaming_closed` 守卫是否生效 | `300317`、`_streaming_closed`、`preservative_seal`
 | 状态转换被拒绝 | `transition()` 合法性检查 + `PHASE_TRANSITIONS` | `phase transition rejected`、`transition`、`PHASE_TRANSITIONS`
 | 卡片创建后状态不对 | epoch 过期检查 `is_stale_create` | `is_stale_create`、`create_epoch`、`_create_epoch_snap`
