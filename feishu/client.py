@@ -396,10 +396,24 @@ class FeishuClient:
         summary : str
             完成后的会话摘要文本（截断至 120 字符）。
             为空时不更新 summary（保持原值）。
+
+        Notes
+        -----
+        同时更新 ``content`` 和 ``i18n_content`` 两个摘要字段。
+        飞书会根据用户语言偏好显示 ``i18n_content.<locale>``，
+        如果只更新 ``content`` 而不更新 ``i18n_content``，中文用户
+        在会话列表中会一直看到"处理中..."——这正是 Bug #3 的根因。
         """
         settings: dict[str, Any] = {"streaming_mode": False}
         if summary:
-            settings["summary"] = {"content": summary[:120]}
+            truncated = summary[:120]
+            settings["summary"] = {
+                "content": truncated,
+                "i18n_content": {
+                    "zh_cn": truncated,
+                    "en_us": truncated,
+                },
+            }
 
         async def _do():
             body_builder = SettingsCardRequestBody.builder().settings(self._dumps(settings))
