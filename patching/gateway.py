@@ -184,7 +184,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                     _eid = ctx.get("event_message_id", "")
                     if _eid:
                         _sess = _ctrl._sessions.get(_eid)
-                        if _sess and _sess.state not in ("completing", "completed", "failed", "aborted"):
+                        if _sess and _sess.state not in ("completing", "completed", "creation_failed", "aborted", "terminated"):
                             _logger.info(
                                 "card session stuck in non-terminal state for msg=%s "
                                 "(state=%s, card_sent=%s), firing abort",

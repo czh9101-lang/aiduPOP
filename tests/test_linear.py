@@ -57,6 +57,13 @@ class TestOnReasoningDelta:
         state.on_reasoning_delta("hello")
         assert state.total_reasoning_count == 1
 
+    def test_native_reasoning_active_flag(self) -> None:
+        """_native_reasoning_active is False by default and settable."""
+        state = UnifiedLinearState()
+        assert state._native_reasoning_active is False
+        state._native_reasoning_active = True
+        assert state._native_reasoning_active is True
+
 
 # ── 答案文本追加（on_answer_delta） ──
 

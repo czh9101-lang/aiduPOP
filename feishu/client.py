@@ -378,16 +378,102 @@ class FeishuClient:
 
         await self._retry_transient("cardkit_batch_update", _do)
 
-    async def cardkit_close_streaming(self, card_id: str, sequence: int = 0) -> None:
-        """关闭 CardKit 卡片的流式模式."""
+    async def cardkit_close_streaming(
+        self,
+        card_id: str,
+        sequence: int = 0,
+        *,
+        summary: str = "",
+    ) -> None:
+        """关闭 CardKit 卡片的流式模式，并可选更新会话摘要.
+
+        关闭流式模式后，飞书会话列表会显示卡片的 summary 文本。
+        如果不更新 summary，会话列表会一直显示创建时设置的"处理中..."，
+        即使卡片内容已完成。
+
+        Parameters
+        ----------
+        summary : str
+            完成后的会话摘要文本（截断至 120 字符）。
+            为空时不更新 summary（保持原值）。
+
+        Notes
+        -----
+        同时更新 ``content`` 和 ``i18n_content`` 两个摘要字段。
+        飞书会根据用户语言偏好显示 ``i18n_content.<locale>``，
+        如果只更新 ``content`` 而不更新 ``i18n_content``，中文用户
+        在会话列表中会一直看到"处理中..."——这正是 Bug #3 的根因。
+        """
+        settings: dict[str, Any] = {
+            "config": {
+                "streaming_mode": False,
+            }
+        }
+        if summary:
+            truncated = summary[:120]
+            settings["config"]["summary"] = {
+                "content": truncated,
+                "i18n_content": {
+                    "zh_cn": truncated,
+                    "en_us": truncated,
+                },
+            }
+
         async def _do():
-            body_builder = SettingsCardRequestBody.builder().settings(self._dumps({"streaming_mode": False}))
+            body_builder = SettingsCardRequestBody.builder().settings(self._dumps(settings))
             body_builder = body_builder.sequence(sequence)
             request = SettingsCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
             resp = await self._client.cardkit.v1.card.asettings(request)
             self._check(resp, "cardkit_close_streaming")
 
         await self._retry_transient("cardkit_close_streaming", _do)
+
+    async def cardkit_update_summary(
+        self,
+        card_id: str,
+        summary: str,
+        *,
+        sequence: int = 0,
+    ) -> None:
+        """Update the card summary text WITHOUT closing streaming mode.
+
+        Belt-and-suspenders for the edge case where streaming was already
+        closed (e.g. by Feishu TTL auto-close or a CARDKIT_STREAMING_CLOSED
+        error) but the summary was never updated from "处理中..." to the
+        actual answer text.
+
+        **IMPORTANT**: This is NOT the primary mechanism for updating the
+        conversation list preview.  The primary mechanism is passing
+        ``summary`` to :meth:`cardkit_close_streaming`, which atomically
+        updates the preview when ``streaming_mode`` transitions to ``false``.
+        This method is only used when streaming was already closed and we
+        need a fallback to update the summary after the fact.
+
+        See: 飞书开放平台 → 卡片2.0 → 流式更新 → 完成后关闭流式更新模式.
+        """
+        if not summary:
+            return
+        truncated = summary[:120]
+        settings: dict[str, Any] = {
+            "config": {
+                "summary": {
+                    "content": truncated,
+                    "i18n_content": {
+                        "zh_cn": truncated,
+                        "en_us": truncated,
+                    },
+                },
+            },
+        }
+
+        async def _do():
+            body_builder = SettingsCardRequestBody.builder().settings(self._dumps(settings))
+            body_builder = body_builder.sequence(sequence)
+            request = SettingsCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
+            resp = await self._client.cardkit.v1.card.asettings(request)
+            self._check(resp, "cardkit_update_summary")
+
+        await self._retry_transient("cardkit_update_summary", _do)
 
     async def cardkit_extend_ttl(
         self,
@@ -404,7 +490,7 @@ class FeishuClient:
         """
         async def _do():
             body_builder = SettingsCardRequestBody.builder().settings(
-                self._dumps({"streaming_mode": True, "streaming_config": {"ttl_seconds": ttl_seconds}})
+                self._dumps({"config": {"streaming_mode": True, "streaming_config": {"ttl_seconds": ttl_seconds}}})
             )
             body_builder = body_builder.sequence(sequence)
             request = SettingsCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()

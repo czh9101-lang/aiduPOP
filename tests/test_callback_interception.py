@@ -225,7 +225,13 @@ class TestThinkingWrapper:
             assert len(agent.interim_calls) == 1
 
     def test_already_streamed_kwarg_accepted_when_card_consumes(self):
-        """already_streamed=True 时, 卡片消费了就不调原始回调."""
+        """already_streamed=True 时, 跳过卡片 on_thinking 但仍调原始回调.
+
+        When Hermes sets already_streamed=True, it means the text was already
+        delivered via stream_delta_callback.  We must NOT add it to the card
+        (would cause duplication), but we MUST call the original callback so
+        Hermes's _stream_consumer.on_segment_break() fires correctly.
+        """
         mock_ctrl = _make_mock_ctrl()
         with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
@@ -234,8 +240,11 @@ class TestThinkingWrapper:
             _maybe_wrap_callbacks(agent)
             agent.interim_assistant_callback("text", already_streamed=True)
 
-            # 卡片消费了 → 不调原始
-            assert len(agent.interim_calls) == 0
+            # on_thinking 不应被调(文字已被 stream 消费, already_streamed=True)
+            assert mock_ctrl.on_thinking.call_count == 0
+            # 原始回调应被调(Hermes 需要 on_segment_break)
+            assert len(agent.interim_calls) == 1
+            assert agent.interim_calls[0]["kwargs"].get("already_streamed") is True
 
     def test_already_streamed_kwarg_passed_through_when_card_not_consumed(self):
         """卡片没消费时, already_streamed 应正确传递给原始回调."""
@@ -262,9 +271,15 @@ class TestThinkingWrapperDedup:
     def teardown_method(self):
         _clear_msg_ctx()
 
-    def test_text_already_consumed_by_stream_delta_skips_original(self):
+    def test_text_already_consumed_by_stream_delta_skips_card_but_passes_through(self):
         """当文字已被 stream_delta_callback 消费(卡片已展示),
-        thinking_wrapper 应跳过原始回调避免重复发送."""
+        thinking_wrapper 应跳过 on_thinking_delta 但调原始回调.
+
+        Length-based dedup: if the total text consumed by stream_delta_callback
+        is >= the interim text length, the text was fully streamed already.
+        We skip on_thinking_delta (prevent card duplication) but call
+        _orig_interim (Hermes needs on_segment_break for state management).
+        """
         mock_ctrl = _make_mock_ctrl()
         with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
@@ -280,8 +295,8 @@ class TestThinkingWrapperDedup:
 
             # on_thinking 不应被调(文字已被 stream 消费, dedup)
             assert mock_ctrl.on_thinking.call_count == 0
-            # 原始回调也不应被调(避免重复纯文本)
-            assert len(agent.interim_calls) == 0
+            # 原始回调应被调(Hermes 需要 on_segment_break)
+            assert len(agent.interim_calls) == 1
             # stream 也不应被调(卡片消费了)
             assert len(agent.stream_calls) == 0
 
@@ -427,7 +442,13 @@ class TestFullPipelineSimulation:
 
     def test_interim_with_already_streamed_true_card_active(self):
         """[already_streamed 场景] 卡片活跃 + already_streamed=True 时,
-        on_segment_break 不会丢 (因为 _stream_consumer 的 _accumulated 是空的)."""
+        on_thinking 被跳过, 原始回调被调以触发 on_segment_break.
+
+        When already_streamed=True, Hermes tells us the text was already
+        delivered via stream_delta_callback.  We must NOT add it to the card
+        (would duplicate), but we MUST call the original callback so
+        _stream_consumer.on_segment_break() fires correctly.
+        """
         mock_ctrl = _make_mock_ctrl()
         with patch("hermes_lark_streaming.patching.hooks.get_controller", return_value=mock_ctrl):
             _set_msg_ctx()
@@ -441,6 +462,8 @@ class TestFullPipelineSimulation:
             # 然后 interim_assistant_callback 被调, same text + already_streamed=True
             agent.interim_assistant_callback("搜索中", already_streamed=True)
 
-            # 文字已被 stream_delta 消费 → dedup 跳过 → 不调原始回调
-            # 这是安全的, 因为 _stream_consumer._accumulated 也是空的
-            assert len(agent.interim_calls) == 0
+            # on_thinking 不应被调(文字已被 stream 消费, already_streamed=True)
+            assert mock_ctrl.on_thinking.call_count == 0
+            # 原始回调应被调(Hermes 需要 on_segment_break)
+            assert len(agent.interim_calls) == 1
+            assert agent.interim_calls[0]["kwargs"].get("already_streamed") is True

@@ -23,10 +23,13 @@ from .mixin import (
     ABORTED,
     COMPLETED,
     COMPLETING,
+    CREATION_FAILED,
     FAILED,
     IDLE,
+    TERMINATED,
     ControllerMixin,
 )
+from ..state.phase import TerminalReason
 from ..feishu import (
     FeishuClient,
     FeishuClientConfig,
@@ -110,7 +113,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
     def _get_active_session(self, message_id: str) -> CardSession | None:
         """获取非终态的活跃 session，不存在或已终态返回 None."""
         session = self._sessions.get(message_id)
-        if session is None or session.state in _TERMINAL:
+        if session is None or session.is_terminal_phase:
             return None
         return session
 
@@ -207,6 +210,10 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         if session.linear and session.unified_state:
             session.unified_state.on_reasoning_delta(text)
+            # Mark that native reasoning_callback is active — prevents
+            # _linear_on_thinking from appending the same reasoning text
+            # again when interim_assistant_callback delivers accumulated text.
+            session.unified_state._native_reasoning_active = True
             self._schedule_linear_flush(session)
             return
 
@@ -475,8 +482,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             message_id = redirected_id or message_id
 
         # 卡片创建失败 → 交回 gateway 正常回复
-        if session.state == FAILED:
-            _logger.info("on_completed: msg=%s state=FAILED, yielding to gateway", (message_id or "?")[:12])
+        if session.state in (CREATION_FAILED, TERMINATED):
+            _logger.info("on_completed: msg=%s state=%s, yielding to gateway", (message_id or "?")[:12], session.state)
             self._cleanup(message_id)
             return False
 
@@ -490,6 +497,27 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         if answer:
             session.text.on_deliver(answer)
+            # ── Linear mode answer fallback ──
+            # When stream_delta_callback was not called or failed to deliver
+            # the answer text (e.g. callback not wrapped, streaming disabled,
+            # or race condition), unified_state.answer_text will be empty.
+            # The `answer` parameter from on_completed contains the full
+            # response text — use it as a fallback to ensure the card shows
+            # the answer content.  Only set if unified_state.answer_text is
+            # empty to avoid duplicating text that was already streamed.
+            if (
+                session.linear
+                and session.unified_state is not None
+                and not session.unified_state.answer_text
+            ):
+                from ..state.text import strip_reasoning_tags
+                clean_answer = strip_reasoning_tags(answer)
+                if clean_answer:
+                    session.unified_state.on_answer_delta(clean_answer)
+                    _logger.info(
+                        "on_completed: linear answer fallback, len=%d msg=%s",
+                        len(clean_answer), (message_id or "?")[:12],
+                    )
 
         # ── 保存错误/中断消息 ──
         # 用于在卡片正文中展示（而非仅页脚）
@@ -618,7 +646,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 _logger.debug("background review sender failed", exc_info=True)
 
     def _schedule_card_update(self, session: CardSession) -> None:
-        if session.state == IDLE or session.state in _TERMINAL or session.state == COMPLETING:
+        if session.state == IDLE or session.is_terminal_phase or session.state == COMPLETING:
             return
         if session.guard.should_skip("_schedule_card_update"):
             return

@@ -12,6 +12,8 @@ from .mixin import (  # noqa: F401
     STREAMING,
     COMPLETING,
     COMPLETED,
+    CREATION_FAILED,
+    TERMINATED,
     FAILED,
     ABORTED,
     _TERMINAL,

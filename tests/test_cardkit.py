@@ -522,6 +522,21 @@ class TestBuildStreamingCardV2:
         card = build_streaming_card_v2(show_reasoning=True, print_strategy="fast")
         assert card["config"]["streaming_config"]["print_strategy"] == "fast"
 
+    def test_initial_summary_has_i18n_content(self) -> None:
+        """Streaming card must set both content and i18n_content for summary.
+
+        This is critical for Bug #3: Chinese users see i18n_content.zh_cn,
+        not content.  If i18n_content is missing, Feishu shows "处理中..."
+        even after close_streaming updates content.
+        """
+        card = build_streaming_card_v2()
+        summary = card["config"]["summary"]
+        assert "content" in summary
+        assert "i18n_content" in summary
+        i18n = summary["i18n_content"]
+        assert "zh_cn" in i18n
+        assert "en_us" in i18n
+
 
 class TestBuildStreamingCard:
     def test_basic(self) -> None:
@@ -588,8 +603,13 @@ class TestBuildCompleteCard:
     def test_summary_truncated(self) -> None:
         long_text = "x" * 200
         card = build_complete_card(text=long_text, has_cardkit=True)
-        summary = card["config"].get("summary", {}).get("content", "")
-        assert len(summary) <= 120
+        summary = card["config"].get("summary", {})
+        assert len(summary.get("content", "")) <= 120
+        # i18n_content must also be updated (Bug #3 fix)
+        i18n = summary.get("i18n_content", {})
+        assert "zh_cn" in i18n
+        assert "en_us" in i18n
+        assert i18n["zh_cn"] == summary["content"]
 
     def test_footer_present(self) -> None:
         card = build_complete_card(
@@ -720,8 +740,13 @@ class TestBuildLinearCompleteCard:
             segments=[_seg("answer", "short"), _seg("answer", "x" * 200)],
             all_tool_steps=[],
         )
-        summary = card["config"].get("summary", {}).get("content", "")
-        assert len(summary) <= 120
+        summary = card["config"].get("summary", {})
+        assert len(summary.get("content", "")) <= 120
+        # i18n_content must also be updated (Bug #3 fix)
+        i18n = summary.get("i18n_content", {})
+        assert "zh_cn" in i18n
+        assert "en_us" in i18n
+        assert i18n["zh_cn"] == summary["content"]
 
     def test_error_message_adds_error_panel(self) -> None:
         card = build_linear_complete_card(segments=[], all_tool_steps=[], error_message="test error")
@@ -1221,3 +1246,53 @@ class TestPreservativeSealActionsDeleteHint:
         hint_idx = delete_ids.index(_LOADING_HINT_ELEMENT_ID)
         loading_idx = delete_ids.index("loading_icon")
         assert hint_idx < loading_idx
+
+
+# --- Bug #3 regression: summary i18n_content ---
+
+
+class TestSummaryI18nContent:
+    """Bug #3: close_streaming must update i18n_content, not just content.
+
+    Feishu CardKit 2.0 displays i18n_content.<locale> based on the user's
+    language preference.  For Chinese users, Feishu shows zh_cn.  If we
+    only update "content" but not "i18n_content" when closing streaming,
+    the conversation list continues showing "处理中..." forever — even
+    though close_streaming succeeded and "content" was updated.
+    """
+
+    def test_streaming_card_v2_summary_has_i18n(self) -> None:
+        card = build_streaming_card_v2()
+        summary = card["config"]["summary"]
+        assert "i18n_content" in summary
+        assert "zh_cn" in summary["i18n_content"]
+        assert "en_us" in summary["i18n_content"]
+
+    def test_complete_card_summary_has_i18n(self) -> None:
+        card = build_complete_card(text="hello world", has_cardkit=True)
+        summary = card["config"].get("summary", {})
+        assert "i18n_content" in summary, f"summary={summary}"
+        assert summary["i18n_content"]["zh_cn"] == summary["content"]
+
+    def test_linear_complete_card_summary_has_i18n(self) -> None:
+        card = build_linear_complete_card(
+            segments=[_seg("answer", "test answer")],
+            all_tool_steps=[],
+        )
+        summary = card["config"].get("summary", {})
+        assert "i18n_content" in summary, f"summary={summary}"
+        assert summary["i18n_content"]["zh_cn"] == summary["content"]
+
+    def test_unified_complete_card_summary_has_i18n(self) -> None:
+        from hermes_lark_streaming.cardkit import build_unified_complete_card
+
+        round_ = ReasoningRound(index=1, text="thinking")
+        card = build_unified_complete_card(
+            reasoning_rounds=[round_],
+            answer_text="the answer",
+            tool_steps=[],
+        )
+        summary = card["config"].get("summary", {})
+        assert "i18n_content" in summary, f"summary={summary}"
+        assert summary["i18n_content"]["zh_cn"] == summary["content"]
+        assert "the answer" in summary["content"]

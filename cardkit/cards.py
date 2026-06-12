@@ -50,6 +50,23 @@ __all__ = [
     'build_unified_complete_card',
 ]
 
+def _build_summary(text: str) -> dict[str, Any]:
+    """Build a summary dict with both content and i18n_content.
+
+    Feishu CardKit 2.0 displays ``i18n_content.<locale>`` for users
+    whose Feishu language matches that locale, and falls back to
+    ``content`` otherwise.  If we only update ``content`` but not
+    ``i18n_content``, Chinese users continue seeing the old
+    "处理中..." in the conversation list even after close_streaming
+    succeeds — the exact bug reported as "会话列表永久显示处理中".
+    """
+    truncated = text[:120].replace("\n", " ").replace("```", "").strip()
+    return {
+        "content": truncated,
+        "i18n_content": _i18n(truncated, truncated),
+    }
+
+
 def build_streaming_tool_use_pending_panel() -> dict[str, Any]:
     return _collapsible_panel(
         expanded=False,
@@ -246,8 +263,8 @@ def build_complete_card(
         )
     )
 
-    summary = (text or reasoning_text or "")[:120]
-    summary = summary.replace("\n", " ").replace("```", "").strip()
+    summary_text = (text or reasoning_text or "")[:120]
+    summary_text = summary_text.replace("\n", " ").replace("```", "").strip()
 
     card: dict[str, Any] = {
         "config": {
@@ -256,8 +273,8 @@ def build_complete_card(
             "locales": _LOCALES,
         },
     }
-    if summary:
-        card["config"]["summary"] = {"content": summary}
+    if summary_text:
+        card["config"]["summary"] = _build_summary(summary_text)
 
     if header_enabled:
         if is_error:
@@ -416,7 +433,7 @@ def build_linear_complete_card(
         },
     }
     if summary:
-        card["config"]["summary"] = {"content": summary}
+        card["config"]["summary"] = _build_summary(summary)
     if header_enabled:
         if is_error:
             card["header"] = _build_header("error")
@@ -522,7 +539,7 @@ def _build_linear_complete_unified(
         },
     }
     if summary:
-        card["config"]["summary"] = {"content": summary}
+        card["config"]["summary"] = _build_summary(summary)
     if header_enabled:
         if is_error:
             card["header"] = _build_header("error")
@@ -663,7 +680,7 @@ def build_unified_complete_card(
         },
     }
     if summary:
-        card["config"]["summary"] = {"content": summary}
+        card["config"]["summary"] = _build_summary(summary)
     if header_enabled:
         if is_error:
             card["header"] = _build_header("error")
