@@ -92,8 +92,7 @@ def _maybe_wrap_callbacks(agent) -> None:
         or (_current_interim and getattr(_current_interim, "_hls_wrapper", False))
     )
     if _any_wrapped and not _force_rewrap:
-        _logger.debug(
-            "HLS_WRAP: guard SKIP — callbacks already wrapped (stream=%s interim=%s) eid=%s",
+        _logger.debug("HLS_WRAP: guard SKIP — callbacks already wrapped (stream=%s interim=%s) eid=%s",
             bool(_current_stream and getattr(_current_stream, "_hls_wrapper", False)),
             bool(_current_interim and getattr(_current_interim, "_hls_wrapper", False)),
             eid[:12] if eid else "?",

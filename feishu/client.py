@@ -433,17 +433,19 @@ class FeishuClient:
     ) -> None:
         """Update the card summary text WITHOUT closing streaming mode.
 
-        Used when streaming was already closed (e.g. by Feishu TTL) but
-        the summary still needs to be updated from "处理中..." to the
-        actual answer text.  Unlike :meth:`cardkit_close_streaming`, this
-        method does NOT set ``streaming_mode: False`` — it only updates
-        the ``summary`` field.
+        Belt-and-suspenders for the edge case where streaming was already
+        closed (e.g. by Feishu TTL auto-close or a CARDKIT_STREAMING_CLOSED
+        error) but the summary was never updated from "处理中..." to the
+        actual answer text.
 
-        Bug fix (v1.0.3): The Feishu settings API may not reliably
-        process the ``summary`` field when ``streaming_mode: false`` is
-        in the same request.  Calling it separately after
-        ``cardkit_close_streaming`` ensures the conversation list
-        updates from "处理中..." to the actual answer text.
+        **IMPORTANT**: This is NOT the primary mechanism for updating the
+        conversation list preview.  The primary mechanism is passing
+        ``summary`` to :meth:`cardkit_close_streaming`, which atomically
+        updates the preview when ``streaming_mode`` transitions to ``false``.
+        This method is only used when streaming was already closed and we
+        need a fallback to update the summary after the fact.
+
+        See: 飞书开放平台 → 卡片2.0 → 流式更新 → 完成后关闭流式更新模式.
         """
         if not summary:
             return

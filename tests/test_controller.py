@@ -708,9 +708,11 @@ class TestDoLinearComplete:
 
         assert await ctrl._do_linear_complete(session) is True
         assert session.state == COMPLETED
-        # With preservative seal, the flow is: close + batch_update (not full rebuild)
+        # With preservative seal, the flow is: close + batch_update
+        # (summary is passed IN close_streaming, no separate cardkit_update needed)
         assert "close" in call_order
-        # cardkit_update should NOT be called (preservative seal succeeded)
+        # cardkit_update should NOT be called — summary is updated atomically
+        # in close_streaming per Feishu docs
         client.cardkit_update.assert_not_called()
 
     @pytest.mark.asyncio
@@ -728,7 +730,8 @@ class TestDoLinearComplete:
 
         assert await ctrl._do_linear_complete(session) is True
         assert client.cardkit_close_streaming.call_count == 1
-        # cardkit_update should NOT be called (preservative seal succeeded)
+        # cardkit_update should NOT be called — summary is passed in
+        # close_streaming atomically per Feishu docs
         client.cardkit_update.assert_not_called()
 
     @pytest.mark.asyncio
@@ -874,10 +877,12 @@ class TestDoLinearComplete:
         """close_streaming is called with summary text from answer.
 
         This is the fix for the "处理中..." stays in conversation list bug:
-        when close_streaming is called, the card's summary must be updated
-        from the initial "处理中..." to the actual answer text, so the
-        Feishu conversation list shows the answer preview instead of
-        "处理中...".
+        when close_streaming is called, the summary MUST be passed in the
+        same request so Feishu atomically updates the conversation list
+        preview from "处理中..." to the actual answer text.  A separate
+        cardkit_update_summary call does NOT reliably work.
+
+        See: 飞书开放平台 → 卡片2.0 → 流式更新 → 完成后关闭流式更新模式
         """
         ctrl = _setup_ctrl()
         session = _make_session("msg_summary", linear=True)
@@ -898,6 +903,7 @@ class TestDoLinearComplete:
         assert await ctrl._do_linear_complete(session) is True
 
         # close_streaming should have been called with summary kwarg
+        # containing the answer text
         assert len(close_kwargs) >= 1
         summary = close_kwargs[0].get("summary", "")
         assert "Hello" in summary
@@ -951,3 +957,82 @@ class TestDoLinearComplete:
         """CardSession._streaming_closed starts as False."""
         session = CardSession("msg_test", "chat_test", asyncio.new_event_loop())
         assert session._streaming_closed is False
+
+
+class TestLinearOnThinkingNativeReasoningDedup:
+    """Bug fix: _linear_on_thinking must skip reasoning when _native_reasoning_active.
+
+    When the model provides a dedicated reasoning_callback (e.g. DeepSeek, QwQ),
+    reasoning text arrives incrementally via on_reasoning → on_reasoning_delta.
+    The interim_assistant_callback also delivers the same reasoning text in
+    accumulated form.  Without the _native_reasoning_active guard, appending
+    the accumulated text again via on_reasoning_delta would double every token
+    in the collapsible panel ("TheThe user user is is saying saying…").
+    """
+
+    def _make_dedup_session(self) -> tuple:
+        ctrl = _setup_ctrl()
+        # Enable show_reasoning so _linear_on_thinking processes reasoning text
+        ctrl._cfg._raw.setdefault("hermes_lark_streaming", {}).setdefault(
+            "display", {"show_reasoning": True},
+        )
+        # Also set the cached config so _cfg.show_reasoning returns True
+        ctrl._cfg._reload_cached = lambda: {
+            "display": {"platforms": {"feishu": {"show_reasoning": True}}},
+        }
+        session = _make_session("msg_dedup", linear=True)
+        session.state = STREAMING
+        ctrl._sessions["msg_dedup"] = session
+        return ctrl, session
+
+    def test_no_dedup_when_native_reasoning_inactive(self) -> None:
+        """When _native_reasoning_active is False, reasoning IS processed."""
+        ctrl, session = self._make_dedup_session()
+        assert session.unified_state._native_reasoning_active is False
+
+        # Use Reasoning:\n prefix so split_reasoning_text classifies
+        # this as reasoning_text, not answer_text
+        with patch.object(ctrl, "_schedule_linear_flush"):
+            ctrl._linear_on_thinking(session, "Reasoning:\nThe user is asking about Python")
+
+        # Reasoning should have been processed (no native reasoning active)
+        assert session.unified_state.current_reasoning_text == "The user is asking about Python"
+
+    def test_dedup_when_native_reasoning_active(self) -> None:
+        """When _native_reasoning_active is True, reasoning is NOT re-appended."""
+        ctrl, session = self._make_dedup_session()
+
+        # Simulate reasoning_callback delivering text first
+        session.unified_state.on_reasoning_delta("The user is asking about Python")
+        assert session.unified_state.current_reasoning_text == "The user is asking about Python"
+
+        # Mark native reasoning as active (set by on_reasoning)
+        session.unified_state._native_reasoning_active = True
+
+        # Now interim_assistant_callback delivers the same accumulated text
+        # Use Reasoning:\n prefix so split_reasoning_text classifies
+        # this as reasoning_text, not answer_text
+        with patch.object(ctrl, "_schedule_linear_flush"):
+            ctrl._linear_on_thinking(session, "Reasoning:\nThe user is asking about Python")
+
+        # Reasoning should NOT be doubled
+        assert session.unified_state.current_reasoning_text == "The user is asking about Python"
+        assert "TheThe" not in session.unified_state.current_reasoning_text
+
+    def test_dedup_with_mixed_reasoning_and_answer(self) -> None:
+        """When native reasoning is active, only answer part is processed from thinking."""
+        ctrl, session = self._make_dedup_session()
+
+        # Simulate reasoning_callback delivering text
+        session.unified_state.on_reasoning_delta("Let me think about this")
+        session.unified_state._native_reasoning_active = True
+
+        # interim_assistant_callback delivers plain text (no Reasoning: prefix),
+        # which split_reasoning_text classifies as answer_text.
+        # When _native_reasoning_active is True, reasoning part is skipped
+        # but answer part should still be processed (if no streamed answer yet)
+        with patch.object(ctrl, "_schedule_linear_flush"):
+            ctrl._linear_on_thinking(session, "Here is my answer")
+
+        # Answer should be set (no streamed answer yet)
+        assert "Here is my answer" in session.unified_state.answer_text

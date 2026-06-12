@@ -609,6 +609,17 @@ class UnifiedControllerMixin:
 
         Splits the incoming text into reasoning and answer components,
         updates the unified state, and schedules a flush.
+
+        Native reasoning dedup
+        ----------------------
+        When the model provides a dedicated ``reasoning_callback`` (e.g.
+        DeepSeek, QwQ), reasoning text arrives incrementally via
+        :meth:`on_reasoning` → :meth:`on_reasoning_delta`.  The
+        ``interim_assistant_callback`` also delivers the same reasoning
+        text in accumulated form.  Without the ``_native_reasoning_active``
+        guard, ``on_reasoning_delta`` would *append* the accumulated text
+        again, causing every token to appear twice in the collapsible
+        panel ("TheThe user user is is saying saying…").
         """
         state = session.unified_state
         if state is None:
@@ -617,7 +628,13 @@ class UnifiedControllerMixin:
         reasoning = split.get("reasoning_text")
         answer = split.get("answer_text")
 
-        if reasoning and self._cfg.show_reasoning:
+        # ── Native reasoning dedup ──
+        # When the model provides a dedicated reasoning_callback (e.g.
+        # DeepSeek, QwQ), reasoning text is already tracked via
+        # on_reasoning → on_reasoning_delta.  The interim_assistant_callback
+        # delivers the same text in accumulated form — appending it again
+        # via on_reasoning_delta would double the content.
+        if reasoning and self._cfg.show_reasoning and not state._native_reasoning_active:
             state.on_reasoning_delta(reasoning)
         if answer:
             # ── Dedup: skip answer text already delivered via stream_delta_callback ──
@@ -628,7 +645,7 @@ class UnifiedControllerMixin:
             _has_streamed_answer = bool(state.answer_text)
             if not _has_streamed_answer:
                 state.on_answer_delta(answer)
-        if (reasoning and self._cfg.show_reasoning) or answer:
+        if (reasoning and self._cfg.show_reasoning and not state._native_reasoning_active) or answer:
             self._schedule_linear_flush(session)
 
     # ===================================================================
@@ -770,10 +787,13 @@ class UnifiedControllerMixin:
             # sequence number.  The _streaming_closed flag ensures we
             # never call close_streaming twice.
             #
-            # Bug fix (v1.0.3): The Feishu settings API may not reliably
-            # process the summary field when streaming_mode: false is in the
-            # same request.  We now close streaming WITHOUT the summary,
-            # then update summary as a separate API call for reliability.
+            # ── Prepare summary text for conversation list preview ──
+            # Feishu documentation: When streaming_mode transitions from
+            # true to false, the conversation list preview is atomically
+            # updated to config.summary.content.  The summary MUST be
+            # included in the close_streaming request itself — a separate
+            # cardkit_update_summary call after streaming is closed does
+            # NOT reliably update the conversation list preview.
             seal_summary = ""
             if state is not None:
                 summary_text = state.answer_text
@@ -789,50 +809,27 @@ class UnifiedControllerMixin:
                     card_id[:12], session.sequence,
                     repr(seal_summary[:40]) if seal_summary else "(empty)",
                 )
-                # Note: Don't pass summary in close_streaming — Feishu API
-                # doesn't reliably update summary when combined with
-                # streaming_mode:false in the same settings call.
-                # We update it separately below for reliability.
+                # ── Bug fix (v1.0.3): Pass summary IN close_streaming ──
+                # Feishu atomically updates the conversation list preview
+                # when streaming_mode transitions to false.  The summary
+                # must be in THIS request — passing summary="" and then
+                # calling cardkit_update_summary separately does NOT work
+                # reliably.  See: 飞书开放平台 → 卡片2.0 → 流式更新.
                 await self._client.cardkit_close_streaming(
-                    card_id, sequence=session.sequence, summary="",
+                    card_id, sequence=session.sequence, summary=seal_summary,
                 )
                 session._streaming_closed = True
-
-                # ── Always update summary as a separate API call ──
-                # Bug fix (v1.0.3): The Feishu settings API may not
-                # process the summary field when streaming_mode is being
-                # set to false in the same request.  Calling it separately
-                # after close_streaming ensures the conversation list
-                # updates from "处理中..." to the actual answer text.
-                if seal_summary:
-                    try:
-                        session.sequence += 1
-                        await self._client.cardkit_update_summary(
-                            card_id, seal_summary, sequence=session.sequence,
-                        )
-                        _logger.info(
-                            "preservative seal: summary updated (after close_streaming) "
-                            "card=%s seq=%d summary=%s",
-                            card_id[:12], session.sequence,
-                            repr(seal_summary[:40]),
-                        )
-                    except FeishuAPIError as e:
-                        _logger.warning(
-                            "preservative seal: summary update failed (after close) "
-                            "card=%s error=%s",
-                            card_id[:12], e,
-                        )
             else:
                 _logger.info(
                     "preservative seal: streaming already closed, skipping close_streaming card=%s",
                     card_id[:12],
                 )
-                # ── Update summary even when streaming is already closed ──
+                # ── Fallback: update summary when streaming was already closed ──
                 # When Feishu auto-closes streaming (TTL timeout) or a
                 # previous flush hit CARDKIT_STREAMING_CLOSED, the summary
                 # was never updated from "处理中..." to the actual answer.
-                # Without this, the conversation list permanently shows
-                # "处理中..." even though the card content is complete.
+                # cardkit_update_summary is used as a belt-and-suspenders
+                # for this edge case only.
                 if seal_summary:
                     try:
                         session.sequence += 1
@@ -1237,6 +1234,13 @@ class UnifiedControllerMixin:
             footer_show_label=self._cfg.footer_show_label,
         )
 
+        # ── Summary is already updated in close_streaming ──
+        # No separate cardkit_update is needed for summary sync.
+        # The summary was passed to cardkit_close_streaming which
+        # atomically updates the conversation list preview when
+        # streaming_mode transitions to false.  See: 飞书开放平台 →
+        # 卡片2.0 → 流式更新 → 完成后关闭流式更新模式.
+
         if not seal_ok:
             # ── Fallback: full card rebuild ──
             _logger.info(
@@ -1258,11 +1262,13 @@ class UnifiedControllerMixin:
                             fallback_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
                     session.sequence += 1
                     try:
-                        # Bug fix (v1.0.3): Don't pass summary in close_streaming —
-                        # Feishu API may not process it reliably in the same request.
-                        # We update it separately below.
+                        # ── Bug fix (v1.0.3): Pass summary IN close_streaming ──
+                        # Feishu atomically updates the conversation list preview
+                        # when streaming_mode transitions to false.  The summary
+                        # must be in THIS request.  See: 飞书开放平台 → 卡片2.0
+                        # → 流式更新 → 完成后关闭流式更新模式.
                         await self._client.cardkit_close_streaming(
-                            session.card_id, sequence=session.sequence, summary="",  # type: ignore[union-attr]
+                            session.card_id, sequence=session.sequence, summary=fallback_summary,  # type: ignore[union-attr]
                         )
                         session._streaming_closed = True
                     except FeishuAPIError as e:
@@ -1271,30 +1277,15 @@ class UnifiedControllerMixin:
                             session._streaming_closed = True
                         else:
                             raise
-
-                    # ── Update summary separately (v1.0.3 bug fix) ──
-                    if fallback_summary:
-                        try:
-                            session.sequence += 1
-                            await self._client.cardkit_update_summary(
-                                session.card_id, fallback_summary, sequence=session.sequence,  # type: ignore[union-attr]
-                            )
-                            _logger.info(
-                                "fallback: summary updated card=%s seq=%d summary=%s",
-                                session.card_id[:12], session.sequence,
-                                repr(fallback_summary[:40]),
-                            )
-                        except FeishuAPIError as e:
-                            _logger.warning(
-                                "fallback: summary update failed card=%s error=%s",
-                                session.card_id[:12], e,
-                            )
                 else:
                     _logger.info(
                         "fallback: streaming already closed, skipping close_streaming card=%s",
                         (session.card_id or "")[:12],
                     )
-                    # ── Update summary even when streaming is already closed ──
+                    # ── Update summary when streaming was already closed ──
+                    # Belt-and-suspenders for the edge case where Feishu
+                    # auto-closed streaming (TTL timeout) before we could
+                    # pass the summary in close_streaming.
                     fallback_summary = ""
                     if state is not None:
                         summary_text = state.answer_text
