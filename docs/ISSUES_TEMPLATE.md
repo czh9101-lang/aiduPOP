@@ -184,13 +184,16 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 | 内容不完整就封卡 | `answer_dirty` 是否在 seal 前被 flush（非仅清除标记） | `drain`、`stream_element`、`preservative_seal` |
 | 会话列表永久显示"处理中..." | `close_streaming` 是否传入 `summary` + `i18n_content` 是否同时更新 + `_streaming_closed` 守卫 | `close_streaming`、`summary`、`i18n_content`、`_streaming_closed`
 | 300317 序列冲突反复出现 | `_streaming_closed` 守卫是否生效 | `300317`、`_streaming_closed`、`preservative_seal`
+| 状态转换被拒绝 | `transition()` 合法性检查 + `PHASE_TRANSITIONS` | `phase transition rejected`、`transition`、`PHASE_TRANSITIONS`
+| 卡片创建后状态不对 | epoch 过期检查 `is_stale_create` | `is_stale_create`、`create_epoch`、`_create_epoch_snap`
+| 消息删除后仍更新 | UnavailableGuard → `TERMINATED` 状态 | `TERMINATED`、`unavailable_guard`、`terminal_reason`
 | preservative seal 崩溃 | 重试路径是否重建 panel | `UnboundLocalError`、`panel`、`_preservative_seal`
 | 中断后卡片异常 | card_sent 传播 | `_wrap_run_agent`、`ABORTED`、`card_sent` |
 | 配置不生效 | config.yaml 路径 | `config`、`HERMES_HOME`、`_get_hermes_config_path` |
 
-### 架构背景（v1.0.3+ 统一面板 + 打字机效果）
+### 架构背景（v1.0.3+ 统一面板 + 打字机效果 + 状态机增强）
 
-从 v1.0.3 开始，插件使用**统一面板架构 + 打字机效果**：
+从 v1.0.3 开始，插件使用**统一面板架构 + 打字机效果 + 显式状态机**：
 - 所有推理轮次和工具步骤集中在 1 个可折叠面板
 - 面板标题动态显示 `agent loop · N rounds · M tools · Xs`
 - 打字机效果：`print_frequency_ms=70`（飞书官方默认，每70ms渲染1字符），`print_step=1`（官方默认，每次1字符），默认刷新间隔100ms（最低70ms，对齐官方默认值），仅回答文本变化时使用70ms快流节流（对齐官方默认值），面板变化时使用正常100ms间隔。所有流式参数已验证 ≥ 官方默认值：`_ANSWER_FAST_STREAM_MS=70ms`、`CARDKIT_MS=80ms`
@@ -206,6 +209,7 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 - **`_streaming_closed` 守卫**：v1.0.3 迭代修复了重复 `close_streaming` 导致 300317 级联失败的 bug——`CardSession` 新增 `_streaming_closed` 布尔标志，确保 `close_streaming` 对同一张卡片只调用一次。所有代码路径（preservative seal、retry、fallback、drain、flush）在调用前检查此标志，成功后设置此标志
 - **重试路径重建 panel**：v1.0.3 迭代修复了 `UnboundLocalError: 'panel'` 导致恢复路径崩溃的 bug——`_preservative_seal` 的 300317 重试路径不再引用 try 块中的 `panel` 局部变量，而是始终从当前状态重建 `retry_panel`
 - **COMPLETING 状态修正**：v1.0.3 将 `COMPLETING` 从 `_TERMINAL` 集合中移除（它是过渡状态而非终态），使晚到的 `on_answer`/`on_thinking` 回调不再被静默丢弃
+- **状态机增强**：v1.0.3 参考 openclaw-lark 引入显式状态转换图 (`PHASE_TRANSITIONS`)、终端原因追踪 (`TerminalReason`)、视觉状态分离 (`CardVisualState`)、epoch 机制 (`is_stale_create`)、统一守卫 (`should_proceed`)、验证转换 (`transition`)。新增 `CREATION_FAILED`（卡片创建失败）和 `TERMINATED`（消息删除/撤回）阶段，`FAILED` 作为 `CREATION_FAILED` 的别名保留。
 
 如果用户报告与旧版行为相关的问题（如拆卡、compact seal、element_limit），请确认他们已升级到 v1.0.3+。
 

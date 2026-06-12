@@ -1,5 +1,26 @@
 ## v1.0.3 (2026-06-12)
 
+### 🏗️ Architecture: Card Lifecycle State Machine Optimization
+
+参考 [openclaw-lark](https://github.com/larksuite/openclaw-lark) 插件设计美学，对卡片生命周期和状态机制进行全面优化。**不照搬代码，参考设计原则，适配我们插件的猴子补丁架构**。
+
+- **显式状态转换图 (`PHASE_TRANSITIONS`)**: 定义了每个阶段的合法后继阶段，终端阶段（COMPLETED / CREATION_FAILED / ABORTED / TERMINATED）无出边——吸收态。非法转换被拒绝并记录日志，避免隐式状态漂移。
+- **`CardPhase` 类**: 新增 `CREATION_FAILED`（替代旧的 catch-all `FAILED`，语义更明确——卡片创建失败 → 回退到静态交付）和 `TERMINATED`（消息被删除/撤回 → 立即停止所有更新，独立于 ABORTED 和 FAILED）。向后兼容：`FAILED` 作为 `CREATION_FAILED` 的别名保留。
+- **`TerminalReason` 类**: 追踪会话进入终端阶段的**原因**（normal / error / abort / unavailable / creation_failed），而非仅知道"已结束"。
+- **`CardVisualState` 类**: 将**视觉外观**（thinking / streaming / complete / error / aborted）与**生命周期阶段**分离。多个阶段可映射到同一视觉状态，卡片构建逻辑更清晰。
+- **`CardSession.transition()`**: 验证转换合法性，自动设置 `terminal_reason`/`terminal_source`，日志记录所有转换。现有代码 `session.state = "streaming"` 仍可工作（无验证直接赋值），新代码推荐使用 `session.transition()`。
+- **`CardSession.should_proceed()`**: 统一守卫——合并终端阶段检查 + UnavailableGuard 检查，替代散落的 `session.state in _TERMINAL` 和 `session.guard.should_skip()` 双重判断。
+- **`CardSession.is_stale_create(epoch)`**: Epoch 机制——终端阶段进入时递增 `create_epoch`，卡片创建回调检查 epoch 是否过期，防止过期回调污染状态（竞态场景：创建期间会话被终止）。
+- **`CardSession.enter_terminal()`**: 统一终端入口——设置 `terminal_reason`、`terminal_source`，递增 `create_epoch`。首次调用保留原因（幂等），后续调用不覆盖。
+- **`CardSession._on_guard_terminate()`**: UnavailableGuard 回调现在设置 `TERMINATED` 状态（而非旧的 `FAILED`），语义更精确——消息被删除/撤回不应视为"卡片创建失败"。
+- **新增 `state/phase.py` 模块**: `CardPhase`、`TerminalReason`、`CardVisualState`、`PHASE_TRANSITIONS`、`TERMINAL_PHASES`、`PHASE_TO_VISUAL`、`is_legal_transition()`、`get_visual_state()` 的唯一定义源。
+- **新增 `tests/test_phase.py`**: 88 个测试覆盖所有状态机增强功能——常量、转换表、`transition()`、`should_proceed()`、`is_terminal_phase`/`visual_state` 属性、`enter_terminal()`、`is_stale_create()`、`_on_guard_terminate()`、向后兼容性。
+- **`controller/mixin.py`**: 阶段常量从 `state.phase` 导入（唯一定义源），`_do_create_card` 使用 epoch 快照 + stale-create 守卫，失败路径使用 `CREATION_FAILED` + `enter_terminal()`。
+- **`controller/linear_mixin.py`**: `_do_create_linear_card` 使用 epoch 快照 + stale-create 守卫，`_schedule_linear_flush` 使用 `session.should_proceed()`，`_do_unified_flush` 使用 `session.is_terminal_phase`。
+- **`controller/core.py`**: `_get_active_session` 使用 `session.is_terminal_phase` 属性，`on_completed` 检查 `CREATION_FAILED`/`TERMINATED` 作为 yield-to-gateway 条件。
+- **`patching/gateway.py`**: 悬挂会话检测更新为包含 `"creation_failed"` 和 `"terminated"`（替代旧的 `"failed"`）。
+- **`controller/__init__.py`** / **`state/__init__.py`**: 导出 `CREATION_FAILED` 和 `TERMINATED`。
+
 ### 🐛 Bug Fixes
 
 - **CRITICAL: Fixed conversation list permanently showing "处理中..." for Chinese users (Bug #3)**: Root cause was `cardkit_close_streaming` only updating `summary.content` but NOT `summary.i18n_content`. Feishu CardKit 2.0 displays `i18n_content.<locale>` based on the user's language preference — for Chinese users, it shows `i18n_content.zh_cn`. Since `i18n_content` was never updated from the initial "处理中...", the conversation list always displayed "处理中..." even after `close_streaming` succeeded and `content` was updated. Fix: (1) `cardkit_close_streaming` in `feishu/client.py` now updates BOTH `content` and `i18n_content` (zh_cn + en_us) when closing streaming. (2) All card builders (`build_complete_card`, `build_linear_complete_card`, `_build_linear_complete_unified`, `build_unified_complete_card`) now use a shared `_build_summary()` helper that includes both `content` and `i18n_content`. (3) Added regression test class `TestSummaryI18nContent` with 4 tests covering all code paths.

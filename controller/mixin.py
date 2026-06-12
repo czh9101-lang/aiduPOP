@@ -38,30 +38,34 @@ from ..feishu import (
 )
 from ..flush import CARDKIT_MS, PATCH_MS
 
+# ── Phase constants — single source of truth ─────────────────────────
+from ..state.phase import (
+    CardPhase,
+    TerminalReason,
+    TERMINAL_PHASES,
+    _TERMINAL,
+)
+
+# Re-export as module-level names for backward compatibility.
+# Existing code that does ``from .mixin import IDLE, FAILED`` continues
+# to work.  New code should import from ``..state.phase`` directly.
+IDLE = CardPhase.IDLE
+CREATING = CardPhase.CREATING
+STREAMING = CardPhase.STREAMING
+COMPLETING = CardPhase.COMPLETING
+COMPLETED = CardPhase.COMPLETED
+CREATION_FAILED = CardPhase.CREATION_FAILED
+ABORTED = CardPhase.ABORTED
+TERMINATED = CardPhase.TERMINATED
+# DEPRECATED: use CREATION_FAILED instead
+FAILED = CardPhase.FAILED  # == "creation_failed"
+
 if TYPE_CHECKING:
     from ..config import Config
     from ..state.session import CardSession
     from ..feishu import FeishuClient
 
 _logger = logging.getLogger("hermes_lark_streaming")
-
-IDLE = "idle"
-CREATING = "creating"
-STREAMING = "streaming"
-COMPLETING = "completing"
-COMPLETED = "completed"
-FAILED = "failed"
-ABORTED = "aborted"
-
-# True terminal states — session is done and will never accept updates.
-# COMPLETING is intentionally NOT a terminal state: it is a transitional
-# state during which late-arriving on_answer / on_thinking callbacks
-# must still be able to update unified_state.  The drain logic in
-# _do_linear_complete will flush any remaining dirty data before
-# closing streaming.  If COMPLETING were in _TERMINAL, _get_active_session
-# would return None and those callbacks would silently drop content,
-# causing the "footer appears before content finishes streaming" bug.
-_TERMINAL = {COMPLETED, FAILED, ABORTED}
 
 __all__ = [
     "ControllerMixin",
@@ -70,6 +74,8 @@ __all__ = [
     "STREAMING",
     "COMPLETING",
     "COMPLETED",
+    "CREATION_FAILED",
+    "TERMINATED",
     "FAILED",
     "ABORTED",
     "_TERMINAL",
@@ -89,7 +95,10 @@ class ControllerMixin:
     async def _do_create_card(self, session: CardSession) -> None:
         if session.state != IDLE:
             return
+        # Snapshot epoch before async creation
+        epoch = session.create_epoch
         session.state = CREATING
+        session._create_epoch_snap = epoch
 
         try:
             await self._ensure_init()
@@ -123,7 +132,12 @@ class ControllerMixin:
                 session.flush.set_throttle(PATCH_MS)
 
             session.flush.set_card_message_ready(True)
-            if session.state == CREATING:
+
+            # ── Stale-create guard ──
+            # If the session was terminated/aborted while we were awaiting
+            # card creation, the epoch will have changed — skip the
+            # CREATING → STREAMING transition.
+            if session.state == CREATING and not session.is_stale_create(epoch):
                 session.state = STREAMING
             # Signal card readiness so _do_complete_inner can proceed
             session._card_ready.set()
@@ -135,7 +149,11 @@ class ControllerMixin:
             )
         except Exception:
             _logger.exception("_do_create_card failed")
-            session.state = FAILED
+            session.state = CREATION_FAILED
+            session.enter_terminal(
+                reason=TerminalReason.CREATION_FAILED,
+                source="_do_create_card",
+            )
             # Signal readiness even on failure so awaiters don't deadlock
             session._card_ready.set()
 
@@ -327,7 +345,11 @@ class ControllerMixin:
                 (session.message_id or "?")[:12],
                 session.state,
             )
-            session.state = FAILED
+            session.state = CREATION_FAILED
+            session.enter_terminal(
+                reason=TerminalReason.CREATION_FAILED,
+                source="_do_complete_inner",
+            )
             return False
 
         display = session.text.display_text
@@ -343,7 +365,7 @@ class ControllerMixin:
         if session.reasoning_start:
             reasoning_elapsed_ms = (time.time() - session.reasoning_start) * 1000
 
-        is_error = session.state == FAILED
+        is_error = session.state in (CREATION_FAILED, TERMINATED)
         # COMPLETING 状态下需通过 _was_aborted 获取中断标记
         is_aborted = getattr(session, "_was_aborted", False) or session.state == ABORTED
         error_message = getattr(session, "error_message", "")
@@ -442,7 +464,11 @@ class ControllerMixin:
             session.card_msg_id,
             session.sequence,
         )
-        session.state = FAILED
+        session.state = CREATION_FAILED
+        session.enter_terminal(
+            reason=TerminalReason.CREATION_FAILED,
+            source="_do_complete_inner_3_retries",
+        )
         return False
 
     async def _do_cron_deliver(self, chat_id: str, content: str) -> None:

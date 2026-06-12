@@ -73,11 +73,14 @@ from .mixin import (
     ABORTED,
     COMPLETED,
     COMPLETING,
+    CREATION_FAILED,
     CREATING,
     FAILED,
     IDLE,
     STREAMING,
+    TERMINATED,
 )
+from ..state.phase import TerminalReason
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -152,7 +155,10 @@ class UnifiedControllerMixin:
         """
         if session.state != IDLE:
             return
+        # Snapshot epoch before async creation
+        epoch = session.create_epoch
         session.state = CREATING
+        session._create_epoch_snap = epoch
         session.linear = True
         session.unified_state = UnifiedLinearState()
 
@@ -198,7 +204,12 @@ class UnifiedControllerMixin:
                 session.flush.set_throttle(PATCH_MS)
 
             session.flush.set_card_message_ready(True)
-            if session.state == CREATING:
+
+            # ── Stale-create guard ──
+            # If the session was terminated/aborted while we were awaiting
+            # card creation, the epoch will have changed — skip the
+            # CREATING → STREAMING transition.
+            if session.state == CREATING and not session.is_stale_create(epoch):
                 session.state = STREAMING
 
             # ── Execute deferred flush immediately after card is ready ──
@@ -233,7 +244,11 @@ class UnifiedControllerMixin:
             )
         except Exception:
             _logger.exception("_do_create_linear_card failed")
-            session.state = FAILED
+            session.state = CREATION_FAILED
+            session.enter_terminal(
+                reason=TerminalReason.CREATION_FAILED,
+                source="_do_create_linear_card",
+            )
             # Signal readiness even on failure so awaiters don't deadlock
             session._card_ready.set()
 
@@ -260,9 +275,10 @@ class UnifiedControllerMixin:
         deferred.  The card creation routine will pick it up once the
         card is ready.
         """
-        if session.state == IDLE or session.state in _TERMINAL or session.state == COMPLETING:
+        if not session.should_proceed("_schedule_linear_flush"):
             return
-        if session.guard.should_skip("_schedule_linear_flush"):
+        # COMPLETING is not terminal, but we should not schedule new flushes
+        if session.state == IDLE or session.state == COMPLETING:
             return
 
         state = session.unified_state
@@ -329,7 +345,7 @@ class UnifiedControllerMixin:
         Phase 4 (complete):
             Handled by ``_preservative_seal``.
         """
-        if session.state in _TERMINAL or session.state == COMPLETING or not session.card_id:
+        if session.is_terminal_phase or session.state == COMPLETING or not session.card_id:
             return
         state = session.unified_state
         if state is None:
@@ -1135,7 +1151,11 @@ class UnifiedControllerMixin:
             _logger.warning("complete: card creation timed out: msg=%s", (session.message_id or "?")[:12])
 
         if not session.card_id:
-            session.state = FAILED
+            session.state = CREATION_FAILED
+            session.enter_terminal(
+                reason=TerminalReason.CREATION_FAILED,
+                source="_do_linear_complete",
+            )
             return False
 
         # ── Step 4: Finalize state ──
@@ -1144,7 +1164,7 @@ class UnifiedControllerMixin:
 
         # ── Build footer data ──
         footer_data = session.footer
-        is_error = session.state == FAILED
+        is_error = session.state in (CREATION_FAILED, TERMINATED)
         is_aborted = getattr(session, "_was_aborted", False) or session.state == ABORTED
         error_message = getattr(session, "error_message", "")
 
@@ -1232,7 +1252,11 @@ class UnifiedControllerMixin:
         if seal_ok:
             session.state = COMPLETED
         else:
-            session.state = FAILED
+            session.state = CREATION_FAILED
+            session.enter_terminal(
+                reason=TerminalReason.CREATION_FAILED,
+                source="_do_linear_complete_seal_failed",
+            )
 
         return seal_ok
 

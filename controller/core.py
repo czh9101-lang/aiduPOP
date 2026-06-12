@@ -23,10 +23,13 @@ from .mixin import (
     ABORTED,
     COMPLETED,
     COMPLETING,
+    CREATION_FAILED,
     FAILED,
     IDLE,
+    TERMINATED,
     ControllerMixin,
 )
+from ..state.phase import TerminalReason
 from ..feishu import (
     FeishuClient,
     FeishuClientConfig,
@@ -110,7 +113,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
     def _get_active_session(self, message_id: str) -> CardSession | None:
         """获取非终态的活跃 session，不存在或已终态返回 None."""
         session = self._sessions.get(message_id)
-        if session is None or session.state in _TERMINAL:
+        if session is None or session.is_terminal_phase:
             return None
         return session
 
@@ -475,8 +478,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             message_id = redirected_id or message_id
 
         # 卡片创建失败 → 交回 gateway 正常回复
-        if session.state == FAILED:
-            _logger.info("on_completed: msg=%s state=FAILED, yielding to gateway", (message_id or "?")[:12])
+        if session.state in (CREATION_FAILED, TERMINATED):
+            _logger.info("on_completed: msg=%s state=%s, yielding to gateway", (message_id or "?")[:12], session.state)
             self._cleanup(message_id)
             return False
 
@@ -618,7 +621,7 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 _logger.debug("background review sender failed", exc_info=True)
 
     def _schedule_card_update(self, session: CardSession) -> None:
-        if session.state == IDLE or session.state in _TERMINAL or session.state == COMPLETING:
+        if session.state == IDLE or session.is_terminal_phase or session.state == COMPLETING:
             return
         if session.guard.should_skip("_schedule_card_update"):
             return
