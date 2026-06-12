@@ -119,6 +119,7 @@ class UnifiedLinearState:
         "bg_review_panel_id",
         "_panel_events",
         "_tool_count",
+        "_native_reasoning_active",
     )
 
     def __init__(self) -> None:
@@ -154,6 +155,15 @@ class UnifiedLinearState:
         # order rather than grouping all reasoning before all tools.
         self._panel_events: list[tuple[str, int]] = []
         self._tool_count: int = 0
+
+        # ── Native reasoning dedup ──
+        # When the model provides a dedicated reasoning_callback (e.g.
+        # DeepSeek, QwQ), reasoning text arrives incrementally via
+        # on_reasoning.  The interim_assistant_callback also delivers the
+        # same reasoning text in accumulated form.  Without this flag,
+        # _linear_on_thinking would append the same text again via
+        # on_reasoning_delta, causing doubled content in the panel.
+        self._native_reasoning_active: bool = False
 
     # ------------------------------------------------------------------
     # Event handlers

@@ -406,6 +406,22 @@ class ControllerMixin:
                         session._streaming_closed = True  # type: ignore[attr-defined]
                     else:
                         session.sequence += 1
+                        # ── Update summary even when streaming is already closed ──
+                        # When Feishu auto-closes streaming (TTL timeout), the
+                        # summary was never updated from "处理中...". Fix it here.
+                        complete_summary = (display or "")[:120].replace("\n", " ").replace("```", "").strip()
+                        if complete_summary:
+                            try:
+                                await self._client.cardkit_update_summary(
+                                    session.card_id,
+                                    complete_summary,
+                                    sequence=session.sequence,
+                                )
+                            except FeishuAPIError as e:
+                                _logger.warning(
+                                    "do_complete: summary update failed (streaming already closed) card=%s error=%s",
+                                    (session.card_id or "")[:12], e,
+                                )
                     await self._client.cardkit_update(
                         session.card_id,
                         card,

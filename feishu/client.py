@@ -424,6 +424,47 @@ class FeishuClient:
 
         await self._retry_transient("cardkit_close_streaming", _do)
 
+    async def cardkit_update_summary(
+        self,
+        card_id: str,
+        summary: str,
+        *,
+        sequence: int = 0,
+    ) -> None:
+        """Update the card summary text WITHOUT closing streaming mode.
+
+        Used when streaming was already closed (e.g. by Feishu TTL) but
+        the summary still needs to be updated from "处理中..." to the
+        actual answer text.  Unlike :meth:`cardkit_close_streaming`, this
+        method does NOT set ``streaming_mode: False`` — it only updates
+        the ``summary`` field.
+
+        This fixes the bug where the conversation list permanently shows
+        "处理中..." when Feishu auto-closes streaming before the
+        preservative seal can call ``cardkit_close_streaming``.
+        """
+        if not summary:
+            return
+        truncated = summary[:120]
+        settings: dict[str, Any] = {
+            "summary": {
+                "content": truncated,
+                "i18n_content": {
+                    "zh_cn": truncated,
+                    "en_us": truncated,
+                },
+            },
+        }
+
+        async def _do():
+            body_builder = SettingsCardRequestBody.builder().settings(self._dumps(settings))
+            body_builder = body_builder.sequence(sequence)
+            request = SettingsCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()
+            resp = await self._client.cardkit.v1.card.asettings(request)
+            self._check(resp, "cardkit_update_summary")
+
+        await self._retry_transient("cardkit_update_summary", _do)
+
     async def cardkit_extend_ttl(
         self,
         card_id: str,

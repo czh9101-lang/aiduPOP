@@ -618,6 +618,16 @@ class UnifiedControllerMixin:
           streaming path already delivered content, to prevent doubling.
           The callbacks.py layer now also checks the already_streamed
           kwarg from Hermes, providing a first line of defense.
+
+        Native reasoning dedup:
+          When the model provides a dedicated reasoning_callback (e.g.
+          DeepSeek, QwQ), reasoning text arrives incrementally via
+          on_reasoning → state.on_reasoning_delta, and
+          state._native_reasoning_active is set to True.  The
+          interim_assistant_callback also delivers the same reasoning in
+          accumulated form.  Without this guard, we'd double the
+          reasoning content in the panel (Bug: "TheThe user user is is
+          saying saying...").
         """
         state = session.unified_state
         if state is None:
@@ -625,6 +635,19 @@ class UnifiedControllerMixin:
         split = split_reasoning_text(text)
         reasoning = split.get("reasoning_text")
         answer = split.get("answer_text")
+
+        # ── Skip reasoning if native reasoning_callback is active ──
+        # The same reasoning has already been delivered incrementally
+        # via on_reasoning → state.on_reasoning_delta.  Adding it again
+        # here would cause doubled content in the collapsible panel.
+        if reasoning and state._native_reasoning_active:
+            _logger.debug(
+                "_linear_on_thinking: skip reasoning (native reasoning active, "
+                "len=%d) msg=%s",
+                len(reasoning),
+                (session.message_id or "?")[:12],
+            )
+            reasoning = None
 
         if reasoning and self._cfg.show_reasoning:
             state.on_reasoning_delta(reasoning)
@@ -808,6 +831,30 @@ class UnifiedControllerMixin:
                     "preservative seal: streaming already closed, skipping close_streaming card=%s",
                     card_id[:12],
                 )
+                # ── Update summary even when streaming is already closed ──
+                # When Feishu auto-closes streaming (TTL timeout) or a
+                # previous flush hit CARDKIT_STREAMING_CLOSED, the summary
+                # was never updated from "处理中..." to the actual answer.
+                # Without this, the conversation list permanently shows
+                # "处理中..." even though the card content is complete.
+                if seal_summary:
+                    try:
+                        session.sequence += 1
+                        await self._client.cardkit_update_summary(
+                            card_id, seal_summary, sequence=session.sequence,
+                        )
+                        _logger.info(
+                            "preservative seal: summary updated (streaming already closed) "
+                            "card=%s seq=%d summary=%s",
+                            card_id[:12], session.sequence,
+                            repr(seal_summary[:40]),
+                        )
+                    except FeishuAPIError as e:
+                        _logger.warning(
+                            "preservative seal: summary update failed (streaming already closed) "
+                            "card=%s error=%s",
+                            card_id[:12], e,
+                        )
 
             # ── Step 2: Update unified panel to final state (non-streaming) ──
             seal_actions: list[dict[str, Any]] = []
@@ -1230,6 +1277,28 @@ class UnifiedControllerMixin:
                         "fallback: streaming already closed, skipping close_streaming card=%s",
                         (session.card_id or "")[:12],
                     )
+                    # ── Update summary even when streaming is already closed ──
+                    # Same fix as in preservative seal: when streaming was
+                    # auto-closed by Feishu TTL, the summary was never updated.
+                    fallback_summary = ""
+                    if state is not None:
+                        summary_text = state.answer_text
+                        if not summary_text and state.reasoning_rounds:
+                            summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
+                        if summary_text:
+                            fallback_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
+                    if fallback_summary:
+                        try:
+                            session.sequence += 1
+                            await self._client.cardkit_update_summary(
+                                session.card_id, fallback_summary,  # type: ignore[union-attr]
+                                sequence=session.sequence,
+                            )
+                        except FeishuAPIError as e:
+                            _logger.warning(
+                                "fallback: summary update failed card=%s error=%s",
+                                (session.card_id or "")[:12], e,
+                            )
 
                 complete_card = build_unified_complete_card(
                     reasoning_rounds=state.reasoning_rounds if state else [],

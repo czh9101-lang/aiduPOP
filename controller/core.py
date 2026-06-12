@@ -210,6 +210,10 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         if session.linear and session.unified_state:
             session.unified_state.on_reasoning_delta(text)
+            # Mark that native reasoning_callback is active — prevents
+            # _linear_on_thinking from appending the same reasoning text
+            # again when interim_assistant_callback delivers accumulated text.
+            session.unified_state._native_reasoning_active = True
             self._schedule_linear_flush(session)
             return
 
