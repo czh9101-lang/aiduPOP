@@ -180,8 +180,11 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 | Cron 推送纯文本 | Cron 补丁是否生效 | `cron`、`_wrap_cron_deliver` |
 | 图片不显示 | hermes 原生图片处理配置 | hermes 配置、`media_delivery` |
 | 封卡后面板状态异常 | 封卡是否更新面板最终状态 | `_preservative_seal`、`unified_panel` |
-| 页脚早于内容出现 | drain 步骤是否执行 | `drain`、`answer_dirty`、`_do_linear_complete` |
-| 内容不完整就封卡 | `answer_dirty` 是否在 seal 前被 drain | `drain`、`stream_element` |
+| 页脚早于内容出现 | drain 步骤是否执行 + seal 前是否flush脏数据 | `drain`、`answer_dirty`、`_do_linear_complete`、`_preservative_seal` |
+| 内容不完整就封卡 | `answer_dirty` 是否在 seal 前被 flush（非仅清除标记） | `drain`、`stream_element`、`preservative_seal` |
+| 会话列表永久显示"处理中..." | `close_streaming` 是否传入 `summary` + `_streaming_closed` 守卫 | `close_streaming`、`summary`、`_streaming_closed`
+| 300317 序列冲突反复出现 | `_streaming_closed` 守卫是否生效 | `300317`、`_streaming_closed`、`preservative_seal`
+| preservative seal 崩溃 | 重试路径是否重建 panel | `UnboundLocalError`、`panel`、`_preservative_seal`
 | 中断后卡片异常 | card_sent 传播 | `_wrap_run_agent`、`ABORTED`、`card_sent` |
 | 配置不生效 | config.yaml 路径 | `config`、`HERMES_HOME`、`_get_hermes_config_path` |
 
@@ -197,8 +200,12 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 - 旧的分段式设计（每轮推理独立面板、元素计数、拆卡逻辑）已完全移除
 - 保留式封卡只删除卡片上实际存在的元素，更新统一面板为最终状态
 - 加载提示"正在加载上下文..."在首内容到达时删除，删除操作在 API 成功后确认
-- **完成前排空 (drain)**：v1.0.3 修复了页脚早于内容出现的 bug——`_do_linear_complete()` 在关闭流式模式前先 drain 所有剩余脏数据，确保内容完整输出后才封卡
-- **COMPLETING 状态修正**：v1.0.3 将 `COMPLETING` 从 `_TERMINAL` 集合中移除（它是过渡状态而非终态），使晚到的 `on_answer`/`on_thinking` 回调不再被静默丢弃；drain 循环增加最多 5 轮迭代 + `asyncio.sleep(0)` yield 以捕获工作线程晚到内容
+- **完成前排空 (drain)**：v1.0.3 修复了页脚早于内容出现的 bug——`_do_linear_complete()` 在关闭流式模式前先 drain 所有剩余脏数据（最多 8 轮，每轮间隔 20ms 给 worker 线程回调时间），确保内容完整输出后才封卡
+- **Seal 前实际 flush（非仅清除标记）**：v1.0.3 迭代修复了 `_preservative_seal` 的内容完整性守卫——旧实现只打 warning 日志并清除 dirty 标记（内容永久丢失），新实现在 `close_streaming` 前先通过 `cardkit_batch_update`/`cardkit_stream_element` 实际将剩余脏数据刷到卡片，确保所有内容到达飞书后才封卡
+- **卡片摘要更新**：v1.0.3 修复了会话列表永久显示 "处理中..." 的 bug——`cardkit_close_streaming` 新增可选 `summary` 参数，关闭流式时一并调用飞书 settings API 更新 `config.summary`，使会话列表显示回答内容摘要而非永久 "处理中..."
+- **`_streaming_closed` 守卫**：v1.0.3 迭代修复了重复 `close_streaming` 导致 300317 级联失败的 bug——`CardSession` 新增 `_streaming_closed` 布尔标志，确保 `close_streaming` 对同一张卡片只调用一次。所有代码路径（preservative seal、retry、fallback、drain、flush）在调用前检查此标志，成功后设置此标志
+- **重试路径重建 panel**：v1.0.3 迭代修复了 `UnboundLocalError: 'panel'` 导致恢复路径崩溃的 bug——`_preservative_seal` 的 300317 重试路径不再引用 try 块中的 `panel` 局部变量，而是始终从当前状态重建 `retry_panel`
+- **COMPLETING 状态修正**：v1.0.3 将 `COMPLETING` 从 `_TERMINAL` 集合中移除（它是过渡状态而非终态），使晚到的 `on_answer`/`on_thinking` 回调不再被静默丢弃
 
 如果用户报告与旧版行为相关的问题（如拆卡、compact seal、element_limit），请确认他们已升级到 v1.0.3+。
 

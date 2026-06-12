@@ -33,6 +33,7 @@ class CardSession:
         "_loop",
         "_panel_element_created",
         "_pending_flush",
+        "_streaming_closed",
         "_was_aborted",
         "anchor_id",
         "card_created_at",
@@ -107,6 +108,7 @@ class CardSession:
         self._first_answer_time: float = 0.0
         self._loading_hint_removed: bool = False
         self._pending_flush: bool = False
+        self._streaming_closed: bool = False
         self._card_ready: asyncio.Event = asyncio.Event()
 
     # ------------------------------------------------------------------
