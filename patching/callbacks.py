@@ -4,6 +4,24 @@ Split from monkey_patch.py — contains:
   - _maybe_wrap_callbacks() and all inner wrapper functions
     (_answer_wrapper, _thinking_wrapper, _tool_wrapper,
      _reasoning_wrapper, _background_review_wrapper)
+
+Dedup architecture (v1.0.3):
+  Hermes delivers the same text through TWO callbacks:
+    1. stream_delta_callback  — incremental deltas during streaming
+    2. interim_assistant_callback — full accumulated text after the
+       model response completes, with already_streamed=True/False
+
+  The dedup mechanism uses:
+    _stream_consumed_len[eid] — total length of text consumed by
+      stream_delta_callback for this eid.  When interim_assistant_callback
+      arrives, if its text length <= _stream_consumed_len, the text was
+      fully streamed and we skip it (pass through to original callback
+      for segment break / state management).
+
+  When already_streamed=True (Hermes tells us the text was already
+  delivered via stream_delta_callback), we skip on_thinking_delta
+  entirely and just call the original callback (so Hermes's internal
+  _stream_consumer.on_segment_break() fires correctly).
 """
 
 from __future__ import annotations
@@ -71,8 +89,12 @@ def _maybe_wrap_callbacks(agent) -> None:
         return
 
     # ── ANSWER: wrap stream_delta_callback ──
-    # Track the last consumed text hash for dedup with interim_assistant_callback.
-    _stream_consumed_texts: dict[str, str] = {}
+    # Track total consumed text LENGTH for dedup with interim_assistant_callback.
+    # We use length instead of exact text match because:
+    #   - stream_delta_callback delivers incremental deltas: "The ", "user ", ...
+    #   - interim_assistant_callback delivers accumulated text: "The user keeps asking"
+    #   - Exact match on last chunk fails; length-based check is robust.
+    _stream_consumed_len: dict[str, int] = {}
 
     if getattr(agent, "stream_delta_callback", None):
         _orig_stream = agent.stream_delta_callback
@@ -86,8 +108,8 @@ def _maybe_wrap_callbacks(agent) -> None:
                         "answer_wrapper: consumed text len=%d eid=%s",
                         len(text), eid[:12],
                     )
-                    # Record consumed text for dedup with interim_assistant_callback
-                    _stream_consumed_texts[eid] = text
+                    # Record total consumed length for dedup with interim_assistant_callback
+                    _stream_consumed_len[eid] = _stream_consumed_len.get(eid, 0) + len(text)
                     return
                 else:
                     _logger.debug(
@@ -107,37 +129,58 @@ def _maybe_wrap_callbacks(agent) -> None:
     # Routes interim content (status messages, thinking text) to the card.
     # When the card consumes the text, skip the original callback to prevent
     # duplicate messages (card + plain text) on Feishu.
-    # Dedup: skip if the text was already consumed by stream_delta_callback,
-    # which happens when Hermes processes the same text through both callbacks.
+    #
+    # Dedup strategy:
+    #   1. If already_streamed=True (Hermes tells us the text was already
+    #      delivered via stream_delta_callback), skip on_thinking_delta
+    #      entirely and pass through to _orig_interim for segment break.
+    #   2. If the text length <= total consumed by stream_delta_callback,
+    #      the text was fully streamed — skip on_thinking_delta.
+    #   3. Otherwise, process through on_thinking_delta for the card.
     if getattr(agent, "interim_assistant_callback", None):
         _orig_interim = agent.interim_assistant_callback
 
         def _thinking_wrapper(text, *args, **kwargs):
             try:
-                # Dedup: skip if stream_delta_callback already consumed this text
-                last_consumed = _stream_consumed_texts.get(eid, "")
-                if text and text != last_consumed:
+                # ── Check already_streamed kwarg from Hermes ──
+                # When Hermes calls interim_assistant_callback(text, already_streamed=True),
+                # it means the text was already delivered via stream_delta_callback.
+                # We should NOT process it through on_thinking_delta (would cause
+                # duplication in the card), but we MUST call _orig_interim so
+                # Hermes's internal _stream_consumer.on_segment_break() fires
+                # correctly for state management.
+                already_streamed = kwargs.get("already_streamed", False)
+                if already_streamed:
+                    _logger.debug(
+                        "thinking_wrapper: already_streamed=True, passing through eid=%s len=%d",
+                        eid[:12], len(text) if text else 0,
+                    )
+                    return _orig_interim(text, *args, **kwargs)
+
+                # ── Length-based dedup ──
+                # If the total text consumed by stream_delta_callback is >=
+                # the interim text length, the interim text was fully streamed
+                # already.  Skip on_thinking_delta to prevent duplication.
+                consumed_len = _stream_consumed_len.get(eid, 0)
+                if text and consumed_len > 0 and len(text) <= consumed_len:
+                    _logger.debug(
+                        "thinking_wrapper: dedup skip (stream consumed %d >= interim %d) eid=%s",
+                        consumed_len, len(text), eid[:12],
+                    )
+                    # Still call _orig_interim for Hermes state management
+                    return _orig_interim(text, *args, **kwargs)
+
+                if text:
                     from .hooks import on_thinking_delta
                     consumed = on_thinking_delta(message_id=eid, text=text)
                     if consumed:
                         # Card consumed the text — skip original callback to
                         # avoid duplicate plain-text delivery via _stream_consumer.
-                        # Safe because: when the card is active, _stream_consumer's
-                        # _accumulated is empty (answer_wrapper already intercepted
-                        # the stream deltas), so on_segment_break() would be a no-op.
                         _logger.debug(
                             "thinking_wrapper: consumed text len=%d eid=%s",
                             len(text), eid[:12],
                         )
                         return
-                elif text and text == last_consumed:
-                    # Text already consumed by stream_delta_callback (card shown),
-                    # skip original callback to avoid duplicate plain-text send.
-                    _logger.debug(
-                        "thinking_wrapper: dedup skip (stream already consumed) eid=%s",
-                        eid[:12],
-                    )
-                    return
             except Exception:
                 _logger.debug("thinking_wrapper: exception", exc_info=True)
             # Card didn't consume (disabled / not Feishu / error) — call original

@@ -493,6 +493,27 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         if answer:
             session.text.on_deliver(answer)
+            # ── Linear mode answer fallback ──
+            # When stream_delta_callback was not called or failed to deliver
+            # the answer text (e.g. callback not wrapped, streaming disabled,
+            # or race condition), unified_state.answer_text will be empty.
+            # The `answer` parameter from on_completed contains the full
+            # response text — use it as a fallback to ensure the card shows
+            # the answer content.  Only set if unified_state.answer_text is
+            # empty to avoid duplicating text that was already streamed.
+            if (
+                session.linear
+                and session.unified_state is not None
+                and not session.unified_state.answer_text
+            ):
+                from ..state.text import strip_reasoning_tags
+                clean_answer = strip_reasoning_tags(answer)
+                if clean_answer:
+                    session.unified_state.on_answer_delta(clean_answer)
+                    _logger.info(
+                        "on_completed: linear answer fallback, len=%d msg=%s",
+                        len(clean_answer), (message_id or "?")[:12],
+                    )
 
         # ── 保存错误/中断消息 ──
         # 用于在卡片正文中展示（而非仅页脚）

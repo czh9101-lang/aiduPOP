@@ -609,6 +609,15 @@ class UnifiedControllerMixin:
 
         Splits the incoming text into reasoning and answer components,
         updates the unified state, and schedules a flush.
+
+        Dedup note (v1.0.3):
+          When stream_delta_callback is active, answer text arrives
+          incrementally via on_answer → state.on_answer_delta.  The
+          interim_assistant_callback may also deliver the same text in
+          accumulated form.  We skip the answer portion here if the
+          streaming path already delivered content, to prevent doubling.
+          The callbacks.py layer now also checks the already_streamed
+          kwarg from Hermes, providing a first line of defense.
         """
         state = session.unified_state
         if state is None:
@@ -628,6 +637,12 @@ class UnifiedControllerMixin:
             _has_streamed_answer = bool(state.answer_text)
             if not _has_streamed_answer:
                 state.on_answer_delta(answer)
+            else:
+                _logger.debug(
+                    "_linear_on_thinking: skip answer dedup (streamed=%d chars) msg=%s",
+                    len(state.answer_text),
+                    (session.message_id or "?")[:12],
+                )
         if (reasoning and self._cfg.show_reasoning) or answer:
             self._schedule_linear_flush(session)
 
