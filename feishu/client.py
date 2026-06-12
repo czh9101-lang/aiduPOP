@@ -404,10 +404,14 @@ class FeishuClient:
         如果只更新 ``content`` 而不更新 ``i18n_content``，中文用户
         在会话列表中会一直看到"处理中..."——这正是 Bug #3 的根因。
         """
-        settings: dict[str, Any] = {"streaming_mode": False}
+        settings: dict[str, Any] = {
+            "config": {
+                "streaming_mode": False,
+            }
+        }
         if summary:
             truncated = summary[:120]
-            settings["summary"] = {
+            settings["config"]["summary"] = {
                 "content": truncated,
                 "i18n_content": {
                     "zh_cn": truncated,
@@ -451,11 +455,13 @@ class FeishuClient:
             return
         truncated = summary[:120]
         settings: dict[str, Any] = {
-            "summary": {
-                "content": truncated,
-                "i18n_content": {
-                    "zh_cn": truncated,
-                    "en_us": truncated,
+            "config": {
+                "summary": {
+                    "content": truncated,
+                    "i18n_content": {
+                        "zh_cn": truncated,
+                        "en_us": truncated,
+                    },
                 },
             },
         }
@@ -484,7 +490,7 @@ class FeishuClient:
         """
         async def _do():
             body_builder = SettingsCardRequestBody.builder().settings(
-                self._dumps({"streaming_mode": True, "streaming_config": {"ttl_seconds": ttl_seconds}})
+                self._dumps({"config": {"streaming_mode": True, "streaming_config": {"ttl_seconds": ttl_seconds}}})
             )
             body_builder = body_builder.sequence(sequence)
             request = SettingsCardRequest.builder().card_id(card_id).request_body(body_builder.build()).build()

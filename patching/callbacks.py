@@ -97,6 +97,36 @@ def _maybe_wrap_callbacks(agent) -> None:
             bool(_current_interim and getattr(_current_interim, "_hls_wrapper", False)),
             eid[:12] if eid else "?",
         )
+        # ── Late-arriving reasoning_callback fix ──
+        # When _maybe_wrap_callbacks is called a second time (Hermes
+        # sometimes sets reasoning_callback AFTER the first call), the
+        # guard SKIP prevents ALL wrapping — including reasoning_callback.
+        # Without wrapping, on_reasoning is never called, so
+        # _native_reasoning_active stays False and the dedup guard in
+        # _linear_on_thinking doesn't trigger, causing reasoning text
+        # duplication in the collapsible panel.
+        #
+        # Fix: Even when the guard SKIP fires, check if reasoning_callback
+        # exists and is NOT yet wrapped. If so, wrap it separately.
+        _current_reasoning_now = getattr(agent, "reasoning_callback", None)
+        if _current_reasoning_now and not getattr(_current_reasoning_now, "_hls_wrapper", False):
+            _orig_reasoning_late = _current_reasoning_now
+
+            def _late_reasoning_wrapper(text, *args, **kwargs):
+                try:
+                    from .hooks import on_reasoning_delta
+                    if text:
+                        on_reasoning_delta(message_id=eid, text=text)
+                except Exception:
+                    pass
+                return _orig_reasoning_late(text, *args, **kwargs)
+
+            agent.reasoning_callback = _late_reasoning_wrapper
+            setattr(agent.reasoning_callback, "_hls_wrapper", True)
+            _logger.info(
+                "HLS_WRAP: late-wrapped reasoning_callback eid=%s",
+                eid[:12] if eid else "?",
+            )
         return
 
     # ── ANSWER: wrap stream_delta_callback ──

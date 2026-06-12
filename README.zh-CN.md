@@ -18,7 +18,7 @@
 
 为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、统一可折叠面板、按时间线交错显示推理与工具调用等。
 
-> **提示**：流式卡片完成时，卡片的摘要文本（在飞书会话列表中显示）会自动从"处理中..."更新为回答内容的摘要（如无回答则使用推理文本作为回退）。更新采用两步操作：先关闭流式模式，再通过独立 API 调用更新摘要——即使流式模式已因 TTL 超时提前关闭，摘要仍能可靠更新。同时更新 `content` 和 `i18n_content`（zh_cn + en_us），确保无论用户的飞书语言设置如何，会话列表都能正确显示已完成卡片的实际内容。
+> **提示**：流式卡片完成时，卡片的摘要文本（在飞书会话列表中显示）会自动从"处理中..."更新为回答内容的摘要（如无回答则使用推理文本作为回退）。根据飞书 CardKit 2.0 文档，会话列表预览在 `streaming_mode` 从 `true` 变为 `false` 时**原子地**更新——`summary.content` 必须包含在 `close_streaming` 请求本身中。同时更新 `content` 和 `i18n_content`（zh_cn + en_us），确保无论用户的飞书语言设置如何，会话列表都能正确显示已完成卡片的实际内容。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >
