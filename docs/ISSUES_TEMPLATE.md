@@ -188,6 +188,8 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 | 卡片创建后状态不对 | epoch 过期检查 `is_stale_create` | `is_stale_create`、`create_epoch`、`_create_epoch_snap`
 | 消息删除后仍更新 | UnavailableGuard → `TERMINATED` 状态 | `TERMINATED`、`unavailable_guard`、`terminal_reason`
 | preservative seal 崩溃 | 重试路径是否重建 panel | `UnboundLocalError`、`panel`、`_preservative_seal`
+| 回答内容不显示（卡片空白或仅面板） | `_thinking_wrapper` 的 `already_streamed` 处理 + 去重长度追踪 `_stream_consumed_len` + `on_completed` 线性回答回退 | `already_streamed`、`_stream_consumed_len`、`on_completed`、`unified_state.answer_text` |
+| 回答文本重复/乱码 | `_thinking_wrapper` 是否在 `already_streamed=True` 时跳过 `on_thinking_delta` | `already_streamed`、`_thinking_wrapper`、`on_thinking_delta` |
 | 中断后卡片异常 | card_sent 传播 | `_wrap_run_agent`、`ABORTED`、`card_sent` |
 | 配置不生效 | config.yaml 路径 | `config`、`HERMES_HOME`、`_get_hermes_config_path` |
 
@@ -210,6 +212,7 @@ grep -E "controller_linear|flush|cardkit|unified_panel" ~/.hermes/logs/gateway.l
 - **重试路径重建 panel**：v1.0.3 迭代修复了 `UnboundLocalError: 'panel'` 导致恢复路径崩溃的 bug——`_preservative_seal` 的 300317 重试路径不再引用 try 块中的 `panel` 局部变量，而是始终从当前状态重建 `retry_panel`
 - **COMPLETING 状态修正**：v1.0.3 将 `COMPLETING` 从 `_TERMINAL` 集合中移除（它是过渡状态而非终态），使晚到的 `on_answer`/`on_thinking` 回调不再被静默丢弃
 - **状态机增强**：v1.0.3 参考 openclaw-lark 引入显式状态转换图 (`PHASE_TRANSITIONS`)、终端原因追踪 (`TerminalReason`)、视觉状态分离 (`CardVisualState`)、epoch 机制 (`is_stale_create`)、统一守卫 (`should_proceed`)、验证转换 (`transition`)。新增 `CREATION_FAILED`（卡片创建失败）和 `TERMINATED`（消息删除/撤回）阶段，`FAILED` 作为 `CREATION_FAILED` 的别名保留。
+- **`already_streamed` 透传 + 长度去重 + 线性回答回退**：v1.0.3 迭代修复了回答内容不在流式卡片中显示的 bug——三个根因：(1) `_thinking_wrapper` 忽略 Hermes 的 `already_streamed` kwarg 导致双重投递/乱码（修复：`already_streamed=True` 时跳过 `on_thinking_delta`）；(2) 精确字符串去重对累积文本失效（修复：`_stream_consumed_len` 长度追踪替代 `_stream_consumed_texts` 精确匹配）；(3) `on_completed` 只更新非线性 `session.text`，线性模式 `unified_state.answer_text` 始终为空（修复：线性回退——当线性且 `answer_text` 为空但 answer 参数有值时写入 `unified_state`）。`_linear_on_thinking` 新增去重决策调试日志。
 
 如果用户报告与旧版行为相关的问题（如拆卡、compact seal、element_limit），请确认他们已升级到 v1.0.3+。
 
