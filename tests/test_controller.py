@@ -902,3 +902,52 @@ class TestDoLinearComplete:
         summary = close_kwargs[0].get("summary", "")
         assert "Hello" in summary
         assert "处理中" not in summary
+
+    @pytest.mark.asyncio
+    async def test_streaming_closed_guard_prevents_double_close_on_300317(self) -> None:
+        """When batch_update gets 300317 after close_streaming succeeds,
+        the retry path must NOT call close_streaming again.
+
+        This is the fix for the cascading 300317 failure:
+        1. preservative_seal calls close_streaming → succeeds
+        2. preservative_seal calls batch_update → 300317
+        3. Retry path should skip close_streaming (already done)
+        4. Retry path should only retry batch_update
+        Without _streaming_closed guard, step 3 calls close_streaming
+        again, causing a second 300317 (sequence advanced from step 1).
+        """
+        ctrl = _setup_ctrl()
+        client = ctrl._client
+        close_call_count = 0
+
+        async def _close_side_effect(*a, **k):
+            nonlocal close_call_count
+            close_call_count += 1
+            # First close_streaming succeeds
+
+        async def _batch_side_effect(*a, **k):
+            # First batch_update → 300317
+            raise FeishuAPIError("sequence conflict", code=CARDKIT_SEQUENCE_CONFLICT)
+
+        client.cardkit_close_streaming = AsyncMock(side_effect=_close_side_effect)
+        client.cardkit_batch_update = AsyncMock(side_effect=_batch_side_effect)
+
+        session = _make_session("msg_double_close", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_double"
+        session._panel_element_created = True
+        session._loading_hint_removed = True
+        ctrl._sessions["msg_double_close"] = session
+
+        result = await ctrl._do_linear_complete(session)
+        # Should fail (all retries exhausted), but close_streaming
+        # should only have been called ONCE
+        assert close_call_count == 1, (
+            f"close_streaming should be called exactly once, got {close_call_count}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_session_initializes_streaming_closed_false(self) -> None:
+        """CardSession._streaming_closed starts as False."""
+        session = CardSession("msg_test", "chat_test", asyncio.new_event_loop())
+        assert session._streaming_closed is False

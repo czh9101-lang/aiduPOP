@@ -414,6 +414,7 @@ class UnifiedControllerMixin:
                             "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
                             session.card_id[:12],
                         )
+                        session._streaming_closed = True
                         return
                     if is_schema_error(e):
                         # ── Schema error (300315): permanent, don't retry ──
@@ -454,6 +455,7 @@ class UnifiedControllerMixin:
                     state.answer_dirty = False
                 except FeishuAPIError as e:
                     if e.code == CARDKIT_STREAMING_CLOSED:
+                        session._streaming_closed = True
                         return
                     _logger.debug("unified stream_element failed: %s", e)
 
@@ -527,6 +529,7 @@ class UnifiedControllerMixin:
                         "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
                         session.card_id[:12],
                     )
+                    session._streaming_closed = True
                     return
                 if is_schema_error(e):
                     _logger.error(
@@ -570,6 +573,7 @@ class UnifiedControllerMixin:
                         "unified stream: streaming closed, will be handled by TTL or seal: card=%s",
                         session.card_id[:12],
                     )
+                    session._streaming_closed = True
                     return
                 _logger.debug("unified stream_element failed: %s", e)
 
@@ -706,13 +710,14 @@ class UnifiedControllerMixin:
                     except FeishuAPIError as e:
                         if e.code == CARDKIT_STREAMING_CLOSED:
                             _logger.info("seal drain: streaming already closed, skipping panel flush")
+                            session._streaming_closed = True
                         else:
                             _logger.warning("seal drain panel failed: %s", e)
                         state.panel_dirty = False
                         state.tool_steps_dirty = False
 
                 # ── Flush remaining answer text ──
-                if state.answer_dirty and session._panel_element_created:
+                if state.answer_dirty and session._panel_element_created and not session._streaming_closed:
                     content = state.answer_text or " "
                     try:
                         session.sequence += 1
@@ -728,6 +733,7 @@ class UnifiedControllerMixin:
                     except FeishuAPIError as e:
                         if e.code == CARDKIT_STREAMING_CLOSED:
                             _logger.info("seal drain: streaming already closed, skipping answer flush")
+                            session._streaming_closed = True
                         else:
                             _logger.warning("seal drain answer failed: %s", e)
                         state.answer_dirty = False
@@ -739,6 +745,14 @@ class UnifiedControllerMixin:
             # list.  Without updating it, the conversation list would forever
             # show "处理中..." even though the card is completed — the exact
             # bug the user reported.
+            #
+            # CRITICAL: Only call close_streaming ONCE per card lifecycle.
+            # If streaming was already closed (e.g. by a TTL timeout or an
+            # earlier seal attempt), skip the close_streaming call — calling
+            # it again causes 300317 sequence conflict because the card's
+            # server-side sequence has already advanced past our local
+            # sequence number.  The _streaming_closed flag ensures we
+            # never call close_streaming twice.
             seal_summary = ""
             if state is not None:
                 summary_text = state.answer_text
@@ -747,18 +761,26 @@ class UnifiedControllerMixin:
                 if summary_text:
                     seal_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
 
-            session.sequence += 1
-            _logger.info(
-                "preservative seal: closing streaming card=%s seq=%d summary=%s",
-                card_id[:12], session.sequence,
-                repr(seal_summary[:40]) if seal_summary else "(empty)",
-            )
-            await self._client.cardkit_close_streaming(
-                card_id, sequence=session.sequence, summary=seal_summary,
-            )
+            if not session._streaming_closed:
+                session.sequence += 1
+                _logger.info(
+                    "preservative seal: closing streaming card=%s seq=%d summary=%s",
+                    card_id[:12], session.sequence,
+                    repr(seal_summary[:40]) if seal_summary else "(empty)",
+                )
+                await self._client.cardkit_close_streaming(
+                    card_id, sequence=session.sequence, summary=seal_summary,
+                )
+                session._streaming_closed = True
+            else:
+                _logger.info(
+                    "preservative seal: streaming already closed, skipping close_streaming card=%s",
+                    card_id[:12],
+                )
 
             # ── Step 2: Update unified panel to final state (non-streaming) ──
             seal_actions: list[dict[str, Any]] = []
+            panel: dict[str, Any] | None = None
 
             if state is not None:
                 state.finalize()
@@ -836,27 +858,51 @@ class UnifiedControllerMixin:
                 # success, causing close_streaming and batch_update to
                 # silently fail (spinning icon, no footer).
                 # We now retry with incremented sequence numbers.
+                #
+                # IMPORTANT: We must NOT call close_streaming again in the
+                # retry if it already succeeded in the try block above.
+                # The 300317 came from the batch_update after close_streaming,
+                # meaning close_streaming itself succeeded — only batch_update
+                # had a stale sequence.  Calling close_streaming again would
+                # cause a SECOND 300317 (because the card's sequence already
+                # advanced from the first successful close_streaming), creating
+                # an infinite retry loop.
                 _logger.warning(
                     "preservative seal: sequence conflict, retrying... card=%s seq=%d",
                     card_id[:12], session.sequence,
                 )
                 for retry in range(2):
                     try:
-                        session.sequence += 1
-                        await self._client.cardkit_close_streaming(
-                            card_id, sequence=session.sequence, summary=seal_summary,
-                        )
+                        # Only call close_streaming if it hasn't been called yet
+                        if not session._streaming_closed:
+                            session.sequence += 1
+                            await self._client.cardkit_close_streaming(
+                                card_id, sequence=session.sequence, summary=seal_summary,
+                            )
+                            session._streaming_closed = True
 
-                        # Rebuild seal actions
+                        # Rebuild seal actions — always rebuild panel to
+                        # avoid UnboundLocalError if the 300317 occurred
+                        # before panel was assigned in the try block.
                         retry_actions: list[dict[str, Any]] = []
                         if state is not None:
+                            all_tool_steps = session.tool_use.build_display_steps()
+                            retry_panel = build_unified_panel(
+                                reasoning_rounds=state.reasoning_rounds,
+                                current_reasoning_text="",
+                                tool_steps=all_tool_steps,
+                                tool_elapsed_ms=session.tool_use.elapsed_ms,
+                                show_reasoning=self._cfg.show_reasoning,
+                                expanded=self._cfg.panel_expanded,
+                                panel_events=state.panel_events,
+                            )
                             retry_actions.append({
                                 "action": "partial_update_element",
                                 "params": {
                                     "element_id": UNIFIED_PANEL_ELEMENT_ID,
                                     "partial_element": {
-                                        "header": panel["header"],  # type: ignore[possibly-undefined]
-                                        "elements": panel["elements"],  # type: ignore[possibly-undefined]
+                                        "header": retry_panel["header"],
+                                        "elements": retry_panel["elements"],
                                     },
                                 },
                             })
@@ -901,6 +947,8 @@ class UnifiedControllerMixin:
                                 retry + 1, card_id[:12],
                             )
                             continue
+                        if retry_e.code == CARDKIT_STREAMING_CLOSED:
+                            session._streaming_closed = True
                         raise
                 # All retries exhausted
                 _logger.warning(
@@ -908,6 +956,8 @@ class UnifiedControllerMixin:
                     card_id[:12],
                 )
                 return False
+            if e.code == CARDKIT_STREAMING_CLOSED:
+                session._streaming_closed = True
             _logger.debug(
                 "preservative seal failed: card=%s, falling back to full rebuild",
                 card_id[:12], exc_info=True,
@@ -1019,6 +1069,7 @@ class UnifiedControllerMixin:
                 except FeishuAPIError as e:
                     if e.code == CARDKIT_STREAMING_CLOSED:
                         _logger.info("drain: streaming already closed, skipping")
+                        session._streaming_closed = True
                     elif is_schema_error(e):
                         _logger.error("drain SCHEMA ERROR: %s", e)
                         state.panel_dirty = False
@@ -1043,6 +1094,7 @@ class UnifiedControllerMixin:
                 except FeishuAPIError as e:
                     if e.code == CARDKIT_STREAMING_CLOSED:
                         _logger.info("drain: streaming already closed, skipping")
+                        session._streaming_closed = True
                     else:
                         _logger.warning("drain answer failed: %s", e)
 
@@ -1115,23 +1167,34 @@ class UnifiedControllerMixin:
             )
             try:
                 # Close streaming first (may already be closed by the failed seal attempt)
-                # Also update summary for the conversation list
-                fallback_summary = ""
-                if state is not None:
-                    summary_text = state.answer_text
-                    if not summary_text and state.reasoning_rounds:
-                        summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
-                    if summary_text:
-                        fallback_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
-                session.sequence += 1
-                try:
-                    await self._client.cardkit_close_streaming(
-                        session.card_id, sequence=session.sequence, summary=fallback_summary,  # type: ignore[union-attr]
+                # Also update summary for the conversation list.
+                # Use _streaming_closed guard to prevent duplicate close_streaming
+                # calls which cause 300317 sequence conflicts.
+                if not session._streaming_closed:
+                    fallback_summary = ""
+                    if state is not None:
+                        summary_text = state.answer_text
+                        if not summary_text and state.reasoning_rounds:
+                            summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
+                        if summary_text:
+                            fallback_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
+                    session.sequence += 1
+                    try:
+                        await self._client.cardkit_close_streaming(
+                            session.card_id, sequence=session.sequence, summary=fallback_summary,  # type: ignore[union-attr]
+                        )
+                        session._streaming_closed = True
+                    except FeishuAPIError as e:
+                        if e.code == CARDKIT_STREAMING_CLOSED:
+                            # Streaming already closed — that's fine
+                            session._streaming_closed = True
+                        else:
+                            raise
+                else:
+                    _logger.info(
+                        "fallback: streaming already closed, skipping close_streaming card=%s",
+                        (session.card_id or "")[:12],
                     )
-                except FeishuAPIError as e:
-                    if e.code != CARDKIT_STREAMING_CLOSED:
-                        raise
-                    # Streaming already closed — that's fine
 
                 complete_card = build_unified_complete_card(
                     reasoning_rounds=state.reasoning_rounds if state else [],

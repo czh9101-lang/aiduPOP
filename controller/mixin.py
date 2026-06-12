@@ -368,15 +368,22 @@ class ControllerMixin:
             try:
                 assert self._client is not None
                 if session.use_cardkit and session.card_id:
-                    # Update summary when closing streaming so the
-                    # conversation list shows the answer, not "处理中..."
-                    complete_summary = (display or "")[:120].replace("\n", " ").replace("```", "").strip()
-                    await self._client.cardkit_close_streaming(
-                        session.card_id,
-                        sequence=session.sequence + 1,
-                        summary=complete_summary,
-                    )
-                    session.sequence += 1
+                    # Close streaming — only once per card lifecycle.
+                    # Use _streaming_closed guard to prevent duplicate
+                    # close_streaming calls which cause 300317 conflicts.
+                    if not getattr(session, "_streaming_closed", False):
+                        # Update summary when closing streaming so the
+                        # conversation list shows the answer, not "处理中..."
+                        complete_summary = (display or "")[:120].replace("\n", " ").replace("```", "").strip()
+                        await self._client.cardkit_close_streaming(
+                            session.card_id,
+                            sequence=session.sequence + 1,
+                            summary=complete_summary,
+                        )
+                        session.sequence += 1
+                        session._streaming_closed = True  # type: ignore[attr-defined]
+                    else:
+                        session.sequence += 1
                     await self._client.cardkit_update(
                         session.card_id,
                         card,
