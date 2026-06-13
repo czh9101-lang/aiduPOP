@@ -181,6 +181,21 @@ class UnifiedLinearState:
             len(self.reasoning_rounds),
             self._native_reasoning_active,
         )
+        # Post-stream dedup: if reasoning was already delivered incrementally
+        # and the incoming text looks like the full accumulated text, skip it.
+        if (
+            self._native_reasoning_active
+            and self._current_reasoning
+            and len(text) >= len(self._current_reasoning)
+            and text[:min(30, len(self._current_reasoning))]
+            == self._current_reasoning[:min(30, len(self._current_reasoning))]
+        ):
+            _diag_logger.debug(
+                "HLS_FIX: on_reasoning_delta skips post-stream duplicate "
+                "text_len=%d current_len=%d",
+                len(text), len(self._current_reasoning),
+            )
+            return
         if not self._current_reasoning:
             # First token of a new reasoning round
             self._counter += 1
