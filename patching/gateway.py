@@ -138,23 +138,56 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
 
         # ── ABORT / INTERRUPT detection ──
         # When card was already sent, _handle_message_with_agent returns
-        # None (the "Discarding stale agent result" path).
-        # Use the per-message context (not _msg_ctx) because the global
-        # context may have been overwritten by a newer message.
+        # None (the "Discarding stale agent result" path or the
+        # already_sent=True path).  Use the per-message context (not
+        # _msg_ctx) because the global context may have been overwritten
+        # by a newer message.
         if result is None:
             if ctx and ctx.get("card_sent"):
                 # Card was sent successfully via on_message_completed.
-                # Only fire interrupt if a newer message started after this one.
+                # Only fire interrupt if a *genuinely newer* message started
+                # after this one AND is still active (has a card session in
+                # a non-terminal state).
+                #
+                # Bug fix: Hermes returns None when already_sent=True (our
+                # _wrap_run_agent COMPLETE hook sets this), which is NOT an
+                # interrupt. Without the session-active check, stale message
+                # IDs left in _started_msg_ids from previous turns cause
+                # false interrupt detection, showing "Interrupted by new message"
+                # on cards that completed normally.
                 with _started_msg_ids_lock:
                     others = _started_msg_ids - {mid}
+                _real_interrupt = False
                 if others:
+                    # Verify the "other" message is genuinely active:
+                    # it must have an active (non-terminal) card session.
+                    try:
+                        from ..controller import get_controller
+                        _ctrl = get_controller()
+                        if _ctrl and _ctrl.enabled:
+                            for _other_mid in others:
+                                _other_sess = _ctrl._sessions.get(_other_mid)
+                                if _other_sess and _other_sess.state not in (
+                                    "completing", "completed", "creation_failed",
+                                    "aborted", "terminated",
+                                ):
+                                    _real_interrupt = True
+                                    _interrupt_new_mid = _other_mid
+                                    break
+                        else:
+                            # No controller — fall back to old behavior
+                            _real_interrupt = True
+                            _interrupt_new_mid = next(iter(others))
+                    except Exception:
+                        _real_interrupt = bool(others)
+                        _interrupt_new_mid = next(iter(others)) if others else None
+                if _real_interrupt:
                     try:
                         from .hooks import on_message_interrupted
 
-                        new_mid = next(iter(others))
                         on_message_interrupted(
                             message_id=mid,
-                            new_message_id=new_mid,
+                            new_message_id=_interrupt_new_mid,
                             chat_id=chat_id,
                             anchor_id=anchor_id,
                         )
@@ -934,3 +967,4 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
             feishu_adapter._hls_cron_sending = False
 
     return wrapper
+
