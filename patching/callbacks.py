@@ -143,11 +143,15 @@ def _maybe_wrap_callbacks(agent) -> None:
                         on_reasoning_delta(message_id=eid, text=text)
                 except Exception:
                     pass
-                _logger.warning(
-                    "HLS_DIAG: late_reasoning_wrapper calling _orig_late eid=%s",
-                    eid[:12] if eid else "?",
-                )
-                return _orig_reasoning_late(text, *args, **kwargs)
+                # FIX: If _orig_reasoning_late is already an HLS wrapper, skip it
+                _orig_late_is_hls = getattr(_orig_reasoning_late, "_hls_wrapper", False)
+                if _orig_late_is_hls:
+                    _logger.debug(
+                        "HLS_FIX: late_reasoning_wrapper skips _orig_late (already HLS-wrapped) eid=%s",
+                        eid[:12] if eid else "?",
+                    )
+                else:
+                    return _orig_reasoning_late(text, *args, **kwargs)
 
             agent.reasoning_callback = _late_reasoning_wrapper
             setattr(agent.reasoning_callback, "_hls_wrapper", True)
@@ -317,11 +321,17 @@ def _maybe_wrap_callbacks(agent) -> None:
         except Exception:
             pass
         if _orig_reasoning:
-            _logger.warning(
-                "HLS_DIAG: reasoning_wrapper calling _orig_reasoning eid=%s",
-                eid[:12] if eid else "?",
-            )
-            return _orig_reasoning(text, *args, **kwargs)
+            # FIX: If _orig_reasoning is already an HLS wrapper (agent reuse scenario),
+            # skip calling it — it would call on_reasoning_delta again with the OLD
+            # message_id, causing duplicate reasoning text in the collapsible panel.
+            _orig_is_hls = getattr(_orig_reasoning, "_hls_wrapper", False)
+            if _orig_is_hls:
+                _logger.debug(
+                    "HLS_FIX: _reasoning_wrapper skips _orig_reasoning (already HLS-wrapped) eid=%s",
+                    eid[:12] if eid else "?",
+                )
+            else:
+                return _orig_reasoning(text, *args, **kwargs)
 
     agent.reasoning_callback = _reasoning_wrapper
     # BUG FIX: Mark _reasoning_wrapper with _hls_wrapper AFTER setting it.
