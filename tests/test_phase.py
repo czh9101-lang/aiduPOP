@@ -227,6 +227,7 @@ class TestCardSessionTransition:
 
     def _make_session(self) -> CardSession:
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             return CardSession("test_msg", "test_chat", loop)
         finally:
@@ -288,6 +289,7 @@ class TestCardSessionShouldProceed:
 
     def _make_session(self) -> CardSession:
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             return CardSession("test_msg", "test_chat", loop)
         finally:
@@ -331,6 +333,7 @@ class TestCardSessionProperties:
 
     def _make_session(self) -> CardSession:
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             return CardSession("test_msg", "test_chat", loop)
         finally:
@@ -383,6 +386,7 @@ class TestCardSessionEnterTerminal:
 
     def _make_session(self) -> CardSession:
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             return CardSession("test_msg", "test_chat", loop)
         finally:
@@ -425,6 +429,7 @@ class TestCardSessionStaleCreate:
 
     def _make_session(self) -> CardSession:
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             return CardSession("test_msg", "test_chat", loop)
         finally:
@@ -456,6 +461,7 @@ class TestCardSessionGuardTerminate:
 
     def _make_session(self) -> CardSession:
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             return CardSession("test_msg", "test_chat", loop)
         finally:
@@ -501,6 +507,7 @@ class TestBackwardCompatibility:
     def test_session_state_string_comparison(self) -> None:
         """session.state == 'idle' still works."""
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             s = CardSession("msg", "chat", loop)
         finally:
@@ -512,6 +519,7 @@ class TestBackwardCompatibility:
     def test_terminal_check_with_in_operator(self) -> None:
         """session.state in _TERMINAL still works."""
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             s = CardSession("msg", "chat", loop)
         finally:

@@ -50,6 +50,30 @@ def _is_plugin_yaml_path(p: Path) -> bool:
     return p.name == "plugin.yaml"
 
 
+def _reload_hls():
+    """Reload hermes_lark_streaming preserving conftest.py's registration.
+
+    ``importlib.reload()`` fails when the module was loaded via
+    ``spec_from_file_location`` (as conftest.py does) because
+    ``module.__spec__`` may be None or incomplete, causing
+    ``ModuleNotFoundError`` in Python 3.11+.  This function re-registers
+    the module using the same approach as conftest.py.
+    """
+    init_file = Path(__file__).resolve().parent.parent / "__init__.py"
+    spec = importlib.util.spec_from_file_location(
+        "hermes_lark_streaming",
+        str(init_file),
+        submodule_search_locations=[str(init_file.parent)],
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    module.__package__ = "hermes_lark_streaming"
+    module.__path__ = [str(init_file.parent)]
+    sys.modules["hermes_lark_streaming"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 # ---------------------------------------------------------------------------
 # __init__.py  –  hermes_lark_streaming.__version__
 # ---------------------------------------------------------------------------
@@ -74,11 +98,11 @@ class TestInitVersion:
 
         try:
             with patch.object(Path, "exists", mock_exists):
-                importlib.reload(hermes_lark_streaming)
-            assert hermes_lark_streaming.__version__ == "unknown"
+                mod = _reload_hls()
+            assert mod.__version__ == "unknown"
         finally:
             # Restore the module to its correct state regardless of test outcome
-            importlib.reload(hermes_lark_streaming)
+            _reload_hls()
 
     def test_version_fallback_when_no_version_field(self) -> None:
         """__version__ falls back to 'unknown' when plugin.yaml has no version: field."""
@@ -98,10 +122,10 @@ class TestInitVersion:
         try:
             with patch.object(Path, "exists", mock_exists), \
                  patch.object(Path, "read_text", mock_read_text):
-                importlib.reload(hermes_lark_streaming)
-            assert hermes_lark_streaming.__version__ == "unknown"
+                mod = _reload_hls()
+            assert mod.__version__ == "unknown"
         finally:
-            importlib.reload(hermes_lark_streaming)
+            _reload_hls()
 
 
 # ---------------------------------------------------------------------------

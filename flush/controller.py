@@ -46,7 +46,22 @@ class FlushController:
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
-            self._loop = asyncio.get_event_loop()
+            try:
+                self._loop = asyncio.get_event_loop()
+            except RuntimeError:
+                self._loop = None  # Will be lazily resolved via _get_loop()
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        """Lazily resolve the event loop if not set during __init__.
+
+        In Python 3.10+ (especially 3.11.15), both get_running_loop()
+        and get_event_loop() may raise RuntimeError when no event
+        loop exists — e.g. during unit tests or synchronous construction.
+        This method defers loop resolution until the loop is actually needed.
+        """
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+        return self._loop
 
     @property
     def throttle_ms(self) -> float:
@@ -77,7 +92,7 @@ class FlushController:
         # （如定时器、I/O）自然唤醒循环。
         # 这正是 "跑马灯无文字，等很久才出文字" 的根因。
         try:
-            self._loop.call_soon_threadsafe(self._schedule_update_on_loop, do_flush)
+            self._get_loop().call_soon_threadsafe(self._schedule_update_on_loop, do_flush)
         except RuntimeError:
             pass  # Event loop already closed
 
@@ -118,7 +133,7 @@ class FlushController:
         """等待进行中的 flush 完成."""
         if not self._flush_in_progress:
             return
-        future: asyncio.Future[None] = self._loop.create_future()
+        future: asyncio.Future[None] = self._get_loop().create_future()
         self._flush_resolvers.append(future)
         await future
 
@@ -142,7 +157,7 @@ class FlushController:
 
     def _schedule(self, delay: float, do_flush: Callable[[], Awaitable[None]]) -> None:
         self._cancel_timer()
-        self._pending_timer = self._loop.call_later(
+        self._pending_timer = self._get_loop().call_later(
             delay,
             self._do_flush_task,
             do_flush,
@@ -150,7 +165,7 @@ class FlushController:
 
     def _do_flush_task(self, do_flush: Callable[[], Awaitable[None]]) -> None:
         self._pending_timer = None
-        self._loop.call_soon(asyncio.create_task, self._do_flush(do_flush))
+        self._get_loop().call_soon(asyncio.create_task, self._do_flush(do_flush))
 
     async def _do_flush(self, do_flush: Callable[[], Awaitable[None]]) -> None:
         if self._completed or self._flush_in_progress:
@@ -176,7 +191,7 @@ class FlushController:
         # 如果 flush 期间又有新数据 → 立即重刷
         if self._needs_reflush and not self._completed:
             self._needs_reflush = False
-            self._loop.call_soon(asyncio.create_task, self._do_flush(do_flush))
+            self._get_loop().call_soon(asyncio.create_task, self._do_flush(do_flush))
 
     def _cancel_timer(self) -> None:
         if self._pending_timer is not None:
