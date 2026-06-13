@@ -130,6 +130,42 @@ def _bootstrap_package() -> None:
     )
 
 
+def _find_hermes_python() -> str | None:
+    """Auto-detect the Hermes Agent Python interpreter path.
+
+    Searches common installation locations in order:
+    1. ~/.hermes/hermes-agent/venv/bin/python3 (Hermes Desktop)
+    2. /usr/local/lib/hermes-agent/venv/bin/python3 (CLI/server install)
+    3. /opt/hermes-agent/venv/bin/python3 (alternative install)
+    4. The python3 in PATH (fallback)
+    """
+    candidates = [
+        Path.home() / ".hermes" / "hermes-agent" / "venv" / "bin" / "python3",
+        Path("/usr/local/lib/hermes-agent/venv/bin/python3"),
+        Path("/opt/hermes-agent/venv/bin/python3"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    # Fallback: system python3
+    import shutil
+    if shutil.which("python3"):
+        return shutil.which("python3")
+    return None
+
+
+def _cmd_python() -> int:
+    """Print the detected Hermes Python path."""
+    path = _find_hermes_python()
+    if path:
+        print(path)
+        return 0
+    print("Error: Cannot find Hermes Python interpreter.", file=sys.stderr)
+    print("Please set HERMES_PYTHON manually:", file=sys.stderr)
+    print("  export HERMES_PYTHON=/path/to/hermes-agent/venv/bin/python3", file=sys.stderr)
+    return 1
+
+
 def main() -> int:
     _bootstrap_package()
 
@@ -155,6 +191,8 @@ def main() -> int:
         return _cmd_verify()
     if cmd == "cleanup":
         return _cmd_cleanup()
+    if cmd == "python":
+        return _cmd_python()
 
     print(f"Unknown command: {cmd}")
     _print_usage()
@@ -169,6 +207,7 @@ def _print_usage() -> None:
     print("  status     Show current configuration and credentials status")
     print("  verify     Verify environment compatibility")
     print("  cleanup    Remove plugin-injected config from config.yaml (run after uninstall)")
+    print("  python     Print the auto-detected Hermes Python interpreter path")
     print()
     print("Note: This plugin uses runtime monkey patching (no file modification).")
     print("      Install/uninstall via: hermes plugins install/uninstall")

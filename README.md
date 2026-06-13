@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.3-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.4-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -79,7 +79,8 @@ hermes gateway restart
 
 ```bash
 # 1. Clean up injected config (while plugin code is still available)
-HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+# Auto-detect Hermes Python path:
+HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py cleanup
 
 # 2. Remove plugin
@@ -94,10 +95,16 @@ hermes gateway restart
 ```bash
 hermes plugins list
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
-HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+# Auto-detect Hermes Python path:
+HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
 ```
+
+> **Note**: If auto-detection fails, manually set `HERMES_PYTHON` to your Hermes venv Python:
+> - **Hermes Desktop**: `~/.hermes/hermes-agent/venv/bin/python3`
+> - **CLI/Server install**: `/usr/local/lib/hermes-agent/venv/bin/python3`
+> - **Alternative**: `/opt/hermes-agent/venv/bin/python3`
 
 > **Troubleshooting**: If no card effect appears, check: (1) `hermes plugins list` shows enabled; (2) no `*.bak` directories under `~/.hermes/plugins/`; (3) Feishu credentials are configured.
 

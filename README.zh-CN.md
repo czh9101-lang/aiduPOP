@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.3-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.4-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -79,7 +79,8 @@ hermes gateway restart
 
 ```bash
 # 1. 先清理注入的配置（插件代码还在时执行）
-HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+# 自动检测 Hermes Python 路径：
+HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py cleanup
 
 # 2. 卸载插件
@@ -94,7 +95,8 @@ hermes gateway restart
 ```bash
 hermes plugins list
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
-HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+# 自动检测 Hermes Python 路径：
+HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
 ```

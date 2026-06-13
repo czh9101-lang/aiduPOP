@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 1.0.3 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
+| 版本 | 1.0.4 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
 
 ---
 
@@ -390,7 +390,20 @@ tests/
   test_callback_interception.py — 回调拦截
 ```
 
-运行: `HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3 -m pytest tests/`
+运行: `HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python) -m pytest tests/`
+
+### CLI 命令参考
+
+| 命令 | 说明 |
+|------|------|
+| `__main__.py status` | 显示当前配置和凭据状态 |
+| `__main__.py verify` | 验证环境兼容性 |
+| `__main__.py cleanup` | 清除插件注入的配置（卸载前执行） |
+| `__main__.py python` | 自动检测并输出 Hermes Python 解释器路径 |
+
+`python` 命令搜索常见安装路径（Hermes Desktop `~/.hermes/hermes-agent/venv/bin/python3`、CLI/server `/usr/local/lib/hermes-agent/venv/bin/python3`、alternative `/opt/hermes-agent/venv/bin/python3`），找不到则回退到系统 `python3`。用于简化 `status`/`verify`/`cleanup` 命令的 HERMES_PYTHON 设置。
+
+> **Note**: FlushController now supports Python 3.10+ environments without a running event loop (lazy loop resolution). Tests no longer require manual `asyncio.set_event_loop()` setup unless testing explicit event loop behavior.
 
 ---
 
@@ -407,11 +420,12 @@ hermes plugins install /path/to/hermes-lark-streaming
 grep hermes_lark_streaming ~/.hermes/logs/agent.log
 
 # 运行测试（需要 Hermes venv 的 Python，因为依赖 lark-oapi）
-HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+# 自动检测 Hermes Python 路径：
+HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON -m pytest tests/
 
 # 清理 + 重装
-HERMES_PYTHON=~/.hermes/hermes-agent/venv/bin/python3
+HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py cleanup
 hermes plugins uninstall hermes-lark-streaming
 hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
@@ -461,4 +475,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-12 | Version: 1.0.3*
+*Last updated: 2026-06-13 | Version: 1.0.4*
