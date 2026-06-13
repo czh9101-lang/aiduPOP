@@ -209,11 +209,25 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             return
 
         if session.linear and session.unified_state:
+            _logger.warning(
+                "HLS_DIAG: on_reasoning msg=%s text=%r "
+                "_native_reasoning_active BEFORE=%s current_reasoning_len=%d",
+                (message_id or "?")[:12],
+                text[:50] if text else "",
+                session.unified_state._native_reasoning_active,
+                len(session.unified_state._current_reasoning),
+            )
             session.unified_state.on_reasoning_delta(text)
             # Mark that native reasoning_callback is active — prevents
             # _linear_on_thinking from appending the same reasoning text
             # again when interim_assistant_callback delivers accumulated text.
             session.unified_state._native_reasoning_active = True
+            _logger.warning(
+                "HLS_DIAG: on_reasoning _native_reasoning_active SET=True msg=%s "
+                "current_reasoning_len=%d",
+                (message_id or "?")[:12],
+                len(session.unified_state._current_reasoning),
+            )
             self._schedule_linear_flush(session)
             return
 

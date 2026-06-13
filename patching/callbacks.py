@@ -75,16 +75,21 @@ def _maybe_wrap_callbacks(agent) -> None:
     _current_reasoning = getattr(agent, "reasoning_callback", None)
     _current_bg = getattr(agent, "background_review_callback", None)
     _force_rewrap = bool(ctx and ctx.get("_force_rewrap")) if (ctx := _msg_ctx.get()) else False
-    _logger.debug(
-        "HLS_WRAP: guard check stream=%s(hls=%s) interim=%s(hls=%s) tool=%s reasoning=%s bg=%s eid=%s force_rewrap=%s",
+    _logger.warning(
+        "HLS_DIAG: _maybe_wrap_callbacks GUARD CHECK eid=%s "
+        "stream=%s(hls=%s) interim=%s(hls=%s) tool=%s "
+        "reasoning=%s(hls=%s type=%s repr=%s) bg=%s force_rewrap=%s",
+        eid[:12] if eid else "?",
         bool(_current_stream),
         getattr(_current_stream, "_hls_wrapper", False) if _current_stream else "N/A",
         bool(_current_interim),
         getattr(_current_interim, "_hls_wrapper", False) if _current_interim else "N/A",
         bool(_current_tool),
         bool(_current_reasoning),
+        getattr(_current_reasoning, "_hls_wrapper", False) if _current_reasoning else "N/A",
+        type(_current_reasoning).__name__ if _current_reasoning else "None",
+        repr(_current_reasoning)[:80] if _current_reasoning else "None",
         bool(_current_bg),
-        eid[:12] if eid else "?",
         _force_rewrap,
     )
     _any_wrapped = (
@@ -112,13 +117,36 @@ def _maybe_wrap_callbacks(agent) -> None:
         if _current_reasoning_now and not getattr(_current_reasoning_now, "_hls_wrapper", False):
             _orig_reasoning_late = _current_reasoning_now
 
+            _logger.warning(
+                "HLS_DIAG: late_reasoning_wrapper SETUP eid=%s "
+                "_orig_reasoning_late=%s late_type=%s late_has_hls=%s late_repr=%s",
+                eid[:12] if eid else "?",
+                bool(_orig_reasoning_late),
+                type(_orig_reasoning_late).__name__ if _orig_reasoning_late else "None",
+                getattr(_orig_reasoning_late, "_hls_wrapper", False) if _orig_reasoning_late else "N/A",
+                repr(_orig_reasoning_late)[:120] if _orig_reasoning_late else "None",
+            )
+
             def _late_reasoning_wrapper(text, *args, **kwargs):
+                _logger.warning(
+                    "HLS_DIAG: late_reasoning_wrapper CALLED eid=%s text=%r "
+                    "_orig_late=%s late_type=%s late_has_hls=%s",
+                    eid[:12] if eid else "?",
+                    text[:50] if text else "",
+                    bool(_orig_reasoning_late),
+                    type(_orig_reasoning_late).__name__ if _orig_reasoning_late else "None",
+                    getattr(_orig_reasoning_late, "_hls_wrapper", False) if _orig_reasoning_late else "N/A",
+                )
                 try:
                     from .hooks import on_reasoning_delta
                     if text:
                         on_reasoning_delta(message_id=eid, text=text)
                 except Exception:
                     pass
+                _logger.warning(
+                    "HLS_DIAG: late_reasoning_wrapper calling _orig_late eid=%s",
+                    eid[:12] if eid else "?",
+                )
                 return _orig_reasoning_late(text, *args, **kwargs)
 
             agent.reasoning_callback = _late_reasoning_wrapper
@@ -184,39 +212,33 @@ def _maybe_wrap_callbacks(agent) -> None:
         def _thinking_wrapper(text, *args, **kwargs):
             try:
                 # ── Check already_streamed kwarg from Hermes ──
-                # When Hermes calls interim_assistant_callback(text, already_streamed=True),
-                # it means the text was already delivered via stream_delta_callback.
-                # We should NOT process it through on_thinking_delta (would cause
-                # duplication in the card), but we MUST call _orig_interim so
-                # Hermes's internal _stream_consumer.on_segment_break() fires
-                # correctly for state management.
                 already_streamed = kwargs.get("already_streamed", False)
                 if already_streamed:
-                    _logger.debug(
-                        "thinking_wrapper: already_streamed=True, passing through eid=%s len=%d",
+                    _logger.warning(
+                        "HLS_DIAG: thinking_wrapper SKIP(already_streamed) eid=%s len=%d",
                         eid[:12], len(text) if text else 0,
                     )
                     return _orig_interim(text, *args, **kwargs)
 
                 # ── Length-based dedup ──
-                # If the total text consumed by stream_delta_callback is >=
-                # the interim text length, the interim text was fully streamed
-                # already.  Skip on_thinking_delta to prevent duplication.
                 consumed_len = _stream_consumed_len.get(eid, 0)
                 if text and consumed_len > 0 and len(text) <= consumed_len:
-                    _logger.debug(
-                        "thinking_wrapper: dedup skip (stream consumed %d >= interim %d) eid=%s",
-                        consumed_len, len(text), eid[:12],
+                    _logger.warning(
+                        "HLS_DIAG: thinking_wrapper SKIP(length_dedup) eid=%s "
+                        "consumed=%d interim=%d",
+                        eid[:12], consumed_len, len(text),
                     )
-                    # Still call _orig_interim for Hermes state management
                     return _orig_interim(text, *args, **kwargs)
 
                 if text:
                     from .hooks import on_thinking_delta
+                    _logger.warning(
+                        "HLS_DIAG: thinking_wrapper CALLING on_thinking_delta eid=%s "
+                        "len=%d text_head=%r consumed_len=%d",
+                        eid[:12], len(text), text[:60], consumed_len,
+                    )
                     consumed = on_thinking_delta(message_id=eid, text=text)
                     if consumed:
-                        # Card consumed the text — skip original callback to
-                        # avoid duplicate plain-text delivery via _stream_consumer.
                         _logger.debug(
                             "thinking_wrapper: consumed text len=%d eid=%s",
                             len(text), eid[:12],
@@ -224,9 +246,6 @@ def _maybe_wrap_callbacks(agent) -> None:
                         return
             except Exception:
                 _logger.debug("thinking_wrapper: exception", exc_info=True)
-            # Card didn't consume (disabled / not Feishu / error) — call original
-            # so Hermes internal state (e.g. on_segment_break for already_streamed)
-            # stays consistent and plain-text fallback works.
             return _orig_interim(text, *args, **kwargs)
 
         agent.interim_assistant_callback = _thinking_wrapper
@@ -270,8 +289,26 @@ def _maybe_wrap_callbacks(agent) -> None:
 
     # ── REASONING: set reasoning_callback ──
     _orig_reasoning = getattr(agent, "reasoning_callback", None)
+    _logger.warning(
+        "HLS_DIAG: reasoning_wrapper SETUP eid=%s _orig_reasoning=%s "
+        "orig_type=%s orig_has_hls=%s orig_repr=%s",
+        eid[:12] if eid else "?",
+        bool(_orig_reasoning),
+        type(_orig_reasoning).__name__ if _orig_reasoning else "None",
+        getattr(_orig_reasoning, "_hls_wrapper", False) if _orig_reasoning else "N/A",
+        repr(_orig_reasoning)[:120] if _orig_reasoning else "None",
+    )
 
     def _reasoning_wrapper(text, *args, **kwargs):
+        _logger.warning(
+            "HLS_DIAG: reasoning_wrapper CALLED eid=%s text=%r "
+            "_orig_reasoning=%s orig_type=%s orig_has_hls=%s",
+            eid[:12] if eid else "?",
+            text[:50] if text else "",
+            bool(_orig_reasoning),
+            type(_orig_reasoning).__name__ if _orig_reasoning else "None",
+            getattr(_orig_reasoning, "_hls_wrapper", False) if _orig_reasoning else "N/A",
+        )
         try:
             from .hooks import on_reasoning_delta
 
@@ -280,6 +317,10 @@ def _maybe_wrap_callbacks(agent) -> None:
         except Exception:
             pass
         if _orig_reasoning:
+            _logger.warning(
+                "HLS_DIAG: reasoning_wrapper calling _orig_reasoning eid=%s",
+                eid[:12] if eid else "?",
+            )
             return _orig_reasoning(text, *args, **kwargs)
 
     agent.reasoning_callback = _reasoning_wrapper
