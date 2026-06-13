@@ -324,6 +324,17 @@ def _maybe_wrap_callbacks(agent) -> None:
             return _orig_reasoning(text, *args, **kwargs)
 
     agent.reasoning_callback = _reasoning_wrapper
+    # BUG FIX: Mark _reasoning_wrapper with _hls_wrapper AFTER setting it.
+    # The old code marked reasoning_callback at lines 285-286 BEFORE
+    # _reasoning_wrapper was created (lines 290-326), so the wrapper
+    # was never marked. When _maybe_wrap_callbacks is called a second
+    # time (from the module-level conversation_loop patch), the
+    # late-arriving fix sees that reasoning_callback lacks _hls_wrapper
+    # and wraps it AGAIN with _late_reasoning_wrapper. This creates a
+    # chain: _late_reasoning_wrapper → _reasoning_wrapper, where both
+    # call on_reasoning_delta(), causing every token to appear twice
+    # in the collapsible panel ("TheThe user user wants wants...").
+    setattr(agent.reasoning_callback, "_hls_wrapper", True)
 
     # ── BACKGROUND_REVIEW: wrap background_review_callback ──
     if getattr(agent, "background_review_callback", None):
