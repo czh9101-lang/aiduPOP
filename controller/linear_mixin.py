@@ -656,10 +656,29 @@ class UnifiedControllerMixin:
             )
             state.on_reasoning_delta(reasoning)
         if answer:
-            # ── Dedup: skip answer text already delivered via stream_delta_callback ──
-            _has_streamed_answer = bool(state.answer_text)
-            if not _has_streamed_answer:
+            # ── Answer dedup with incremental append ──
+            # interim_assistant_callback delivers ACCUMULATED text (not incremental).
+            # When the model generates multiple answer segments (answer -> tool -> answer),
+            # each interim call contains the full text so far. We must:
+            #   1. If no answer exists yet -> accept the full text
+            #   2. If the new text starts with the existing answer -> append only the diff
+            #   3. If the new text is different -> accept it (edge case: model rewrite)
+            _existing_len = len(state.answer_text)
+            if _existing_len == 0:
+                # No answer yet - accept the full text
                 state.on_answer_delta(answer)
+            elif len(answer) > _existing_len and answer[:_existing_len] == state.answer_text:
+                # New text extends the existing answer - append only the new portion
+                _new_part = answer[_existing_len:]
+                if _new_part:
+                    _logger.info(
+                        "HLS_FIX: _linear_on_thinking appends incremental answer "
+                        "existing_len=%d new_total=%d diff=%d msg=%s",
+                        _existing_len, len(answer), len(_new_part),
+                        (session.message_id or "?")[:12],
+                    )
+                    state.on_answer_delta(_new_part)
+            # else: text is same length or shorter - already captured, skip
         if (reasoning and self._cfg.show_reasoning and not state._native_reasoning_active) or answer:
             self._schedule_linear_flush(session)
 

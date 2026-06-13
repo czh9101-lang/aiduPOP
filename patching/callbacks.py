@@ -196,7 +196,60 @@ def _maybe_wrap_callbacks(agent) -> None:
         agent.stream_delta_callback = _answer_wrapper
         _logger.debug("_maybe_wrap_callbacks: stream_delta_callback wrapped")
     else:
-        _logger.debug("_maybe_wrap_callbacks: NO stream_delta_callback on agent")
+        # ── Create synthetic stream_delta_callback when Hermes streaming is disabled ──
+        # When Hermes streaming is disabled (streaming.enabled: false), the gateway
+        # sets agent.stream_delta_callback = None. Without this callback, the agent
+        # silently drops incremental answer tokens — they never reach the plugin,
+        # and CardKit streaming shows no answer content until on_completed dumps
+        # the full text at once.
+        #
+        # Fix: Create our own stream_delta_callback that routes answer tokens to
+        # on_answer_delta. The agent will call this for every answer token, enabling
+        # CardKit streaming even without gateway streaming.
+        #
+        # Call patterns from Hermes agent:
+        #   stream_delta_callback(delta.content)  — incremental text token
+        #   stream_delta_callback(None)           — stream boundary (tool start/end)
+        #   stream_delta_callback(final_text)     — guardrail halt response
+        #
+        # Side effects (all desirable):
+        #   - agent._record_streamed_assistant_text() is also called, which tracks
+        #     streamed text for the already_streamed dedup in interim_assistant_callback
+        #   - _stream_consumed_len is updated, so the thinking_wrapper's length-based
+        #     dedup correctly skips content already delivered via stream_delta
+        def _answer_wrapper_synthetic(text, *args, **kwargs):
+            # Handle None — stream boundary signal from conversation_loop
+            # (tool boundary flush / end-of-stream). Just ignore it; the
+            # plugin doesn't need boundary signals since CardKit handles
+            # stream lifecycle independently.
+            if text is None:
+                return
+            try:
+                from .hooks import on_answer_delta
+
+                if text and on_answer_delta(message_id=eid, text=text):
+                    _logger.debug(
+                        "answer_wrapper_synthetic: consumed text len=%d eid=%s",
+                        len(text), eid[:12],
+                    )
+                    _stream_consumed_len[eid] = _stream_consumed_len.get(eid, 0) + len(text)
+                    return
+                else:
+                    _logger.debug(
+                        "answer_wrapper_synthetic: not consumed (text=%r) eid=%s",
+                        bool(text), eid[:12],
+                    )
+            except Exception:
+                _logger.debug("answer_wrapper_synthetic: exception", exc_info=True)
+            # No original callback to call — Hermes didn't provide one
+
+        agent.stream_delta_callback = _answer_wrapper_synthetic
+        setattr(agent.stream_delta_callback, "_hls_wrapper", True)
+        _logger.info(
+            "HLS_FIX: created synthetic stream_delta_callback "
+            "(Hermes streaming disabled) eid=%s",
+            eid[:12] if eid else "?",
+        )
 
     # ── THINKING: wrap interim_assistant_callback ──
     # Routes interim content (status messages, thinking text) to the card.
@@ -374,3 +427,4 @@ def _maybe_wrap_callbacks(agent) -> None:
         # Clear _force_rewrap flag after callbacks have been re-wrapped
         ctx.pop("_force_rewrap", None)
         _thread_local_ctx.data = dict(ctx)
+

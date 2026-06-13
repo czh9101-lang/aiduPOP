@@ -511,27 +511,54 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         if answer:
             session.text.on_deliver(answer)
-            # ── Linear mode answer fallback ──
-            # When stream_delta_callback was not called or failed to deliver
-            # the answer text (e.g. callback not wrapped, streaming disabled,
-            # or race condition), unified_state.answer_text will be empty.
+            # ── Linear mode answer completeness check ──
             # The `answer` parameter from on_completed contains the full
-            # response text — use it as a fallback to ensure the card shows
-            # the answer content.  Only set if unified_state.answer_text is
-            # empty to avoid duplicating text that was already streamed.
+            # response text. We compare it with unified_state.answer_text
+            # (which was built incrementally from streaming callbacks) and
+            # ensure the card shows the COMPLETE answer:
+            #   1. If no answer was streamed -> use the full on_completed answer
+            #   2. If the on_completed answer is LONGER than what was streamed
+            #      -> append the missing portion (streaming may have missed content
+            #      due to callback timing, missing stream_delta_callback, etc.)
+            #   3. If the streamed answer is already complete -> no action needed
             if (
                 session.linear
                 and session.unified_state is not None
-                and not session.unified_state.answer_text
             ):
                 from ..state.text import strip_reasoning_tags
                 clean_answer = strip_reasoning_tags(answer)
                 if clean_answer:
-                    session.unified_state.on_answer_delta(clean_answer)
-                    _logger.info(
-                        "on_completed: linear answer fallback, len=%d msg=%s",
-                        len(clean_answer), (message_id or "?")[:12],
-                    )
+                    _existing = session.unified_state.answer_text
+                    _existing_len = len(_existing)
+                    _clean_len = len(clean_answer)
+                    if _existing_len == 0:
+                        # No answer was streamed — use the full on_completed answer
+                        session.unified_state.on_answer_delta(clean_answer)
+                        _logger.info(
+                            "on_completed: linear answer fallback, len=%d msg=%s",
+                            _clean_len, (message_id or "?")[:12],
+                        )
+                    elif _clean_len > _existing_len and clean_answer[:_existing_len] == _existing:
+                        # on_completed answer extends the streamed answer — append diff
+                        _diff = clean_answer[_existing_len:]
+                        if _diff:
+                            session.unified_state.on_answer_delta(_diff)
+                            _logger.info(
+                                "on_completed: linear answer extended, existing=%d added=%d msg=%s",
+                                _existing_len, len(_diff), (message_id or "?")[:12],
+                            )
+                    elif _clean_len > _existing_len and clean_answer[:_existing_len] != _existing:
+                        # on_completed answer is longer but doesn't start with streamed text
+                        # This can happen when the model rewrites or when streaming captured
+                        # only a prefix. Replace with the more complete version.
+                        _logger.warning(
+                            "on_completed: linear answer MISMATCH existing_len=%d clean_len=%d msg=%s "
+                            "existing_head=%r clean_head=%r — replacing with on_completed answer",
+                            _existing_len, _clean_len, (message_id or "?")[:12],
+                            _existing[:60], clean_answer[:60],
+                        )
+                        session.unified_state.answer_text = clean_answer
+                        session.unified_state.answer_dirty = True
 
         # ── 保存错误/中断消息 ──
         # 用于在卡片正文中展示（而非仅页脚）
