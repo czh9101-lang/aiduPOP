@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.4-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.5-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -17,6 +17,10 @@ English | <a href="README.zh-CN.md">中文版</a>
 </p>
 
 Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, unified collapsible panel, chronological reasoning/tool display, and more.
+
+> 📁 Card templates are available in [`assets/card_templates/`](assets/card_templates/) for reference and customization.
+>
+> 🔄 A daily integration test workflow checks for new Hermes releases and validates compatibility — results are posted to Feishu automatically.
 
 > Based on [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0, with extensive refactoring and optimizations
 >

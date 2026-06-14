@@ -1,0 +1,89 @@
+{
+  "schema": "2.0",
+  "config": {
+    "streaming_mode": true,
+    "streaming_config": {
+      "print_frequency_ms": {
+        "default": 70
+      },
+      "print_step": {
+        "default": 1
+      },
+      "print_strategy": "delay"
+    },
+    "locales": [
+      "zh_cn",
+      "en_us"
+    ],
+    "summary": {
+      "content": "Processing...",
+      "i18n_content": {
+        "zh_cn": "处理中...",
+        "en_us": "Processing..."
+      }
+    }
+  },
+  "body": {
+    "elements": [
+      {
+        "tag": "collapsible_panel",
+        "expanded": true,
+        "header": {
+          "title": {
+            "tag": "plain_text",
+            "content": "agent loop",
+            "i18n_content": {
+              "zh_cn": "agent loop",
+              "en_us": "agent loop"
+            },
+            "text_color": "grey",
+            "text_size": "notation"
+          },
+          "vertical_align": "center",
+          "icon": {
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+            "size": "16px 16px",
+            "color": "grey"
+          },
+          "icon_position": "right",
+          "icon_expanded_angle": -180
+        },
+        "border": {
+          "color": "grey",
+          "corner_radius": "5px"
+        },
+        "vertical_spacing": "4px",
+        "padding": "8px 8px 8px 8px",
+        "elements": [
+          {
+            "tag": "markdown",
+            "content": " "
+          }
+        ],
+        "element_id": "agent_process_panel"
+      },
+      {
+        "tag": "markdown",
+        "content": "",
+        "text_align": "left",
+        "text_size": "normal_v2",
+        "margin": "0px 0px 0px 0px",
+        "element_id": "answer_content"
+      },
+      {
+        "tag": "div",
+        "icon": {
+          "tag": "custom_icon",
+          "img_key": "img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg",
+          "size": "16px 16px"
+        },
+        "text": {
+          "tag": "plain_text",
+          "content": " "
+        },
+        "element_id": "loading_icon"
+      }
+    ]
+  }
+}

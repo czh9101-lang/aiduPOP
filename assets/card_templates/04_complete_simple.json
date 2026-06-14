@@ -1,0 +1,39 @@
+{
+  "schema": "2.0",
+  "config": {
+    "wide_screen_mode": true,
+    "update_multi": true,
+    "streaming_mode": false,
+    "locales": [
+      "zh_cn",
+      "en_us"
+    ],
+    "summary": {
+      "content": "这是一条简单的回复，不包含工具调用或推理过程。",
+      "i18n_content": {
+        "zh_cn": "这是一条简单的回复，不包含工具调用或推理过程。",
+        "en_us": "这是一条简单的回复，不包含工具调用或推理过程。"
+      }
+    }
+  },
+  "body": {
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "这是一条简单的回复，不包含工具调用或推理过程。"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "Completed · gpt-4o",
+        "i18n_content": {
+          "zh_cn": "已完成 · gpt-4o",
+          "en_us": "Completed · gpt-4o"
+        },
+        "text_size": "notation"
+      }
+    ]
+  }
+}

@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.4-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.5-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -17,6 +17,10 @@
 </p>
 
 为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、统一可折叠面板、按时间线交错显示推理与工具调用等。
+
+> 📁 卡片模板已导出至 [`assets/card_templates/`](assets/card_templates/)，便于查阅和自定义。
+>
+> 🔄 每日集成测试工作流自动检测 Hermes 新版本并验证兼容性，结果自动推送至飞书。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >
