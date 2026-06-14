@@ -92,6 +92,52 @@ def test_on_interrupted_uses_new_message_id_and_anchor_alias() -> None:
     assert ctrl._sessions["old"].state == ABORTED
 
 
+def test_on_interrupted_skips_abort_for_completing_session() -> None:
+    """Hotfix: COMPLETING session should not be aborted on interrupt.
+
+    When on_completed has already fired (session in COMPLETING state),
+    on_interrupted should skip the abort logic — let _do_linear_complete
+    finish naturally. However, the new session must still be created and
+    _interrupt_map must still be updated.
+    """
+    ctrl = StreamCardController()
+    _enable(ctrl)
+
+    with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+        ctrl.on_message_started(message_id="completing_msg", chat_id="chat")
+        # Simulate session in COMPLETING state (on_completed already fired)
+        ctrl._sessions["completing_msg"].state = COMPLETING
+
+        ctrl.on_interrupted(
+            old_message_id="completing_msg",
+            new_message_id="new_msg",
+            chat_id="chat",
+            anchor_id="anchor",
+        )
+
+    # Key assertion: COMPLETING session must NOT be marked as aborted
+    old_session = ctrl._sessions["completing_msg"]
+    assert old_session._was_aborted is False, (
+        "COMPLETING session must NOT be marked as aborted"
+    )
+    assert old_session.state == COMPLETING, (
+        "COMPLETING session state must not be overwritten"
+    )
+
+    # New session must still be created
+    assert "new_msg" in ctrl._sessions, (
+        "New session must be created even when old session is COMPLETING"
+    )
+    new_session = ctrl._sessions["new_msg"]
+    assert ctrl._sessions["anchor"] is new_session
+    assert new_session.anchor_id == "anchor"
+
+    # _interrupt_map must still be updated
+    assert ctrl._interrupt_map["completing_msg"] == "new_msg", (
+        "_interrupt_map must be updated even when old session is COMPLETING"
+    )
+
+
 def test_prune_stale_sessions_ignores_none_key_and_prunes_valid_key() -> None:
     ctrl = StreamCardController()
     stale_session = SimpleNamespace(

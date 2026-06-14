@@ -344,59 +344,76 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         中（flush_in_progress=True），先异步等待当前 flush 完成（带超时），
         再标记 ABORTED 并封卡，避免并发操作 session.card_id 导致
         旧卡被封两次或新卡变成孤儿。
+
+        COMPLETING 短路：如果旧 session 已在 COMPLETING 状态（on_completed
+        已触发，正在 drain 收尾），跳过 abort 逻辑，让 _do_linear_complete
+        自然走完。新 session 创建和 _interrupt_map 更新照常执行。
         """
         if not self.enabled:
             return
 
         old_session = self._get_active_session(old_message_id)
         if old_session is not None:
-            old_session._was_aborted = True
-            old_session.error_message = "Interrupted by new message"
+            # ── Hotfix: skip abort if session is in COMPLETING state ──
+            # COMPLETING 是 on_completed 触发的"正在收尾"中间态，再过几百毫秒
+            # 就会自然到 COMPLETED。在这个窗口里收到新消息的 on_interrupted
+            # 不应该把卡片覆盖成 ABORTED — 那会触发 fallback 路径重发短文本
+            # "已停止"提示，破坏用户体验。只跳过 abort，继续创建新 session
+            # 和更新 _interrupt_map（这些必须在任何情况下都执行）。
+            if old_session.state == COMPLETING:
+                _logger.info(
+                    "on_interrupted: skip abort for msg=%s (session in COMPLETING, "
+                    "let _do_linear_complete finish naturally)",
+                    old_message_id[:12],
+                )
+            else:
+                old_session._was_aborted = True
+                old_session.error_message = "Interrupted by new message"
 
-            # ── 竞态保护：等待当前 flush 完成 ──
-            # 如果 session 正在 _do_linear_split 中（已封旧卡、正在创建新卡），
-            # 需要等 split 完成后再标记 ABORTED，否则并发操作 session.card_id
-            # 可能导致：旧卡被封两次 / 新卡变成孤儿 / sequence conflict。
-            if old_session.flush._flush_in_progress:
-                loop = self._get_loop()
-                if loop is not None:
-                    async def _wait_and_abort():
-                        try:
-                            await asyncio.wait_for(
-                                old_session.flush.wait_for_flush(),
-                                timeout=3.0,
-                            )
-                        except (asyncio.TimeoutError, Exception):
-                            _logger.debug(
-                                "on_interrupted: flush wait timed out, proceeding with abort: msg=%s",
+                # ── 竞态保护：等待当前 flush 完成 ──
+                # 如果 session 正在 _do_linear_split 中（已封旧卡、正在创建新卡），
+                # 需要等 split 完成后再标记 ABORTED，否则并发操作 session.card_id
+                # 可能导致：旧卡被封两次 / 新卡变成孤儿 / sequence conflict。
+                if old_session.flush._flush_in_progress:
+                    loop = self._get_loop()
+                    if loop is not None:
+                        async def _wait_and_abort():
+                            try:
+                                await asyncio.wait_for(
+                                    old_session.flush.wait_for_flush(),
+                                    timeout=3.0,
+                                )
+                            except (asyncio.TimeoutError, Exception):
+                                _logger.debug(
+                                    "on_interrupted: flush wait timed out, proceeding with abort: msg=%s",
+                                    old_message_id[:12],
+                                )
+                            old_session.state = ABORTED
+                            old_session.flush.mark_completed()
+                            _logger.info(
+                                "on_interrupted: abort old msg=%s (after flush wait)",
                                 old_message_id[:12],
                             )
+                            self._complete_session(old_session)
+                        self._fire_and_forget(_wait_and_abort(), loop)
+                    else:
+                        # No loop — immediate abort (best effort)
                         old_session.state = ABORTED
                         old_session.flush.mark_completed()
                         _logger.info(
-                            "on_interrupted: abort old msg=%s (after flush wait)",
+                            "on_interrupted: abort old msg=%s (no loop, immediate)",
                             old_message_id[:12],
                         )
                         self._complete_session(old_session)
-                    self._fire_and_forget(_wait_and_abort(), loop)
                 else:
-                    # No loop — immediate abort (best effort)
+                    # No flush in progress — immediate abort
                     old_session.state = ABORTED
                     old_session.flush.mark_completed()
                     _logger.info(
-                        "on_interrupted: abort old msg=%s (no loop, immediate)",
+                        "on_interrupted: abort old msg=%s",
                         old_message_id[:12],
                     )
                     self._complete_session(old_session)
-            else:
-                # No flush in progress — immediate abort
-                old_session.state = ABORTED
-                old_session.flush.mark_completed()
-                _logger.info(
-                    "on_interrupted: abort old msg=%s",
-                    old_message_id[:12],
-                )
-                self._complete_session(old_session)
 
         if new_message_id not in self._sessions:
             loop = self._get_loop()

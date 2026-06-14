@@ -139,6 +139,7 @@ grep -E "300317|300305|300309|element_limit" ~/.hermes/logs/gateway.log | tail -
 | 300317 序列冲突 | `_streaming_closed` 守卫是否生效 | `300317`、`_streaming_closed` |
 | 页脚早于内容出现 | drain 步骤是否执行 | `drain`、`answer_dirty` |
 | 回答内容不显示 | `already_streamed` 处理 + 去重长度追踪 | `already_streamed`、`_stream_consumed_len` |
+| 完成卡片被覆盖成"已停止" | `on_interrupted` 是否错误触发于 COMPLETING 状态 | `abort old msg=... (after flush wait)` + `linear complete with fallback failed` |
 
 > 详细的架构背景和调试指南请参阅 [SKILL.md](SKILL.md)。
 

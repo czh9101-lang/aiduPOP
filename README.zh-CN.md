@@ -18,10 +18,6 @@
 
 为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、统一可折叠面板、按时间线交错显示推理与工具调用等。
 
-> 📁 卡片模板已导出至 [`assets/card_templates/`](assets/card_templates/)，便于查阅和自定义。
->
-> 🔄 每日集成测试工作流自动检测 Hermes 新版本并验证兼容性，结果自动推送至飞书。
-
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >
 > ⚠️ **与上游插件不兼容** — 如已安装原版 `Cheerwhy/hermes-lark-streaming`，请先卸载后再安装本插件。
@@ -30,10 +26,12 @@
 
 ## 效果预览
 
-<img src="assets/img1.png" width="20%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
-<img src="assets/img2.png" width="20%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
-<img src="assets/img3.png" width="20%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
-<img src="assets/img4.png" width="20%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<p align="center">
+<img src="assets/img1.png" width="22%" style="max-height: 280px; object-fit: contain;" />&nbsp;
+<img src="assets/img2.png" width="22%" style="max-height: 280px; object-fit: contain;" />&nbsp;
+<img src="assets/img3.png" width="22%" style="max-height: 280px; object-fit: contain;" />&nbsp;
+<img src="assets/img4.png" width="22%" style="max-height: 280px; object-fit: contain;" />
+</p>
 
 ---
 
@@ -185,4 +183,4 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ## 致谢
 
-[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=48)](https://github.com/joshcheng820222)
+[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222)[![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998)
