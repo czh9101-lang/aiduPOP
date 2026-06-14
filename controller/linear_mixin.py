@@ -371,25 +371,45 @@ class UnifiedControllerMixin:
 
         actions: list[dict[str, Any]] = []
 
-        # ── Phase 2: First content — add panel + answer element, delete loading hint ──
-        if not session._panel_element_created and (state.panel_visible or state.answer_dirty or state.answer_text):
-            all_tool_steps = session.tool_use.build_display_steps()
-            panel = build_unified_panel(
-                reasoning_rounds=state.reasoning_rounds,
-                current_reasoning_text=state.current_reasoning_text,
-                tool_steps=all_tool_steps,
-                tool_elapsed_ms=session.tool_use.elapsed_ms,
-                show_reasoning=self._cfg.show_reasoning,
-                expanded=self._cfg.streaming_panel_expanded,
-                panel_events=state.panel_events,
-            )
-            # Add panel + answer element before loading hint
+        # ── Phase 2: First content — add answer element (and panel if needed), delete loading hint ──
+        #
+        # Bug fix (v1.0.5): Split Phase 2 into two sub-paths:
+        #   A) If panel_visible (reasoning/tools exist) → add panel + answer element
+        #   B) If only answer text (simple conversation) → add answer element only, no panel
+        #
+        # Previously, the condition was `panel_visible or answer_dirty or answer_text`,
+        # which always created the unified panel — even for simple conversations with
+        # no tools/reasoning, producing an empty collapsible panel.
+        #
+        # The answer element must be created in BOTH paths so the answer text can be
+        # streamed to the card. Without it, simple conversations would never show text.
+        if not session._answer_element_created and (state.panel_visible or state.answer_dirty or state.answer_text):
+            new_elements: list[dict[str, Any]] = []
+
+            # ── Path A: Has reasoning or tools → add unified panel ──
+            if state.panel_visible:
+                all_tool_steps = session.tool_use.build_display_steps()
+                panel = build_unified_panel(
+                    reasoning_rounds=state.reasoning_rounds,
+                    current_reasoning_text=state.current_reasoning_text,
+                    tool_steps=all_tool_steps,
+                    tool_elapsed_ms=session.tool_use.elapsed_ms,
+                    show_reasoning=self._cfg.show_reasoning,
+                    expanded=self._cfg.streaming_panel_expanded,
+                    panel_events=state.panel_events,
+                )
+                new_elements.append(panel)
+
+            # ── Path A & B: Always add answer streaming element ──
+            new_elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
+
+            # Add new elements before loading hint
             actions.append({
                 "action": "add_elements",
                 "params": {
                     "type": "insert_before",
                     "target_element_id": _LOADING_HINT_ELEMENT_ID,
-                    "elements": [panel, _streaming_element(element_id=ANSWER_ELEMENT_ID)],
+                    "elements": new_elements,
                 },
             })
             # Delete loading hint
@@ -404,9 +424,11 @@ class UnifiedControllerMixin:
 
             # ── Execute Phase 2 batch_update ──
             if actions:
+                _has_panel = state.panel_visible
                 session.sequence += 1
                 _logger.info(
-                    "unified flush (phase 2 — add panel): msg=%s seq=%d actions=%d",
+                    "unified flush (phase 2 — add %s): msg=%s seq=%d actions=%d",
+                    "panel+answer" if _has_panel else "answer only",
                     (session.message_id or "?")[:12],
                     session.sequence,
                     len(actions),
@@ -416,10 +438,12 @@ class UnifiedControllerMixin:
                         session.card_id, actions, sequence=session.sequence,
                     )
                     # Update tracking after success
-                    session._panel_element_created = True
+                    session._answer_element_created = True
                     session._loading_hint_removed = True
-                    session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
                     session.existing_elements.add(ANSWER_ELEMENT_ID)
+                    if _has_panel:
+                        session._panel_element_created = True
+                        session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
                     session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
                     # Clear dirty flags only after API success
                     state.panel_dirty = False
@@ -436,14 +460,15 @@ class UnifiedControllerMixin:
                         # ── Schema error (300315): permanent, don't retry ──
                         # This typically means an invalid property on a CardKit
                         # element.  Log with full error so the developer can
-                        # identify the offending property, then mark panel as
+                        # identify the offending property, then mark element as
                         # created to prevent infinite retry loops.
                         _logger.error(
                             "unified flush phase 2 SCHEMA ERROR (permanent): %s — "
-                            "marking panel as created to prevent retry loop, card=%s",
+                            "marking elements as created to prevent retry loop, card=%s",
                             e, session.card_id[:12],
                         )
-                        session._panel_element_created = True  # Prevent retry loop
+                        session._answer_element_created = True  # Prevent retry loop
+                        session._panel_element_created = True
                         session._loading_hint_removed = True
                         # Fall through to Phase 3 (partial_update may still fail
                         # if panel wasn't actually added, but at least we won't
@@ -485,26 +510,53 @@ class UnifiedControllerMixin:
 
         # ── Phase 3: Update existing panel + stream answer ──
         if state.panel_dirty:
-            all_tool_steps = session.tool_use.build_display_steps()
-            panel = build_unified_panel(
-                reasoning_rounds=state.reasoning_rounds,
-                current_reasoning_text=state.current_reasoning_text,
-                tool_steps=all_tool_steps,
-                tool_elapsed_ms=session.tool_use.elapsed_ms,
-                show_reasoning=self._cfg.show_reasoning,
-                expanded=self._cfg.streaming_panel_expanded,
-                panel_events=state.panel_events,
-            )
-            actions.append({
-                "action": "partial_update_element",
-                "params": {
-                    "element_id": UNIFIED_PANEL_ELEMENT_ID,
-                    "partial_element": {
-                        "header": panel["header"],
-                        "elements": panel["elements"],
+            if session._panel_element_created:
+                # Panel exists — update its content
+                all_tool_steps = session.tool_use.build_display_steps()
+                panel = build_unified_panel(
+                    reasoning_rounds=state.reasoning_rounds,
+                    current_reasoning_text=state.current_reasoning_text,
+                    tool_steps=all_tool_steps,
+                    tool_elapsed_ms=session.tool_use.elapsed_ms,
+                    show_reasoning=self._cfg.show_reasoning,
+                    expanded=self._cfg.streaming_panel_expanded,
+                    panel_events=state.panel_events,
+                )
+                actions.append({
+                    "action": "partial_update_element",
+                    "params": {
+                        "element_id": UNIFIED_PANEL_ELEMENT_ID,
+                        "partial_element": {
+                            "header": panel["header"],
+                            "elements": panel["elements"],
+                        },
                     },
-                },
-            })
+                })
+            elif session._answer_element_created:
+                # ── Bug fix (v1.0.5): Late-arriving reasoning/tools ──
+                # The answer element was created first (simple conversation path),
+                # but now reasoning/tool events have arrived. We need to add the
+                # panel element dynamically via add_elements, inserting before
+                # the answer element.
+                all_tool_steps = session.tool_use.build_display_steps()
+                panel = build_unified_panel(
+                    reasoning_rounds=state.reasoning_rounds,
+                    current_reasoning_text=state.current_reasoning_text,
+                    tool_steps=all_tool_steps,
+                    tool_elapsed_ms=session.tool_use.elapsed_ms,
+                    show_reasoning=self._cfg.show_reasoning,
+                    expanded=self._cfg.streaming_panel_expanded,
+                    panel_events=state.panel_events,
+                )
+                actions.append({
+                    "action": "add_elements",
+                    "params": {
+                        "type": "insert_before",
+                        "target_element_id": ANSWER_ELEMENT_ID,
+                        "elements": [panel],
+                    },
+                })
+                # Note: _panel_element_created will be set after API success below
             # Note: panel_dirty and tool_steps_dirty are cleared AFTER
             # the API call succeeds, not before — if the call fails we
             # want the next flush to rebuild the panel content.
@@ -539,6 +591,10 @@ class UnifiedControllerMixin:
                 if _hint_delete_in_batch:
                     session._loading_hint_removed = True
                     session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
+                # ── Track late-arriving panel creation ──
+                if not session._panel_element_created and state.panel_visible:
+                    session._panel_element_created = True
+                    session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
             except FeishuAPIError as e:
                 if e.code == CARDKIT_STREAMING_CLOSED:
                     _logger.info(
@@ -563,7 +619,7 @@ class UnifiedControllerMixin:
         # ── Stream answer text ──
         # Note: skip markdown optimization during streaming for performance;
         # it will be applied on seal via _preservative_seal.
-        if state.answer_dirty:
+        if state.answer_dirty and session._answer_element_created:
             content = state.answer_text or " "
             session.sequence += 1
             _logger.debug(
@@ -784,7 +840,7 @@ class UnifiedControllerMixin:
                         state.tool_steps_dirty = False
 
                 # ── Flush remaining answer text ──
-                if state.answer_dirty and session._panel_element_created and not session._streaming_closed:
+                if state.answer_dirty and session._answer_element_created and not session._streaming_closed:
                     content = state.answer_text or " "
                     try:
                         session.sequence += 1
@@ -889,32 +945,38 @@ class UnifiedControllerMixin:
 
             if state is not None:
                 state.finalize()
-                all_tool_steps = session.tool_use.build_display_steps()
-                panel = build_unified_panel(
-                    reasoning_rounds=state.reasoning_rounds,
-                    current_reasoning_text="",
-                    tool_steps=all_tool_steps,
-                    tool_elapsed_ms=session.tool_use.elapsed_ms,
-                    show_reasoning=self._cfg.show_reasoning,
-                    expanded=self._cfg.panel_expanded,
-                    panel_events=state.panel_events,
-                )
-                seal_actions.append({
-                    "action": "partial_update_element",
-                    "params": {
-                        "element_id": UNIFIED_PANEL_ELEMENT_ID,
-                        "partial_element": {
-                            "header": panel["header"],
-                            "elements": panel["elements"],
+
+                # ── Bug fix (v1.0.5): Only update panel if it was created ──
+                # Simple conversations (no tools/reasoning) don't have a panel element.
+                # Attempting to partial_update a non-existent element causes a
+                # FeishuAPIError.  Only update the panel when _panel_element_created.
+                if session._panel_element_created:
+                    all_tool_steps = session.tool_use.build_display_steps()
+                    panel = build_unified_panel(
+                        reasoning_rounds=state.reasoning_rounds,
+                        current_reasoning_text="",
+                        tool_steps=all_tool_steps,
+                        tool_elapsed_ms=session.tool_use.elapsed_ms,
+                        show_reasoning=self._cfg.show_reasoning,
+                        expanded=self._cfg.panel_expanded,
+                        panel_events=state.panel_events,
+                    )
+                    seal_actions.append({
+                        "action": "partial_update_element",
+                        "params": {
+                            "element_id": UNIFIED_PANEL_ELEMENT_ID,
+                            "partial_element": {
+                                "header": panel["header"],
+                                "elements": panel["elements"],
+                            },
                         },
-                    },
-                })
+                    })
 
             # ── Step 2b: Update answer element with optimized markdown ──
             # During streaming, answer text was sent raw (no markdown optimization)
             # for performance. Now that streaming is closed, update the answer
             # element with the fully optimized markdown content.
-            if state is not None and state.answer_text:
+            if state is not None and state.answer_text and session._answer_element_created:
                 optimized_content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
                 seal_actions.append({
                     "action": "partial_update_element",
@@ -991,28 +1053,30 @@ class UnifiedControllerMixin:
                         # before panel was assigned in the try block.
                         retry_actions: list[dict[str, Any]] = []
                         if state is not None:
-                            all_tool_steps = session.tool_use.build_display_steps()
-                            retry_panel = build_unified_panel(
-                                reasoning_rounds=state.reasoning_rounds,
-                                current_reasoning_text="",
-                                tool_steps=all_tool_steps,
-                                tool_elapsed_ms=session.tool_use.elapsed_ms,
-                                show_reasoning=self._cfg.show_reasoning,
-                                expanded=self._cfg.panel_expanded,
-                                panel_events=state.panel_events,
-                            )
-                            retry_actions.append({
-                                "action": "partial_update_element",
-                                "params": {
-                                    "element_id": UNIFIED_PANEL_ELEMENT_ID,
-                                    "partial_element": {
-                                        "header": retry_panel["header"],
-                                        "elements": retry_panel["elements"],
+                            # ── Bug fix (v1.0.5): Only update panel if it was created ──
+                            if session._panel_element_created:
+                                all_tool_steps = session.tool_use.build_display_steps()
+                                retry_panel = build_unified_panel(
+                                    reasoning_rounds=state.reasoning_rounds,
+                                    current_reasoning_text="",
+                                    tool_steps=all_tool_steps,
+                                    tool_elapsed_ms=session.tool_use.elapsed_ms,
+                                    show_reasoning=self._cfg.show_reasoning,
+                                    expanded=self._cfg.panel_expanded,
+                                    panel_events=state.panel_events,
+                                )
+                                retry_actions.append({
+                                    "action": "partial_update_element",
+                                    "params": {
+                                        "element_id": UNIFIED_PANEL_ELEMENT_ID,
+                                        "partial_element": {
+                                            "header": retry_panel["header"],
+                                            "elements": retry_panel["elements"],
+                                        },
                                     },
-                                },
-                            })
+                                })
                             # Update answer element with optimized markdown
-                            if state.answer_text:
+                            if state.answer_text and session._answer_element_created:
                                 optimized_content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
                                 retry_actions.append({
                                     "action": "partial_update_element",
@@ -1128,7 +1192,7 @@ class UnifiedControllerMixin:
             if not (
                 state is not None
                 and session.card_id
-                and session._panel_element_created
+                and session._answer_element_created
                 and (state.answer_dirty or state.panel_dirty or state.tool_steps_dirty)
             ):
                 break  # No dirty data — drain complete
@@ -1183,7 +1247,7 @@ class UnifiedControllerMixin:
                         _logger.warning("drain panel failed: %s", e)
 
             # ── Drain answer text ──
-            if state.answer_dirty and session._panel_element_created:
+            if state.answer_dirty and session._answer_element_created:
                 content = state.answer_text or " "
                 try:
                     session.sequence += 1

@@ -1,0 +1,134 @@
+{
+  "schema": "2.0",
+  "config": {
+    "wide_screen_mode": true,
+    "update_multi": true,
+    "streaming_mode": false,
+    "locales": [
+      "zh_cn",
+      "en_us"
+    ],
+    "summary": {
+      "content": "用户想要搜索最新的技术趋势，我需要先理解需求再调用工具...",
+      "i18n_content": {
+        "zh_cn": "用户想要搜索最新的技术趋势，我需要先理解需求再调用工具...",
+        "en_us": "用户想要搜索最新的技术趋势，我需要先理解需求再调用工具..."
+      }
+    }
+  },
+  "body": {
+    "elements": [
+      {
+        "tag": "collapsible_panel",
+        "expanded": false,
+        "header": {
+          "title": {
+            "tag": "plain_text",
+            "content": "agent loop · 1 rounds · 1.5s",
+            "i18n_content": {
+              "zh_cn": "agent loop · 1 轮 · 1.5s",
+              "en_us": "agent loop · 1 rounds · 1.5s"
+            },
+            "text_color": "grey",
+            "text_size": "notation"
+          },
+          "vertical_align": "center",
+          "icon": {
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+            "size": "16px 16px",
+            "color": "grey"
+          },
+          "icon_position": "right",
+          "icon_expanded_angle": -180
+        },
+        "border": {
+          "color": "grey",
+          "corner_radius": "5px"
+        },
+        "vertical_spacing": "4px",
+        "padding": "8px 8px 8px 8px",
+        "elements": [
+          {
+            "tag": "div",
+            "icon": {
+              "tag": "standard_icon",
+              "token": "robot-add_outlined",
+              "size": "16px 16px",
+              "color": "grey"
+            },
+            "text": {
+              "tag": "lark_md",
+              "content": "Round 1 · 1.5s",
+              "i18n_content": {
+                "zh_cn": "第 1 轮 · 1.5s",
+                "en_us": "Round 1 · 1.5s"
+              },
+              "text_size": "notation"
+            }
+          },
+          {
+            "tag": "markdown",
+            "content": "用户想要搜索最新的技术趋势，我需要先理解需求再调用工具...",
+            "text_size": "notation"
+          }
+        ],
+        "element_id": "agent_process_panel"
+      },
+      {
+        "tag": "markdown",
+        "content": "Done."
+      },
+      {
+        "tag": "collapsible_panel",
+        "expanded": false,
+        "header": {
+          "title": {
+            "tag": "plain_text",
+            "content": "Error",
+            "i18n_content": {
+              "zh_cn": "错误信息",
+              "en_us": "Error"
+            },
+            "text_color": "red",
+            "text_size": "notation"
+          },
+          "vertical_align": "center",
+          "icon": {
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+            "size": "16px 16px",
+            "color": "grey"
+          },
+          "icon_position": "right",
+          "icon_expanded_angle": -180
+        },
+        "border": {
+          "color": "red",
+          "corner_radius": "5px"
+        },
+        "vertical_spacing": "8px",
+        "padding": "8px 8px 8px 8px",
+        "elements": [
+          {
+            "tag": "markdown",
+            "content": "API request failed: rate limit exceeded (429). Please retry after 60 seconds.",
+            "text_size": "notation"
+          }
+        ]
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "<font color='red'>Error · gpt-4o</font>",
+        "i18n_content": {
+          "zh_cn": "<font color='red'>出错 · gpt-4o</font>",
+          "en_us": "<font color='red'>Error · gpt-4o</font>"
+        },
+        "text_size": "notation"
+      }
+    ]
+  }
+}

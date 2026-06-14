@@ -48,6 +48,7 @@ class CardSession:
         "_loading_hint_removed",
         "_loop",
         "_panel_element_created",
+        "_answer_element_created",
         "_pending_flush",
         "_streaming_closed",
         "_was_aborted",
@@ -126,6 +127,7 @@ class CardSession:
         self.unified_state: UnifiedLinearState | None = None
         self.existing_elements: set[str] = set()
         self._panel_element_created: bool = False
+        self._answer_element_created: bool = False
         self.card_created_at: float = 0.0
         self._was_aborted: bool = False
         self.error_message: str = ""

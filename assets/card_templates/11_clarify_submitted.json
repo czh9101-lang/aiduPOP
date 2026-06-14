@@ -1,0 +1,82 @@
+{
+  "schema": "2.0",
+  "config": {
+    "wide_screen_mode": true,
+    "streaming_mode": false,
+    "locales": [
+      "zh_cn",
+      "en_us"
+    ]
+  },
+  "body": {
+    "elements": [
+      {
+        "tag": "div",
+        "icon": {
+          "tag": "standard_icon",
+          "token": "lock_outlined",
+          "size": "20px 20px",
+          "color": "orange"
+        },
+        "text": {
+          "tag": "lark_md",
+          "content": "**请选择执行方式**"
+        }
+      },
+      {
+        "tag": "div",
+        "icon": {
+          "tag": "standard_icon",
+          "token": "lock_outlined",
+          "size": "16px 16px",
+          "color": "orange"
+        },
+        "text": {
+          "tag": "lark_md",
+          "content": "Selected: 自动执行",
+          "i18n_content": {
+            "zh_cn": "已选择: 自动执行",
+            "en_us": "Selected: 自动执行"
+          }
+        }
+      },
+      {
+        "tag": "div",
+        "text": {
+          "tag": "lark_md",
+          "content": "*Submitted, awaiting confirmation...*",
+          "i18n_content": {
+            "zh_cn": "*已提交，等待确认...*",
+            "en_us": "*Submitted, awaiting confirmation...*"
+          }
+        }
+      },
+      {
+        "tag": "action",
+        "actions": [
+          {
+            "tag": "button",
+            "text": {
+              "tag": "plain_text",
+              "content": "Retry submission",
+              "i18n_content": {
+                "zh_cn": "重试提交",
+                "en_us": "Retry submission"
+              }
+            },
+            "type": "primary",
+            "behaviors": [
+              {
+                "type": "callback",
+                "value": {
+                  "hermes_clarify_action": "retry_submit",
+                  "clarify_id": "test-123"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

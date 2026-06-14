@@ -168,6 +168,27 @@ try:
 except Exception:
     pass
 
+# ── Gitee MR 合并去重 ──
+# Gitee 合并 MR 时会产生两条 commit：原始 commit 和带 "!N" 前缀的合并 commit，
+# 内容相同但 git 把它们当作两条。去掉 "!N " 前缀后内容一致的只保留一条（优先保留带前缀的）。
+import re as _re
+
+def _strip_mr_prefix(msg: str) -> str:
+    """去掉 Gitee MR 编号前缀，如 '!42 fix: xxx' → 'fix: xxx'"""
+    return _re.sub(r"^!\d+\s+", "", msg)
+
+_seen_bare: dict[str, str] = {}  # bare_text → best original line (prefer with !N prefix)
+for line in commit_lines:
+    bare = _strip_mr_prefix(line)
+    if bare not in _seen_bare:
+        _seen_bare[bare] = line
+    else:
+        # Prefer the version with !N prefix (it's more informative)
+        existing = _seen_bare[bare]
+        if _re.match(r"^!\d+\s+", line) and not _re.match(r"^!\d+\s+", existing):
+            _seen_bare[bare] = line
+commit_lines = list(_seen_bare.values())
+
 commit_summary = ""
 if commit_lines:
     # 飞书卡片单条消息过长会被截断，限制每条 80 字符
