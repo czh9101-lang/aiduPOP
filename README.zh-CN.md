@@ -8,6 +8,7 @@
 </p>
 
 <p align="center">
+<a href="mailto:zhengyu.pu@petalmail.com"><img src="https://img.shields.io/badge/邮箱-zhengyu.pu%40petalmail.com-9C27B0?logo=gmail&logoColor=white" alt="邮箱"></a>
 <a href="https://applink.feishu.cn/client/message/link/open?token=AmoQJk5dwczIahKlW78ADLU%3D"><img src="https://img.shields.io/badge/官方唯一交流群-中国-red" alt="官方交流群"></a>
 <a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-知识库-3370FF?logo=feishu&logoColor=white" alt="知识库文档"></a>
 </p>
@@ -185,4 +186,4 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ## 致谢
 
-[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222)[![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998)
+[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222) [![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998)

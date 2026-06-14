@@ -481,4 +481,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-15 | Version: 1.0.5*
+*Last updated: 2026-06-14 | Version: 1.0.5*
