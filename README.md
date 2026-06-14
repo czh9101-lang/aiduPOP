@@ -126,6 +126,8 @@ hermes_lark_streaming:
   print_strategy: delay            # "fast" (instant) or "delay" (smoother typewriter, default)
   flush_interval_ms: 100           # Card refresh interval in ms (70–2000, default 100)
   card_ttl_sec: 600               # Card alive detection timeout (seconds)
+  max_tool_steps: 20               # Max tool steps shown in panel (default 20, range 1–100)
+  max_reasoning_rounds: 20         # Max reasoning rounds shown in panel (default 20, range 1–100)
   inject_time: false               # Time awareness mode (see below)
 
   footer:
@@ -158,41 +160,41 @@ display:
   show_reasoning: true  # Show reasoning content in the unified panel
 ```
 
-### 统一面板超限压缩
+### Unified Panel Overflow Compression
 
-飞书卡片2.0 **硬性限制200个元素/组件**，超出会报错 `300305 (element exceeds the limit)`，导致卡片封口失败并触发文本兜底（内容重复）。
+Feishu Card 2.0 has a **hard limit of 200 elements/components** per card. Exceeding it triggers error `300305 (element exceeds the limit)`, which causes card sealing to fail and triggers a plain-text fallback — resulting in duplicate content visible to users.
 
-> **元素计数规则**：每个带 `tag` 属性的 JSON 对象都算1个元素，包括嵌套在内层的 `standard_icon`、`plain_text`、`lark_md` 等。
+> **Element counting rule**: Every JSON object with a `tag` property counts as 1 element, including deeply nested ones like `standard_icon`, `plain_text`, `lark_md`, etc.
 
-#### 统一面板各项元素消耗
+#### Element Cost Breakdown
 
-| 组成部分 | 元素数 | 说明 |
-|---------|--------|------|
-| 面板容器 | 1 | `collapsible_panel` |
-| 面板标题 | 2 | `plain_text` + `standard_icon` |
-| 每个推理轮次（最大） | 4 | 标题行 `div`+`standard_icon`+`lark_md` + 推理文本 `markdown` |
-| 每个工具步骤（最大） | 7 | 标题行 `div`+`standard_icon`+`lark_md` + 详情行 `div`+`plain_text` + 结果行 `div`+`lark_md` |
-| 折叠提示（触发时） | 1 | 1个 `markdown` 元素 |
-| 回答文本 | 1~3 | `markdown`，长文本会被拆分 |
-| 页脚 | 2 | `hr` + `markdown` |
-| 卡片头（启用时） | ~3 | `plain_text` + `standard_icon` |
-| 错误面板（有时） | ~4 | `collapsible_panel` + 内部元素 |
+| Component | Elements | Notes |
+|-----------|----------|-------|
+| Panel container | 1 | `collapsible_panel` |
+| Panel title | 2 | `plain_text` + `standard_icon` |
+| Each reasoning round (max) | 4 | Title row `div`+`standard_icon`+`lark_md` + reasoning text `markdown` |
+| Each tool step (max) | 7 | Title row `div`+`standard_icon`+`lark_md` + detail row `div`+`plain_text` + result row `div`+`lark_md` |
+| Fold hint (when triggered) | 1 | 1 `markdown` element |
+| Answer text | 1–3 | `markdown`; long text may be split |
+| Footer | 2 | `hr` + `markdown` |
+| Card header (when enabled) | ~3 | `plain_text` + `standard_icon` |
+| Error panel (when present) | ~4 | `collapsible_panel` + inner elements |
 
-**计算示例**：20 轮推理 + 20 步工具 = 20×4 + 20×7 + 固定开销 ≈ 223（超过 200）
+**Example calculation**: 20 reasoning rounds + 20 tool steps = 20×4 + 20×7 + fixed overhead ≈ 223 (exceeds 200)
 
-因此默认值设为 `max_tool_steps=20` + `max_reasoning_rounds=20`，配合折叠机制确保大多数场景不超限。即使配置值较高或极端情况下元素仍超限，代码内置了**卡片级元素安全网**——封卡时已知全部元素（面板+answer+footer+error），递归计算实际 tag objects 总数，超过195（200-5缓冲）时自动从面板children最老项目开始裁剪，确保卡片元素永远不会超过200。answer、footer、error panel 永不裁剪。
+Hence the defaults `max_tool_steps=20` + `max_reasoning_rounds=20`, combined with a fold mechanism, ensure most scenarios stay within limits. Even if a higher config value or an extreme case still exceeds the cap, a built-in **card-level element safety net** kicks in — at seal time all elements are known (panel + answer + footer + error), the actual tag object count is recursively computed, and if it exceeds 195 (200 − 5 buffer), the oldest panel children are trimmed first. This guarantees the card never exceeds 200 elements. Answer, footer, and error panel are never trimmed.
 
-#### 配置项
+#### Configuration
 
 ```yaml
 hermes_lark_streaming:
-  max_tool_steps: 20           # 统一面板最多显示的工具步骤数（默认20，范围1~100）
-  max_reasoning_rounds: 20     # 统一面板最多显示的推理轮次数（默认20，范围1~100）
+  max_tool_steps: 20           # Max tool steps shown in unified panel (default 20, range 1–100)
+  max_reasoning_rounds: 20     # Max reasoning rounds shown in unified panel (default 20, range 1–100)
 ```
 
-超出限制时，早期项目会被折叠为一行提示，例如：`⚡ 还有 10 轮早期推理、5 步早期操作已折叠`
+When the limit is exceeded, early items are collapsed into a single summary line, e.g.: `⚡ 10 early reasoning rounds, 5 early tool steps collapsed`
 
-面板标题始终显示**实际总数**（如"3轮 · 44个工具"），折叠提示仅影响面板内展示的内容。
+The panel title always shows the **actual total** (e.g. "3 rounds · 44 tools"); the fold hint only affects what is displayed inside the panel.
 
 ### Feishu Credentials
 

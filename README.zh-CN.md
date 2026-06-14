@@ -121,6 +121,8 @@ hermes_lark_streaming:
   print_strategy: delay            # "fast"（即时）或 "delay"（更丝滑打字机，默认）
   flush_interval_ms: 100           # 卡片刷新间隔（毫秒，70~2000，默认 100）
   card_ttl_sec: 600               # 卡片存活检测超时（秒）
+  max_tool_steps: 20               # 统一面板最多显示的工具步骤数（默认20，范围1~100）
+  max_reasoning_rounds: 20         # 统一面板最多显示的推理轮次数（默认20，范围1~100）
   inject_time: false               # 时间感知模式（详见下方说明）
 
   footer:
