@@ -602,6 +602,7 @@ class TestDoUnifiedFlush:
         session.state = STREAMING
         session.card_id = "c"
         session._loading_hint_removed = True
+        session._answer_element_created = True  # Answer element already exists (Phase 2 done)
         session._panel_element_created = True  # Panel already exists (Phase 2 done)
         session.unified_state.on_reasoning_delta("t")
         session.unified_state.panel_dirty = False
@@ -663,10 +664,11 @@ class TestDoUnifiedFlush:
             a for a in all_actions
             if a["action"] == "delete_elements"
         ]
-        assert len(add_actions) == 1  # Phase 2: add panel + answer element
+        assert len(add_actions) == 1  # Phase 2: add answer element (panel not needed for answer-only content)
         assert len(delete_hint_actions) == 1  # Delete loading hint
         assert session._loading_hint_removed is True
-        assert session._panel_element_created is True
+        assert session._answer_element_created is True  # Answer element created (Path B: answer only)
+        # _panel_element_created remains False — no reasoning/tools, so no panel needed
 
     @pytest.mark.asyncio
     async def test_loading_hint_removed_on_reasoning(self) -> None:
@@ -883,6 +885,7 @@ class TestDoLinearComplete:
         session.state = STREAMING
         session.card_id = "card_drain"
         session._panel_element_created = True
+        session._answer_element_created = True  # Answer element must exist for drain to work
         session._loading_hint_removed = True
         # Simulate: last answer delta arrived but flush hasn't fired yet
         session.unified_state.on_answer_delta("final chunk")
@@ -924,8 +927,8 @@ class TestDoLinearComplete:
         session.state = STREAMING
         session.card_id = "card_drain_panel"
         session._panel_element_created = True
+        session._answer_element_created = True
         session._loading_hint_removed = True
-        # Simulate: reasoning delta arrived but flush hasn't fired yet
         session.unified_state.on_reasoning_delta("think more")
         assert session.unified_state.panel_dirty is True
         ctrl._sessions["msg_drain_panel"] = session
@@ -951,6 +954,45 @@ class TestDoLinearComplete:
         assert session.unified_state.panel_dirty is False
 
     @pytest.mark.asyncio
+    async def test_linear_complete_simple_conversation_no_panel(self) -> None:
+        """Simple conversation (answer only, no reasoning/tools) completes without panel.
+
+        v1.0.5 Phase 2 split: simple conversations skip the unified panel
+        entirely. Only the answer streaming element is created (Path B).
+        _do_linear_complete should seal the card without panel operations.
+        """
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_simple", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_simple"
+        # Simple conversation: answer element created but NO panel
+        session._answer_element_created = True
+        session._panel_element_created = False
+        session._loading_hint_removed = True
+        session.unified_state.on_answer_delta("Simple answer text")
+        session.unified_state.answer_dirty = False  # Already flushed
+        ctrl._sessions["msg_simple"] = session
+
+        api_calls: list[str] = []
+        client = ctrl._client
+        client.cardkit_stream_element = AsyncMock(
+            side_effect=lambda *a, **k: api_calls.append("stream"),
+        )
+        client.cardkit_batch_update = AsyncMock(
+            side_effect=lambda *a, **k: api_calls.append("batch"),
+        )
+        client.cardkit_close_streaming = AsyncMock(
+            side_effect=lambda *a, **k: api_calls.append("close"),
+        )
+
+        assert await ctrl._do_linear_complete(session) is True
+
+        # No panel operations should happen
+        assert session._panel_element_created is False
+        # Close should be called
+        assert "close" in api_calls
+
+    @pytest.mark.asyncio
     async def test_no_drain_when_no_dirty_data(self) -> None:
         """No drain API calls when all data is already flushed."""
         ctrl = _setup_ctrl()
@@ -958,6 +1000,7 @@ class TestDoLinearComplete:
         session.state = STREAMING
         session.card_id = "card_clean"
         session._panel_element_created = True
+        session._answer_element_created = True
         session._loading_hint_removed = True
         # No dirty data
         ctrl._sessions["msg_clean"] = session
@@ -988,6 +1031,7 @@ class TestDoLinearComplete:
         session.state = STREAMING
         session.card_id = "card_summary"
         session._panel_element_created = True
+        session._answer_element_created = True
         session._loading_hint_removed = True
         session.unified_state.on_answer_delta("Hello, this is the answer text")
         # Clear dirty flag (simulates already-flushed content)
@@ -1041,6 +1085,7 @@ class TestDoLinearComplete:
         session.state = STREAMING
         session.card_id = "card_double"
         session._panel_element_created = True
+        session._answer_element_created = True
         session._loading_hint_removed = True
         ctrl._sessions["msg_double_close"] = session
 
