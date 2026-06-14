@@ -123,6 +123,25 @@ _LOADING_HINT_ELEMENT_ID = "context_loading_hint"
 _LOADING_IMG_KEY = "img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg"
 
 
+def _count_tag_objects(obj: Any) -> int:
+    """Recursively count all JSON objects with a ``tag`` key in a card element tree.
+
+    Feishu Card 2.0 counts every nested tag object toward its 200-element
+    limit — including ``standard_icon`` inside a ``div``, ``plain_text``
+    inside a ``collapsible_panel`` header, etc.
+    """
+    count = 0
+    if isinstance(obj, dict):
+        if "tag" in obj:
+            count += 1
+        for v in obj.values():
+            count += _count_tag_objects(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            count += _count_tag_objects(item)
+    return count
+
+
 def _collapsible_panel(
     *,
     expanded: bool,
@@ -242,6 +261,8 @@ def build_unified_panel(
     expanded: bool = False,
     element_id: str | None = None,
     panel_events: list[tuple[str, int]] | None = None,
+    max_tool_steps: int = 20,
+    max_reasoning_rounds: int = 20,
 ) -> dict:
     """Build the full unified panel content for streaming updates and complete cards.
 
@@ -305,8 +326,62 @@ def build_unified_panel(
     en_full = " · ".join(en_parts)
     zh_full = " · ".join(zh_parts)
 
+    # ── Element limit trimming ──
+    # Feishu Card 2.0 has a hard limit of 200 elements/components.
+    # When the card has too many tool steps or reasoning rounds,
+    # the preservative seal or full rebuild fails with code 300305
+    # ("element exceeds the limit"), causing a text fallback that
+    # duplicates content already visible on the card.
+    # We trim early items and show a collapse hint instead.
+    trimmed_rounds = 0
+    trimmed_tools = 0
+
+    if len(reasoning_rounds) > max_reasoning_rounds:
+        trimmed_rounds = len(reasoning_rounds) - max_reasoning_rounds
+        reasoning_rounds = reasoning_rounds[-max_reasoning_rounds:]
+
+    if len(tool_steps) > max_tool_steps:
+        trimmed_tools = len(tool_steps) - max_tool_steps
+        tool_steps = tool_steps[-max_tool_steps:]
+
+    # Recount after trimming
+    num_rounds = len(reasoning_rounds) + (1 if current_reasoning_text else 0)
+
+    # Filter panel_events to match trimmed items
+    if panel_events and (trimmed_rounds > 0 or trimmed_tools > 0):
+        max_round_idx = len(reasoning_rounds) - 1  # after trimming, valid indices are 0..max_round_idx
+        max_tool_idx = len(tool_steps) - 1
+        # panel_events reference original indices; after trimming, we keep only
+        # the last N items, so original index i maps to trimmed index i - offset.
+        # For simplicity, if we trimmed anything, recalculate panel_events
+        # using the trimmed lists' indices.
+        round_offset = trimmed_rounds
+        tool_offset = trimmed_tools
+        filtered_events: list[tuple[str, int]] = []
+        for kind, idx in panel_events:
+            if kind == "reasoning":
+                if idx >= round_offset:
+                    filtered_events.append((kind, idx - round_offset))
+            elif kind == "tool":
+                if idx >= tool_offset:
+                    filtered_events.append((kind, idx - tool_offset))
+        panel_events = filtered_events if filtered_events else None
+
     # ── Internal elements ──
     children: list[dict] = []
+
+    if trimmed_rounds > 0 or trimmed_tools > 0:
+        collapse_parts: list[str] = []
+        if trimmed_rounds > 0:
+            collapse_parts.append(f"{trimmed_rounds} 轮早期推理")
+        if trimmed_tools > 0:
+            collapse_parts.append(f"{trimmed_tools} 步早期操作")
+        collapse_text = "⚡ 还有 " + "、".join(collapse_parts) + "已折叠"
+        children.append({
+            "tag": "markdown",
+            "content": collapse_text,
+            "text_size": "notation",
+        })
 
     if panel_events:
         # ── Chronological rendering: interleave reasoning and tools ──
@@ -450,6 +525,52 @@ def build_unified_panel(
     # Fallback: empty content
     if not children:
         children.append({"tag": "markdown", "content": " "})
+
+    # ── Hard element count safety net ──
+    # Even after the max_tool_steps/max_reasoning_rounds trimming above,
+    # the actual element count may still exceed Feishu's 200 limit in
+    # worst-case scenarios (every tool step has 7 elements, every
+    # reasoning round has 4).  We count actual tag objects in children
+    # and progressively trim from the front if over threshold.
+    #
+    # The threshold (160) leaves 40 elements for:
+    #   panel container (1) + title (2) + answer (1~3) + footer (2)
+    #   + error panel (0~4) + header (0~3) ≈ 7~16 fixed overhead
+    _ELEMENT_SAFETY_THRESHOLD = 160
+    total_elements = _count_tag_objects(children)
+    # Check if a collapse hint already exists (its element count won't change)
+    has_collapse_hint = any(
+        isinstance(child.get("content"), str) and "已折叠" in child["content"]
+        for child in children
+    )
+    # Reserve 1 element for the collapse hint if we need to add one
+    effective_threshold = _ELEMENT_SAFETY_THRESHOLD if has_collapse_hint else _ELEMENT_SAFETY_THRESHOLD - 1
+    if total_elements > effective_threshold:
+        # Remove non-collapse-hint items from the front until under threshold
+        trimmed_by_safety = 0
+        while total_elements > effective_threshold and len(children) > 1:
+            # Skip the collapse hint (first child if it contains "已折叠")
+            remove_idx = 1 if children[0].get("content", "").endswith("已折叠") else 0
+            removed = children.pop(remove_idx)
+            total_elements -= _count_tag_objects([removed])
+            trimmed_by_safety += 1
+        if trimmed_by_safety > 0:
+            # Update or add collapse hint with the additional trimmed count
+            hint_idx = None
+            for i, child in enumerate(children):
+                if isinstance(child.get("content"), str) and "已折叠" in child["content"]:
+                    hint_idx = i
+                    break
+            if hint_idx is not None:
+                old_hint = children[hint_idx]["content"]
+                # Append the additional count
+                children[hint_idx]["content"] = old_hint.rstrip("已折叠") + f"、{trimmed_by_safety} 项已折叠"
+            else:
+                children.insert(0, {
+                    "tag": "markdown",
+                    "content": f"⚡ 还有 {trimmed_by_safety} 项已折叠",
+                    "text_size": "notation",
+                })
 
     # ── Build panel ──
     panel = _collapsible_panel(

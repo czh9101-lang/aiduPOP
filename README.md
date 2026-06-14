@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.5-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.6-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -157,6 +157,42 @@ When `inject_time: true`, the plugin prepends `<time>HH:MM:SS</time>` to each us
 display:
   show_reasoning: true  # Show reasoning content in the unified panel
 ```
+
+### 统一面板超限压缩
+
+飞书卡片2.0 **硬性限制200个元素/组件**，超出会报错 `300305 (element exceeds the limit)`，导致卡片封口失败并触发文本兜底（内容重复）。
+
+> **元素计数规则**：每个带 `tag` 属性的 JSON 对象都算1个元素，包括嵌套在内层的 `standard_icon`、`plain_text`、`lark_md` 等。
+
+#### 统一面板各项元素消耗
+
+| 组成部分 | 元素数 | 说明 |
+|---------|--------|------|
+| 面板容器 | 1 | `collapsible_panel` |
+| 面板标题 | 2 | `plain_text` + `standard_icon` |
+| 每个推理轮次（最大） | 4 | 标题行 `div`+`standard_icon`+`lark_md` + 推理文本 `markdown` |
+| 每个工具步骤（最大） | 7 | 标题行 `div`+`standard_icon`+`lark_md` + 详情行 `div`+`plain_text` + 结果行 `div`+`lark_md` |
+| 折叠提示（触发时） | 1 | 1个 `markdown` 元素 |
+| 回答文本 | 1~3 | `markdown`，长文本会被拆分 |
+| 页脚 | 2 | `hr` + `markdown` |
+| 卡片头（启用时） | ~3 | `plain_text` + `standard_icon` |
+| 错误面板（有时） | ~4 | `collapsible_panel` + 内部元素 |
+
+**计算示例**：20 轮推理 + 20 步工具 = 20×4 + 20×7 + 固定开销 ≈ 223（超过 200）
+
+因此默认值设为 `max_tool_steps=20` + `max_reasoning_rounds=20`，配合折叠机制和安全网确保不超限。即使配置值较高或极端情况下元素仍超限，代码内置了硬性安全网——构建面板后递归计算实际元素数，超过160时自动从最老的项目开始删减，确保卡片元素永远不会超过200。
+
+#### 配置项
+
+```yaml
+hermes_lark_streaming:
+  max_tool_steps: 20           # 统一面板最多显示的工具步骤数（默认20，范围1~100）
+  max_reasoning_rounds: 20     # 统一面板最多显示的推理轮次数（默认20，范围1~100）
+```
+
+超出限制时，早期项目会被折叠为一行提示，例如：`⚡ 还有 10 轮早期推理、5 步早期操作已折叠`
+
+面板标题始终显示**实际总数**（如"3轮 · 44个工具"），折叠提示仅影响面板内展示的内容。
 
 ### Feishu Credentials
 

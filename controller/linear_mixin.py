@@ -397,6 +397,8 @@ class UnifiedControllerMixin:
                     show_reasoning=self._cfg.show_reasoning,
                     expanded=self._cfg.streaming_panel_expanded,
                     panel_events=state.panel_events,
+                    max_tool_steps=self._cfg.max_tool_steps,
+                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
                 )
                 new_elements.append(panel)
 
@@ -521,6 +523,8 @@ class UnifiedControllerMixin:
                     show_reasoning=self._cfg.show_reasoning,
                     expanded=self._cfg.streaming_panel_expanded,
                     panel_events=state.panel_events,
+                    max_tool_steps=self._cfg.max_tool_steps,
+                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
                 )
                 actions.append({
                     "action": "partial_update_element",
@@ -547,6 +551,8 @@ class UnifiedControllerMixin:
                     show_reasoning=self._cfg.show_reasoning,
                     expanded=self._cfg.streaming_panel_expanded,
                     panel_events=state.panel_events,
+                    max_tool_steps=self._cfg.max_tool_steps,
+                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
                 )
                 actions.append({
                     "action": "add_elements",
@@ -754,17 +760,24 @@ class UnifiedControllerMixin:
         footer_fields: list[list[str]] | None = None,
         footer_show_label: bool = False,
     ) -> bool:
-        """Preservative seal — close streaming + update panel + add footer.
+        """Preservative seal — update panel + add footer + close streaming.
 
         This is the primary seal mechanism for the unified panel
         architecture.  It:
 
-        1. Closes the streaming session (``cardkit_close_streaming``).
-        2. Updates the unified panel to its final non-streaming state
+        1. Updates the unified panel to its final non-streaming state
            via ``partial_update_element`` (finalized reasoning, no
            in-progress text).
+        2. Updates the answer element with optimized markdown.
         3. Adds footer / error panel / deletes loading elements via
            ``build_preservative_seal_actions``.
+        4. batch_update (while still in streaming mode).
+        5. Closes the streaming session (``cardkit_close_streaming``).
+
+        By performing the batch_update BEFORE close_streaming, we
+        ensure that the card's content and footer are visible during
+        the streaming→non-streaming transition, avoiding a flash of
+        incomplete content.
 
         Because the card never has more than 4 elements, this almost
         never fails due to element limits.  The only expected failure
@@ -811,6 +824,8 @@ class UnifiedControllerMixin:
                         show_reasoning=self._cfg.show_reasoning,
                         expanded=self._cfg.streaming_panel_expanded,
                         panel_events=state.panel_events,
+                        max_tool_steps=self._cfg.max_tool_steps,
+                        max_reasoning_rounds=self._cfg.max_reasoning_rounds,
                     )
                     try:
                         session.sequence += 1
@@ -861,7 +876,87 @@ class UnifiedControllerMixin:
                             _logger.warning("seal drain answer failed: %s", e)
                         state.answer_dirty = False
 
-            # ── Step 1: Close streaming mode + update summary ──
+            # ── Step 1: Update unified panel to final state (non-streaming) ──
+            seal_actions: list[dict[str, Any]] = []
+            panel: dict[str, Any] | None = None
+
+            if state is not None:
+                state.finalize()
+
+                # ── Bug fix (v1.0.5): Only update panel if it was created ──
+                # Simple conversations (no tools/reasoning) don't have a panel element.
+                # Attempting to partial_update a non-existent element causes a
+                # FeishuAPIError.  Only update the panel when _panel_element_created.
+                if session._panel_element_created:
+                    all_tool_steps = session.tool_use.build_display_steps()
+                    panel = build_unified_panel(
+                        reasoning_rounds=state.reasoning_rounds,
+                        current_reasoning_text="",
+                        tool_steps=all_tool_steps,
+                        tool_elapsed_ms=session.tool_use.elapsed_ms,
+                        show_reasoning=self._cfg.show_reasoning,
+                        expanded=self._cfg.panel_expanded,
+                        panel_events=state.panel_events,
+                        max_tool_steps=self._cfg.max_tool_steps,
+                        max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                    )
+                    seal_actions.append({
+                        "action": "partial_update_element",
+                        "params": {
+                            "element_id": UNIFIED_PANEL_ELEMENT_ID,
+                            "partial_element": {
+                                "header": panel["header"],
+                                "elements": panel["elements"],
+                            },
+                        },
+                    })
+
+            # ── Step 2: Update answer element with optimized markdown ──
+            # During streaming, answer text was sent raw (no markdown optimization)
+            # for performance. Now that streaming is about to be closed, update the answer
+            # element with the fully optimized markdown content.
+            if state is not None and state.answer_text and session._answer_element_created:
+                optimized_content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
+                seal_actions.append({
+                    "action": "partial_update_element",
+                    "params": {
+                        "element_id": ANSWER_ELEMENT_ID,
+                        "partial_element": {
+                            "content": optimized_content,
+                        },
+                    },
+                })
+
+            # ── Step 3: Add footer + delete loading elements ──
+            seal_actions.extend(
+                build_preservative_seal_actions(
+                    partial=partial,
+                    footer_data=footer_data,
+                    is_error=is_error,
+                    is_aborted=is_aborted,
+                    error_message=error_message,
+                    footer_fields=footer_fields,
+                    footer_show_label=footer_show_label,
+                    existing_elements=session.existing_elements,
+                )
+            )
+
+            # ── batch_update (while still in streaming mode) ──
+            # Perform the batch_update BEFORE close_streaming so that
+            # content and footer are visible during the streaming→
+            # non-streaming transition, avoiding a flash of incomplete
+            # content.
+            if seal_actions:
+                session.sequence += 1
+                _logger.debug(
+                    "preservative seal: batch_update card=%s seq=%d actions=%d",
+                    card_id[:12], session.sequence, len(seal_actions),
+                )
+                await self._client.cardkit_batch_update(
+                    card_id, seal_actions, sequence=session.sequence,
+                )
+
+            # ── Step 4: Close streaming mode + update summary ──
             # When closing streaming, we MUST also update the card's summary
             # text.  During streaming, the summary shows "处理中..."; after
             # close_streaming, Feishu displays the summary in the conversation
@@ -939,79 +1034,6 @@ class UnifiedControllerMixin:
                             card_id[:12], e,
                         )
 
-            # ── Step 2: Update unified panel to final state (non-streaming) ──
-            seal_actions: list[dict[str, Any]] = []
-            panel: dict[str, Any] | None = None
-
-            if state is not None:
-                state.finalize()
-
-                # ── Bug fix (v1.0.5): Only update panel if it was created ──
-                # Simple conversations (no tools/reasoning) don't have a panel element.
-                # Attempting to partial_update a non-existent element causes a
-                # FeishuAPIError.  Only update the panel when _panel_element_created.
-                if session._panel_element_created:
-                    all_tool_steps = session.tool_use.build_display_steps()
-                    panel = build_unified_panel(
-                        reasoning_rounds=state.reasoning_rounds,
-                        current_reasoning_text="",
-                        tool_steps=all_tool_steps,
-                        tool_elapsed_ms=session.tool_use.elapsed_ms,
-                        show_reasoning=self._cfg.show_reasoning,
-                        expanded=self._cfg.panel_expanded,
-                        panel_events=state.panel_events,
-                    )
-                    seal_actions.append({
-                        "action": "partial_update_element",
-                        "params": {
-                            "element_id": UNIFIED_PANEL_ELEMENT_ID,
-                            "partial_element": {
-                                "header": panel["header"],
-                                "elements": panel["elements"],
-                            },
-                        },
-                    })
-
-            # ── Step 2b: Update answer element with optimized markdown ──
-            # During streaming, answer text was sent raw (no markdown optimization)
-            # for performance. Now that streaming is closed, update the answer
-            # element with the fully optimized markdown content.
-            if state is not None and state.answer_text and session._answer_element_created:
-                optimized_content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or " "
-                seal_actions.append({
-                    "action": "partial_update_element",
-                    "params": {
-                        "element_id": ANSWER_ELEMENT_ID,
-                        "partial_element": {
-                            "content": optimized_content,
-                        },
-                    },
-                })
-
-            # ── Step 3: Add footer + delete loading elements ──
-            seal_actions.extend(
-                build_preservative_seal_actions(
-                    partial=partial,
-                    footer_data=footer_data,
-                    is_error=is_error,
-                    is_aborted=is_aborted,
-                    error_message=error_message,
-                    footer_fields=footer_fields,
-                    footer_show_label=footer_show_label,
-                    existing_elements=session.existing_elements,
-                )
-            )
-
-            if seal_actions:
-                session.sequence += 1
-                _logger.debug(
-                    "preservative seal: batch_update card=%s seq=%d actions=%d",
-                    card_id[:12], session.sequence, len(seal_actions),
-                )
-                await self._client.cardkit_batch_update(
-                    card_id, seal_actions, sequence=session.sequence,
-                )
-
             _logger.debug(
                 "preservative seal: success card=%s partial=%s",
                 card_id[:12], partial,
@@ -1026,28 +1048,17 @@ class UnifiedControllerMixin:
                 # silently fail (spinning icon, no footer).
                 # We now retry with incremented sequence numbers.
                 #
-                # IMPORTANT: We must NOT call close_streaming again in the
-                # retry if it already succeeded in the try block above.
-                # The 300317 came from the batch_update after close_streaming,
-                # meaning close_streaming itself succeeded — only batch_update
-                # had a stale sequence.  Calling close_streaming again would
-                # cause a SECOND 300317 (because the card's sequence already
-                # advanced from the first successful close_streaming), creating
-                # an infinite retry loop.
+                # In the retry, we replay batch_update first, then
+                # close_streaming (if not already closed).  The
+                # _streaming_closed flag prevents calling close_streaming
+                # twice if it succeeded in the try block before the
+                # 300317 occurred on a subsequent operation.
                 _logger.warning(
                     "preservative seal: sequence conflict, retrying... card=%s seq=%d",
                     card_id[:12], session.sequence,
                 )
                 for retry in range(2):
                     try:
-                        # Only call close_streaming if it hasn't been called yet
-                        if not session._streaming_closed:
-                            session.sequence += 1
-                            await self._client.cardkit_close_streaming(
-                                card_id, sequence=session.sequence, summary=seal_summary,
-                            )
-                            session._streaming_closed = True
-
                         # Rebuild seal actions — always rebuild panel to
                         # avoid UnboundLocalError if the 300317 occurred
                         # before panel was assigned in the try block.
@@ -1064,6 +1075,8 @@ class UnifiedControllerMixin:
                                     show_reasoning=self._cfg.show_reasoning,
                                     expanded=self._cfg.panel_expanded,
                                     panel_events=state.panel_events,
+                                    max_tool_steps=self._cfg.max_tool_steps,
+                                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
                                 )
                                 retry_actions.append({
                                     "action": "partial_update_element",
@@ -1099,11 +1112,29 @@ class UnifiedControllerMixin:
                                 existing_elements=session.existing_elements,
                             )
                         )
+                        # batch_update BEFORE close_streaming (same order as try block)
                         if retry_actions:
                             session.sequence += 1
                             await self._client.cardkit_batch_update(
                                 card_id, retry_actions, sequence=session.sequence,
                             )
+
+                        # Close streaming AFTER batch_update
+                        if not session._streaming_closed:
+                            # Recompute seal_summary for retry (state may have changed)
+                            retry_summary = ""
+                            if state is not None:
+                                summary_text = state.answer_text
+                                if not summary_text and state.reasoning_rounds:
+                                    summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
+                                if summary_text:
+                                    retry_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
+                            session.sequence += 1
+                            await self._client.cardkit_close_streaming(
+                                card_id, sequence=session.sequence, summary=retry_summary,
+                            )
+                            session._streaming_closed = True
+
                         _logger.info(
                             "preservative seal: retry %d succeeded card=%s",
                             retry + 1, card_id[:12],
@@ -1217,6 +1248,8 @@ class UnifiedControllerMixin:
                     show_reasoning=self._cfg.show_reasoning,
                     expanded=self._cfg.streaming_panel_expanded,
                     panel_events=state.panel_events,
+                    max_tool_steps=self._cfg.max_tool_steps,
+                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
                 )
                 drain_actions: list[dict[str, Any]] = [{
                     "action": "partial_update_element",
@@ -1424,6 +1457,8 @@ class UnifiedControllerMixin:
                     panel_expanded=self._cfg.panel_expanded,
                     header_enabled=self._cfg.header_enabled,
                     panel_events=state.panel_events if state else None,
+                    max_tool_steps=self._cfg.max_tool_steps,
+                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
                 )
                 session.sequence += 1
                 assert self._client is not None

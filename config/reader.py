@@ -62,6 +62,30 @@ class Config:
         return bool(sec.get("streaming_panel_expanded", False))
 
     @property
+    def max_tool_steps(self) -> int:
+        """统一面板中最多显示的工具步骤数.
+
+        超出此数量的早期工具步骤会被折叠为一行提示。
+        飞书卡片2.0元素上限200，每个工具步骤最多占7个元素（标题3+详情2+结果2）。
+        默认20，确保即使在极端情况下也不会超限。
+        """
+        sec = self._plugin_sec()
+        val = sec.get("max_tool_steps", 20)
+        return max(1, min(100, int(val)))
+
+    @property
+    def max_reasoning_rounds(self) -> int:
+        """统一面板中最多显示的推理轮次数.
+
+        超出此数量的早期推理轮次会被折叠为一行提示。
+        飞书卡片2.0元素上限200，每个推理轮次最多占4个元素（标题3+文本1）。
+        默认20，确保即使在极端情况下也不会超限。
+        """
+        sec = self._plugin_sec()
+        val = sec.get("max_reasoning_rounds", 20)
+        return max(1, min(100, int(val)))
+
+    @property
     def print_strategy(self) -> str:
         """流式卡片上屏策略: "fast" 或 "delay".
 
