@@ -55,6 +55,8 @@ from ..cardkit import (
     build_unified_panel,
     build_unified_complete_card,
     build_preservative_seal_actions,
+    _count_tag_objects,
+    _enforce_card_element_limit,
 )
 from ..cardkit.md import _downgrade_tables, optimize_markdown_style
 from ..state.linear import UnifiedLinearState
@@ -771,18 +773,18 @@ class UnifiedControllerMixin:
         2. Updates the answer element with optimized markdown.
         3. Adds footer / error panel / deletes loading elements via
            ``build_preservative_seal_actions``.
-        4. batch_update (while still in streaming mode).
-        5. Closes the streaming session (``cardkit_close_streaming``).
+        4. **Card-level element limit safety net**: Counts total tag
+           objects across all elements that will exist after seal.
+           If over 195 (200 - 5 margin), trims oldest items from
+           panel children until under threshold, adding/updating a
+           collapse hint.
+        5. batch_update (while still in streaming mode).
+        6. Closes the streaming session (``cardkit_close_streaming``).
 
         By performing the batch_update BEFORE close_streaming, we
         ensure that the card's content and footer are visible during
         the streaming→non-streaming transition, avoiding a flash of
         incomplete content.
-
-        Because the card never has more than 4 elements, this almost
-        never fails due to element limits.  The only expected failure
-        mode is a ``CARDKIT_SEQUENCE_CONFLICT``, which is handled by
-        retry.
 
         Returns ``True`` on success, ``False`` on failure (caller
         should fall back to full card rebuild).
@@ -940,6 +942,91 @@ class UnifiedControllerMixin:
                     existing_elements=session.existing_elements,
                 )
             )
+
+            # ── Card-level element limit safety net ──
+            # Before submitting batch_update, count the total tag objects
+            # that the card will have after all seal actions are applied.
+            # If over 195 (200 - 5 margin), trim oldest items from the
+            # panel children and rebuild the panel update action.
+            #
+            # We simulate the final card elements by collecting all
+            # new/updated elements from seal_actions, then counting
+            # with _count_tag_objects.
+            if panel is not None:
+                # Collect all elements that will exist after seal:
+                # - Panel (updated) + Answer (updated) + Footer/Error (added)
+                # We don't count elements being deleted (loading icon/hint).
+                simulated_elements: list[dict] = []
+                # Panel
+                simulated_elements.append(panel)
+                # Answer element (1 markdown with content)
+                if state is not None and state.answer_text:
+                    simulated_elements.append({"tag": "markdown", "content": state.answer_text})
+                else:
+                    simulated_elements.append({"tag": "markdown", "content": " "})
+                # Elements from add_elements actions (footer, error, partial, bg review)
+                for action in seal_actions:
+                    if action.get("action") == "add_elements":
+                        for elem in action.get("params", {}).get("elements", []):
+                            simulated_elements.append(elem)
+                # Count total tag objects in simulated card body
+                total_count = _count_tag_objects(simulated_elements)
+                _FEISHU_ELEMENT_LIMIT = 200
+                _ELEMENT_LIMIT_MARGIN = 5
+                threshold = _FEISHU_ELEMENT_LIMIT - _ELEMENT_LIMIT_MARGIN
+                if total_count > threshold:
+                    _logger.warning(
+                        "preservative seal: card element count %d exceeds threshold %d, "
+                        "trimming panel children card=%s",
+                        total_count, threshold, card_id[:12],
+                    )
+                    # Trim panel children from the front
+                    children: list[dict] = panel.get("elements", [])
+                    # Check if a collapse hint already exists
+                    hint_idx = None
+                    for i, child in enumerate(children):
+                        if isinstance(child.get("content"), str) and "已折叠" in child["content"]:
+                            hint_idx = i
+                            break
+                    # If no hint exists yet, we'll need to add one (1 element), so account for it
+                    if hint_idx is None:
+                        total_count += 1
+                    trimmed_count = 0
+                    while total_count > threshold and len(children) > 1:
+                        # Skip the collapse hint (first child if it contains "已折叠")
+                        remove_idx = 1 if children[0].get("content", "").endswith("已折叠") else 0
+                        removed = children.pop(remove_idx)
+                        total_count -= _count_tag_objects([removed])
+                        trimmed_count += 1
+                    if trimmed_count > 0:
+                        # Update or add collapse hint
+                        # Re-find hint_idx (may have shifted due to removals)
+                        hint_idx = None
+                        for i, child in enumerate(children):
+                            if isinstance(child.get("content"), str) and "已折叠" in child["content"]:
+                                hint_idx = i
+                                break
+                        if hint_idx is not None:
+                            old_hint = children[hint_idx]["content"]
+                            children[hint_idx]["content"] = old_hint.rstrip("已折叠") + f"、{trimmed_count} 项已折叠"
+                        else:
+                            children.insert(0, {
+                                "tag": "markdown",
+                                "content": f"⚡ 还有 {trimmed_count} 项已折叠",
+                                "text_size": "notation",
+                            })
+                        # Update panel's elements
+                        panel["elements"] = children
+                        # Rebuild the panel update action in seal_actions
+                        for i, action in enumerate(seal_actions):
+                            if (action.get("action") == "partial_update_element"
+                                    and action.get("params", {}).get("element_id") == UNIFIED_PANEL_ELEMENT_ID):
+                                seal_actions[i]["params"]["partial_element"]["elements"] = children
+                                break
+                    _logger.info(
+                        "preservative seal: after trimming, estimated total %d, trimmed %d items card=%s",
+                        total_count, trimmed_count, card_id[:12],
+                    )
 
             # ── batch_update (while still in streaming mode) ──
             # Perform the batch_update BEFORE close_streaming so that

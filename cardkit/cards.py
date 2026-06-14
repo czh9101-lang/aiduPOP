@@ -22,6 +22,7 @@ from .elements import (
     _build_tool_panel,
     _build_unified_panel_placeholder,
     _collapsible_panel,
+    _count_tag_objects,
     _extract_images_from_markdown,
     _loading_element,
     _loading_hint_element,
@@ -48,7 +49,112 @@ __all__ = [
     'build_complete_card',
     'build_linear_complete_card',
     'build_unified_complete_card',
+    '_enforce_card_element_limit',
 ]
+
+# Feishu Card 2.0 element limit — every JSON object with a ``tag`` key
+# counts toward this limit at all nesting levels.
+_FEISHU_ELEMENT_LIMIT = 200
+
+# Safety margin below the hard limit.  We enforce this threshold
+# instead of 200 to leave room for small structural additions that
+# the card API may inject internally (e.g. auto-generated wrappers).
+_ELEMENT_LIMIT_MARGIN = 5
+
+
+def _enforce_card_element_limit(
+    card: dict[str, Any],
+    *,
+    panel_element_id: str = UNIFIED_PANEL_ELEMENT_ID,
+) -> dict[str, Any]:
+    """Enforce Feishu Card 2.0 element limit on a complete card.
+
+    Counts **all** tag objects in the card (including nested ones).
+    If the total exceeds ``_FEISHU_ELEMENT_LIMIT - _ELEMENT_LIMIT_MARGIN``
+    (default 195), progressively trims the oldest items from the
+    unified panel's ``elements`` list until under threshold, adding
+    or updating a collapse hint (``⚡ 还有 X 项已折叠``).
+
+    This is the **card-level safety net** — it runs after the entire
+    card is assembled (panel + answer + footer + error panel), so it
+    knows the exact total and can trim precisely without guessing
+    how many elements the answer/footer will consume.
+
+    Parameters
+    ----------
+    card : dict
+        A fully assembled card dict (schema 2.0, with ``body.elements``).
+    panel_element_id : str
+        Element ID of the unified panel to trim if needed.
+
+    Returns
+    -------
+    dict
+        The same card dict, possibly with trimmed panel children.
+    """
+    threshold = _FEISHU_ELEMENT_LIMIT - _ELEMENT_LIMIT_MARGIN
+    total = _count_tag_objects(card)
+    if total <= threshold:
+        return card
+
+    # ── Find the unified panel element in card body ──
+    body = card.get("body", {})
+    elements = body.get("elements", [])
+    panel_idx = None
+    panel = None
+    for i, elem in enumerate(elements):
+        if elem.get("element_id") == panel_element_id and elem.get("tag") == "collapsible_panel":
+            panel_idx = i
+            panel = elem
+            break
+
+    if panel is None:
+        # No panel found — nothing to trim (answer/footer must not be trimmed)
+        return card
+
+    children: list[dict] = panel.get("elements", [])
+
+    # ── Check if a collapse hint already exists ──
+    hint_idx = None
+    for i, child in enumerate(children):
+        if isinstance(child.get("content"), str) and "已折叠" in child["content"]:
+            hint_idx = i
+            break
+    # If no hint exists yet, we'll need to add one (1 element), so account for it
+    if hint_idx is None:
+        total += 1  # Reserve space for the new collapse hint
+
+    # ── Trim oldest items from panel children until under threshold ──
+    trimmed_count = 0
+    while total > threshold and len(children) > 1:
+        # Skip the collapse hint (first child if it contains "已折叠")
+        remove_idx = 1 if children[0].get("content", "").endswith("已折叠") else 0
+        removed = children.pop(remove_idx)
+        total -= _count_tag_objects([removed])
+        trimmed_count += 1
+
+    if trimmed_count > 0:
+        # Update or add collapse hint
+        # Re-find hint_idx (may have shifted due to removals)
+        hint_idx = None
+        for i, child in enumerate(children):
+            if isinstance(child.get("content"), str) and "已折叠" in child["content"]:
+                hint_idx = i
+                break
+        if hint_idx is not None:
+            old_hint = children[hint_idx]["content"]
+            # Parse existing count(s) and merge
+            children[hint_idx]["content"] = old_hint.rstrip("已折叠") + f"、{trimmed_count} 项已折叠"
+        else:
+            children.insert(0, {
+                "tag": "markdown",
+                "content": f"⚡ 还有 {trimmed_count} 项已折叠",
+                "text_size": "notation",
+            })
+
+    # Update panel children in the card
+    panel["elements"] = children
+    return card
 
 def _build_summary(text: str) -> dict[str, Any]:
     """Build a summary dict with both content and i18n_content.
@@ -693,6 +799,14 @@ def build_unified_complete_card(
         else:
             card["header"] = _build_header("completed")
     card["body"] = {"elements": elements}
+
+    # ── Card-level element limit safety net ──
+    # After assembling the complete card, count ALL tag objects and
+    # trim panel children if the total exceeds 195 (200 - 5 margin).
+    # This is more precise than trimming inside build_unified_panel
+    # because we now know the exact answer/footer/error overhead.
+    _enforce_card_element_limit(card)
+
     return card
 
 

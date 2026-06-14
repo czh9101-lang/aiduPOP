@@ -49,6 +49,8 @@ __all__ = [
     # Unified panel builders
     '_build_unified_panel_placeholder',
     'build_unified_panel',
+    # Element counting
+    '_count_tag_objects',
 ]
 
 # 匹配 markdown 图片语法: ![alt](url)
@@ -525,52 +527,6 @@ def build_unified_panel(
     # Fallback: empty content
     if not children:
         children.append({"tag": "markdown", "content": " "})
-
-    # ── Hard element count safety net ──
-    # Even after the max_tool_steps/max_reasoning_rounds trimming above,
-    # the actual element count may still exceed Feishu's 200 limit in
-    # worst-case scenarios (every tool step has 7 elements, every
-    # reasoning round has 4).  We count actual tag objects in children
-    # and progressively trim from the front if over threshold.
-    #
-    # The threshold (160) leaves 40 elements for:
-    #   panel container (1) + title (2) + answer (1~3) + footer (2)
-    #   + error panel (0~4) + header (0~3) ≈ 7~16 fixed overhead
-    _ELEMENT_SAFETY_THRESHOLD = 160
-    total_elements = _count_tag_objects(children)
-    # Check if a collapse hint already exists (its element count won't change)
-    has_collapse_hint = any(
-        isinstance(child.get("content"), str) and "已折叠" in child["content"]
-        for child in children
-    )
-    # Reserve 1 element for the collapse hint if we need to add one
-    effective_threshold = _ELEMENT_SAFETY_THRESHOLD if has_collapse_hint else _ELEMENT_SAFETY_THRESHOLD - 1
-    if total_elements > effective_threshold:
-        # Remove non-collapse-hint items from the front until under threshold
-        trimmed_by_safety = 0
-        while total_elements > effective_threshold and len(children) > 1:
-            # Skip the collapse hint (first child if it contains "已折叠")
-            remove_idx = 1 if children[0].get("content", "").endswith("已折叠") else 0
-            removed = children.pop(remove_idx)
-            total_elements -= _count_tag_objects([removed])
-            trimmed_by_safety += 1
-        if trimmed_by_safety > 0:
-            # Update or add collapse hint with the additional trimmed count
-            hint_idx = None
-            for i, child in enumerate(children):
-                if isinstance(child.get("content"), str) and "已折叠" in child["content"]:
-                    hint_idx = i
-                    break
-            if hint_idx is not None:
-                old_hint = children[hint_idx]["content"]
-                # Append the additional count
-                children[hint_idx]["content"] = old_hint.rstrip("已折叠") + f"、{trimmed_by_safety} 项已折叠"
-            else:
-                children.insert(0, {
-                    "tag": "markdown",
-                    "content": f"⚡ 还有 {trimmed_by_safety} 项已折叠",
-                    "text_size": "notation",
-                })
 
     # ── Build panel ──
     panel = _collapsible_panel(
