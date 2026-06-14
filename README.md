@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.5-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.6-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -126,6 +126,8 @@ hermes_lark_streaming:
   print_strategy: delay            # "fast" (instant) or "delay" (smoother typewriter, default)
   flush_interval_ms: 100           # Card refresh interval in ms (70–2000, default 100)
   card_ttl_sec: 600               # Card alive detection timeout (seconds)
+  max_tool_steps: 20               # Max tool steps shown in panel (default 20, range 1–100)
+  max_reasoning_rounds: 20         # Max reasoning rounds shown in panel (default 20, range 1–100)
   inject_time: false               # Time awareness mode (see below)
 
   footer:
@@ -157,6 +159,42 @@ When `inject_time: true`, the plugin prepends `<time>HH:MM:SS</time>` to each us
 display:
   show_reasoning: true  # Show reasoning content in the unified panel
 ```
+
+### Unified Panel Overflow Compression
+
+Feishu Card 2.0 has a **hard limit of 200 elements/components** per card. Exceeding it triggers error `300305 (element exceeds the limit)`, which causes card sealing to fail and triggers a plain-text fallback — resulting in duplicate content visible to users.
+
+> **Element counting rule**: Every JSON object with a `tag` property counts as 1 element, including deeply nested ones like `standard_icon`, `plain_text`, `lark_md`, etc.
+
+#### Element Cost Breakdown
+
+| Component | Elements | Notes |
+|-----------|----------|-------|
+| Panel container | 1 | `collapsible_panel` |
+| Panel title | 2 | `plain_text` + `standard_icon` |
+| Each reasoning round (max) | 4 | Title row `div`+`standard_icon`+`lark_md` + reasoning text `markdown` |
+| Each tool step (max) | 7 | Title row `div`+`standard_icon`+`lark_md` + detail row `div`+`plain_text` + result row `div`+`lark_md` |
+| Fold hint (when triggered) | 1 | 1 `markdown` element |
+| Answer text | 1–3 | `markdown`; long text may be split |
+| Footer | 2 | `hr` + `markdown` |
+| Card header (when enabled) | ~3 | `plain_text` + `standard_icon` |
+| Error panel (when present) | ~4 | `collapsible_panel` + inner elements |
+
+**Example calculation**: 20 reasoning rounds + 20 tool steps = 20×4 + 20×7 + fixed overhead ≈ 223 (exceeds 200)
+
+Hence the defaults `max_tool_steps=20` + `max_reasoning_rounds=20`, combined with a fold mechanism, ensure most scenarios stay within limits. Even if a higher config value or an extreme case still exceeds the cap, a built-in **card-level element safety net** kicks in — at seal time all elements are known (panel + answer + footer + error), the actual tag object count is recursively computed, and if it exceeds 195 (200 − 5 buffer), the oldest panel children are trimmed first. This guarantees the card never exceeds 200 elements. Answer, footer, and error panel are never trimmed.
+
+#### Configuration
+
+```yaml
+hermes_lark_streaming:
+  max_tool_steps: 20           # Max tool steps shown in unified panel (default 20, range 1–100)
+  max_reasoning_rounds: 20     # Max reasoning rounds shown in unified panel (default 20, range 1–100)
+```
+
+When the limit is exceeded, early items are collapsed into a single summary line, e.g.: `⚡ 10 early reasoning rounds, 5 early tool steps collapsed`
+
+The panel title always shows the **actual total** (e.g. "3 rounds · 44 tools"); the fold hint only affects what is displayed inside the panel.
 
 ### Feishu Credentials
 

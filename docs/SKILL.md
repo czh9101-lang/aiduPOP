@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 1.0.5 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
+| 版本 | 1.0.6 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
 
 ---
 
@@ -57,7 +57,7 @@ Background: _run_background_task ── [Hook 1/2]
 | `├ __init__.py` | ~20 | 重导出门面 | StreamCardController + CardSession + 状态常量 |
 | `├ core.py` | ~720 | 主控制器(单例) | 管理生命周期，导入 CardSession |
 | `├ mixin.py` | ~580 | 异步 API 编排 | 状态机 + CardKit→IM PATCH 降级链 |
-| `└ linear_mixin.py` | ~1050 | 线性模式编排 | 统一面板更新、保留式封卡、TTL 延长 |
+| `└ linear_mixin.py` | ~1600 | 线性模式编排 | 统一面板更新、保留式封卡、卡片级安全网、TTL 延长 |
 | **state/** | | **状态与数据子包** | |
 | `├ __init__.py` | ~22 | 重导出门面 | CardSession + TextState + UnifiedLinearState + CardPhase + 工具类 |
 | `├ phase.py` | ~147 | 卡片生命周期状态机 | `CardPhase`/`TerminalReason`/`CardVisualState` + `PHASE_TRANSITIONS` + 转换/视觉工具函数 |
@@ -92,6 +92,12 @@ Background: _run_background_task ── [Hook 1/2]
 **4.5 时间感知格式**: XML 标签 `<time>HH:MM:SS</time>`，LLM 不模仿，无日期/时区后缀。
 
 **4.6 统一面板架构 (v1.0.2)**: 所有推理轮次和工具步骤放在 1 个可折叠面板中（图标 `robot_filled`），回答使用 1 个流式元素。无论对话多长，卡片始终只有 3–4 个元素。面板标题动态显示 `agent loop · N rounds · M tools · Xs`（中英文统一使用 "agent loop"）。`display.show_reasoning` 控制推理内容是否出现在面板中。`panel_events` 时间线记录事件发生顺序，面板内容按时间线交错渲染（reasoning→tool→reasoning→tool），而非全部推理后再全部工具。
+
+**4.9 统一面板超限压缩 (v1.0.6)**: 飞书卡片2.0硬性限制200个元素/组件，每个带 `tag` 属性的 JSON 对象都算1个元素（包括嵌套的 `standard_icon`、`plain_text`、`lark_md`）。当推理轮次或工具步骤过多导致元素数接近200时，`build_unified_panel` 自动裁剪超出部分，将早期项目折叠为一行提示（`⚡ 还有X轮早期推理、Y步早期操作已折叠`），确保卡片元素永不超限。配置项：`max_tool_steps`（默认20，范围1~100）和 `max_reasoning_rounds`（默认20，范围1~100）。面板标题始终显示实际总数，折叠提示仅影响面板内展示的内容。
+
+**4.10 封口顺序优化 (v1.0.6)**: `_preservative_seal` 中的 `close_streaming` 移到 `batch_update` 之后执行——先写入内容+页脚再关闭流式模式。这样即使封口失败（如 300305 超限），卡片也已包含完整内容和页脚，避免被"冻住"但缺页脚的尴尬状态。
+
+**4.11 卡片级元素安全网 (v1.0.6)**: 第一层裁剪（4.9）按条目数限制，无法精确控制实际元素数（每个工具步1~7个元素、每个推理轮次1~4个元素）。因此安全网上移到卡片层：封卡时已知全部元素（面板+answer+footer+error），通过 `_count_tag_objects` 递归计算总 tag objects，超过195（200-5缓冲）则从面板children头部逐项裁剪，直到总元素数≤195。answer、footer、error panel 永不裁剪。两条封卡路径均覆盖：`_preservative_seal`（逐增量封卡，模拟封卡后元素计数）和 `build_unified_complete_card`（全卡重建，构建后直接调用 `_enforce_card_element_limit`）。
 
 **4.7 卡片生命周期 (v1.0.2)**: 4 阶段渐进式卡片构建：Phase 1 用户消息 → 仅创建 "正在加载上下文..." + 加载图标的占位卡片（2 元素，无面板无回答）；Phase 2 首 LLM token → 删加载提示、通过 `add_elements` 添加统一面板 + 回答元素（1 次 `batch_update`）；Phase 3 流式更新面板内容 + 回答文本；Phase 4 完成 → 添加页脚。
 
@@ -242,6 +248,8 @@ hermes_lark_streaming:
   flush_interval_ms: 100           # 70~2000ms（默认 100，打字机效果优化）
   card_ttl_sec: 600
   inject_time: false
+  max_tool_steps: 20           # 统一面板最多显示的工具步骤数（默认20，范围1~100）
+  max_reasoning_rounds: 20     # 统一面板最多显示的推理轮次数（默认20，范围1~100）
   footer:
     show_label: false
     fields: [status, elapsed, model, cost, compression_exhausted]
@@ -482,7 +490,8 @@ hermes gateway restart
 | 300317 序列冲突反复出现 | `_streaming_closed` 守卫是否生效 | controller/linear_mixin.py, state/session.py |
 | preservative seal 崩溃 (UnboundLocalError) | 重试路径是否重建 panel | controller/linear_mixin.py |
 | 反应拦截静默失效 | `add_reaction`/`delete_reaction` 补丁目标是否存在（Hermes 新版本改为 `_add_reaction`/`_remove_reaction`） | patching/__init__.py |
+| 卡片超限300305内容重复 | 推理/工具步骤过多导致元素超200上限，`_enforce_card_element_limit` 是否触发裁剪 + `max_tool_steps`/`max_reasoning_rounds` 配置 | cardkit/cards.py, cardkit/elements.py, config/reader.py |
 
 ---
 
-*Last updated: 2026-06-14 | Version: 1.0.5*
+*Last updated: 2026-06-15 | Version: 1.0.6*
