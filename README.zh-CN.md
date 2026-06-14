@@ -26,12 +26,14 @@
 
 ## 效果预览
 
-<p align="center">
-<img src="assets/img1.png" width="22%" style="max-height: 280px; object-fit: contain;" />&nbsp;
-<img src="assets/img2.png" width="22%" style="max-height: 280px; object-fit: contain;" />&nbsp;
-<img src="assets/img3.png" width="22%" style="max-height: 280px; object-fit: contain;" />&nbsp;
-<img src="assets/img4.png" width="22%" style="max-height: 280px; object-fit: contain;" />
-</p>
+<table align="center">
+  <tr>
+    <td><img src="assets/img1.png" width="200px" /></td>
+    <td><img src="assets/img2.png" width="200px" /></td>
+    <td><img src="assets/img3.png" width="200px" /></td>
+    <td><img src="assets/img4.png" width="200px" /></td>
+  </tr>
+</table>
 
 ---
 

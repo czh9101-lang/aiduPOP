@@ -138,6 +138,59 @@ def test_on_interrupted_skips_abort_for_completing_session() -> None:
     )
 
 
+def test_on_aborted_skips_abort_for_completing_session() -> None:
+    """Hotfix: COMPLETING session should not be aborted on /stop.
+
+    Same race condition as on_interrupted: if on_completed has already
+    fired (session in COMPLETING state), on_aborted should skip the
+    abort logic — let _do_linear_complete finish naturally. Only mark
+    _was_aborted so the seal shows "stopped" state.
+    """
+    ctrl = StreamCardController()
+    _enable(ctrl)
+
+    ctrl.on_message_started(message_id="completing_msg", chat_id="chat")
+    # Simulate session in COMPLETING state (on_completed already fired)
+    ctrl._sessions["completing_msg"].state = COMPLETING
+
+    ctrl.on_aborted(message_id="completing_msg")
+
+    # Key assertion: COMPLETING session must NOT be marked as ABORTED
+    old_session = ctrl._sessions["completing_msg"]
+    assert old_session.state == COMPLETING, (
+        "COMPLETING session state must not be overwritten to ABORTED"
+    )
+    assert old_session._was_aborted is True, (
+        "COMPLETING session must be marked as _was_aborted for seal display"
+    )
+    # flush must NOT be marked completed (drain should continue)
+    assert not old_session.flush._completed, (
+        "flush must NOT be marked completed during COMPLETING"
+    )
+
+
+def test_on_aborted_normally_aborts_non_completing_session() -> None:
+    """Non-COMPLETING sessions should still be aborted normally."""
+    ctrl = StreamCardController()
+    _enable(ctrl)
+
+    ctrl.on_message_started(message_id="streaming_msg", chat_id="chat")
+    # Session starts in IDLE state, on_message_started sets it up
+    # Simulate it in STREAMING state
+    ctrl._sessions["streaming_msg"].state = STREAMING
+
+    ctrl.on_aborted(message_id="streaming_msg")
+
+    session = ctrl._sessions["streaming_msg"]
+    assert session.state == ABORTED, (
+        "Non-COMPLETING session must be marked as ABORTED"
+    )
+    assert session._was_aborted is True
+    assert session.flush._completed, (
+        "flush must be marked completed for aborted session"
+    )
+
+
 def test_prune_stale_sessions_ignores_none_key_and_prunes_valid_key() -> None:
     ctrl = StreamCardController()
     stale_session = SimpleNamespace(

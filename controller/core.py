@@ -317,13 +317,35 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         self._schedule_card_update(session)
 
     def on_aborted(self, *, message_id: str) -> None:
-        """用户 /stop 导致消息被中断."""
+        """用户 /stop 导致消息被中断.
+
+        COMPLETING 短路：如果 session 已在 COMPLETING 状态（on_completed
+        已触发，正在 drain 收尾），跳过 abort 逻辑，让 _do_linear_complete
+        自然走完。仅标记 _was_aborted 让封卡时显示"已停止"状态。
+        """
         if not self.enabled:
             return
         session = self._get_active_session(message_id)
         if session is None:
             return
 
+        # ── Hotfix: skip abort if session is in COMPLETING state ──
+        # Same race condition as on_interrupted: if the session is already
+        # in COMPLETING (on_completed has fired, drain is in progress),
+        # let _do_linear_complete finish naturally. Setting ABORTED here
+        # would cancel the flush mid-drain, dropping the last answer chunk,
+        # and cause a double-complete race.
+        if session.state == COMPLETING:
+            _logger.info(
+                "on_aborted: skip abort for msg=%s (session in COMPLETING, "
+                "let _do_linear_complete finish naturally)",
+                (message_id or "?")[:12],
+            )
+            # Mark _was_aborted so the seal shows "stopped" state
+            session._was_aborted = True
+            return
+
+        session._was_aborted = True
         session.state = ABORTED
         session.flush.mark_completed()
         _logger.info("on_aborted: msg=%s state=ABORTED", (message_id or "?")[:12])
