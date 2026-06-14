@@ -6,6 +6,10 @@ but the Python package is ``hermes_lark_streaming`` (underscores).  This
 conftest bridges that gap by pre-registering the package in ``sys.modules``
 before any test module is collected, mirroring what Hermes's
 ``_load_directory_module`` does at runtime.
+
+NOTE: This file must stay at the repo root — ``collect_ignore`` and
+``_register_repo_as_package`` only work from the root-level conftest.
+Test-specific fixtures belong in ``tests/conftest.py`` instead.
 """
 
 from __future__ import annotations

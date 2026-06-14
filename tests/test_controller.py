@@ -251,10 +251,16 @@ def test_background_review_after_flush_not_deferred() -> None:
 
 # ── 辅助函数 ──
 
+# Track event loops created by _make_session so the conftest autouse
+# fixture can close them after each test (prevents ResourceWarning /
+# "coroutine never awaited" warnings).
+_loops_to_cleanup: list[asyncio.AbstractEventLoop] = []
+
 
 def _make_session(msg_id: str = "msg_123", *, linear: bool = False) -> CardSession:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    _loops_to_cleanup.append(loop)
     session = CardSession(msg_id, "chat_456", loop)
     if linear:
         session.linear = True
@@ -1099,7 +1105,9 @@ class TestDoLinearComplete:
     @pytest.mark.asyncio
     async def test_session_initializes_streaming_closed_false(self) -> None:
         """CardSession._streaming_closed starts as False."""
-        session = CardSession("msg_test", "chat_test", asyncio.new_event_loop())
+        loop = asyncio.new_event_loop()
+        _loops_to_cleanup.append(loop)
+        session = CardSession("msg_test", "chat_test", loop)
         assert session._streaming_closed is False
 
 
