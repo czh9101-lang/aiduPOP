@@ -14,8 +14,8 @@ when the plugin loads.
     cron.scheduler._deliver_result           → redirect cron Feishu deliveries to CardKit
     FeishuAdapter.send                       → intercept ALL text → convert to cards
     FeishuAdapter.edit_message               → update gateway card content (Phase 2)
-    FeishuAdapter.add_reaction               → card status indicator (Phase 3)
-    FeishuAdapter.delete_reaction            → card status clear (Phase 3)
+    FeishuAdapter.add_reaction / _add_reaction  → card status indicator (Phase 3)
+    FeishuAdapter.delete_reaction / _remove_reaction → card status clear (Phase 3)
     FeishuAdapter.send_clarify               → interactive clarify card (dropdown + input)
     FeishuAdapter._on_card_action_trigger    → clarify card callback handler
 
@@ -632,14 +632,22 @@ def apply_patches() -> None:
         except AttributeError:
             _logger.debug("hermes-lark-streaming: FeishuAdapter.edit_message not found, edit interception skipped")
         # Phase 3: Reaction → card status indicator
+        # Hermes ≥某个版本 将 add_reaction/delete_reaction 改为
+        # _add_reaction/_remove_reaction（private），需兼容两种命名
         try:
             FeishuAdapter.add_reaction = _wrap_feishu_adapter_add_reaction(FeishuAdapter.add_reaction)
         except AttributeError:
-            _logger.debug("hermes-lark-streaming: FeishuAdapter.add_reaction not found, reaction interception skipped")
+            try:
+                FeishuAdapter._add_reaction = _wrap_feishu_adapter_add_reaction(FeishuAdapter._add_reaction)
+            except AttributeError:
+                _logger.debug("hermes-lark-streaming: FeishuAdapter.add_reaction/_add_reaction not found, reaction interception skipped")
         try:
             FeishuAdapter.delete_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter.delete_reaction)
         except AttributeError:
-            _logger.debug("hermes-lark-streaming: FeishuAdapter.delete_reaction not found, reaction interception skipped")
+            try:
+                FeishuAdapter._remove_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter._remove_reaction)
+            except AttributeError:
+                _logger.debug("hermes-lark-streaming: FeishuAdapter.delete_reaction/_remove_reaction not found, reaction interception skipped")
         # NOTE(v0.15.4): send_image_file / send_image interceptors DELETED (2026-06-09).
         # The v0.15.3 interception was fundamentally broken — it injected file:// URLs
         # into session.text.on_partial() which were then stripped by

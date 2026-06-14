@@ -398,8 +398,12 @@ class TestMonkeyPatchTargets:
     # Optional targets — missing ones are warnings, not failures
     OPTIONAL_CLASS_METHOD_TARGETS = [
         ("gateway.run", "GatewayRunner", "_run_background_task"),
-        ("gateway.platforms.feishu", "FeishuAdapter", "add_reaction"),
-        ("gateway.platforms.feishu", "FeishuAdapter", "delete_reaction"),
+        # Reaction methods: Hermes renamed public → private in newer versions
+        # At least one of each pair should exist for the feature to work
+        ("gateway.platforms.feishu", "FeishuAdapter", "add_reaction"),       # old public name
+        ("gateway.platforms.feishu", "FeishuAdapter", "_add_reaction"),      # new private name
+        ("gateway.platforms.feishu", "FeishuAdapter", "delete_reaction"),    # old public name
+        ("gateway.platforms.feishu", "FeishuAdapter", "_remove_reaction"),   # new private name
         ("gateway.platforms.feishu", "FeishuAdapter", "send_clarify"),
         ("gateway.platforms.feishu", "FeishuAdapter", "_on_card_action_trigger"),
     ]
