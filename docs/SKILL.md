@@ -160,6 +160,8 @@ COMPLETING: 状态转移在 `await` 前同步执行防竞态。COMPLETING 不在
 
 **重要 (v1.0.3)**: COMPLETING 状态转换后，`_do_linear_complete()` 会先 **drain** 剩余脏数据（answer/panel），确保所有内容都发到飞书后，才执行 `mark_completed()` → close streaming → add footer。`_complete_session()` 不再提前调用 `mark_completed()`，避免取消 pending flush timer 导致数据丢失。`_preservative_seal` 的内容完整性守卫从"仅清除标记"升级为"实际flush"——在 `close_streaming` 前先通过 API 将剩余脏数据刷到卡片，避免内容永久丢失。
 
+**重要 (v1.0.5)**: `on_interrupted` 新增 COMPLETING 短路——当旧 session 已在 COMPLETING 状态时，跳过 abort 逻辑（不标记 `_was_aborted`、不设 `ABORTED`、不调 `_complete_session`），让 `_do_linear_complete` 自然走完。但新 session 创建和 `_interrupt_map` 更新仍照常执行。这修复了"正常完成的卡片被新消息覆盖成'已停止'"的 bug：COMPLETING 不在 `TERMINAL_PHASES`，`_get_active_session` 仍返回该 session，导致 `on_interrupted` 误判为"正在回复中被中断"。`on_aborted`（用户 /stop）同样适用 COMPLETING 短路——检测到 COMPLETING 时标记 `_was_aborted = True`，跳过 abort 逻辑，让 `_do_linear_complete` 自然走完。
+
 ---
 
 ## 6. 卡片 API 降级链
@@ -286,6 +288,9 @@ hermes_lark_streaming:
 
 ### 10.5 card_sent 区分完成与中断
 返回 None 两种含义：`card_sent=True`→正常完成抑制文本；`card_sent=False`→真正 abort/error。
+
+### 10.5b on_interrupted 必须 COMPLETING 短路，但不能跳过新 session 和 _interrupt_map
+**关键修复 (v1.0.5)**：`on_interrupted` 在旧 session 处于 COMPLETING 状态时，只跳过 abort 逻辑（不标记 `_was_aborted`、不设 `ABORTED`、不调 `_complete_session`），但新 session 创建和 `_interrupt_map` 更新仍照常执行。如果直接 `return` 跳过全部逻辑，新消息可能没有 card session，`_interrupt_map` 未设置会导致 `on_completed` 的消息 ID 重定向失败。`on_aborted`（/stop）同样需要 COMPLETING 短路——用户 /stop 打到正在 drain 的 session 时，直接设 ABORTED 同样会取消 flush、丢失最后一段内容，并触发 double-complete 竞态。修复：`on_aborted` 检测到 COMPLETING 时标记 `_was_aborted = True`（让封卡显示"已停止"），然后 return 跳过 abort 逻辑。
 
 ### 10.6 FlushController 线程安全
 worker 线程必须用 `call_soon_threadsafe()`，`call_soon()` 不唤醒事件循环→flush 永不执行。
@@ -464,6 +469,7 @@ hermes gateway restart
 | 流式关闭 (300309) | 卡片 TTL + 主动延长 | controller/linear_mixin.py |
 | 封卡后面板状态异常 | 封卡是否更新面板最终状态 | controller/linear_mixin.py |
 | /stop 卡片卡死 | on_aborted/on_completed 路径 | patching/gateway.py / patching/adapter.py |
+| 完成卡片被覆盖成"已停止" | `on_interrupted`/`on_aborted` 是否错误触发于 COMPLETING 状态 | controller/core.py |
 | 页脚早于内容出现 | drain 步骤是否执行 | controller/linear_mixin.py |
 | 内容不完整就封卡 | `answer_dirty` 是否在 seal 前被 drain | controller/linear_mixin.py |
 | 流式参数报错/频控 | `print_frequency_ms` ≥ 70 | cardkit/cards.py |

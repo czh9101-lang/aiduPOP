@@ -18,10 +18,6 @@ English | <a href="README.zh-CN.md">中文版</a>
 
 Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, unified collapsible panel, chronological reasoning/tool display, and more.
 
-> 📁 Card templates are available in [`assets/card_templates/`](assets/card_templates/) for reference and customization.
->
-> 🔄 A daily integration test workflow checks for new Hermes releases and validates compatibility — results are posted to Feishu automatically.
-
 > Based on [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0, with extensive refactoring and optimizations
 >
 > ⚠️ **Incompatible with the upstream plugin** — if you have the original `Cheerwhy/hermes-lark-streaming` installed, please uninstall it first before installing this version.
@@ -30,10 +26,14 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 
 ## Effect Preview
 
-<img src="assets/img1.png" width="20%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
-<img src="assets/img2.png" width="20%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
-<img src="assets/img3.png" width="20%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
-<img src="assets/img4.png" width="20%" style="max-height: 250px; object-fit: contain; margin: 5px;" />
+<table align="center">
+  <tr>
+    <td><img src="assets/img1.png" width="200px" /></td>
+    <td><img src="assets/img2.png" width="200px" /></td>
+    <td><img src="assets/img3.png" width="200px" /></td>
+    <td><img src="assets/img4.png" width="200px" /></td>
+  </tr>
+</table>
 
 ---
 
@@ -189,4 +189,4 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ## Acknowledgments
 
-[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=48)](https://github.com/joshcheng820222)
+[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222)[![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998)

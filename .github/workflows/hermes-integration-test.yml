@@ -22,7 +22,18 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── 2. Read last tested release ──────────────────────────────────
+      # ── 2. Restore last tested release from cache ────────────────────
+      # NOTE: .hermes-last-release is NOT tracked in git (in .gitignore).
+      # It is persisted across runs via GitHub Actions Cache, which is not
+      # affected by the sync-from-gitee workflow that overwrites git files.
+      - name: Restore last tested release
+        uses: actions/cache/restore@v4
+        with:
+          path: .hermes-last-release
+          key: hermes-last-release-${{ github.run_number }}
+          restore-keys: |
+            hermes-last-release-
+
       - name: Read last tested release
         id: last_release
         run: |
@@ -259,18 +270,20 @@ jobs:
               print(f"Failed to notify Feishu: {e}")
           PYEOF
 
-      # ── 11. Update .hermes-last-release ──────────────────────────────
-      # Only update when the full pipeline completed (tests actually ran),
-      # regardless of pass/fail. Do NOT update if tests were skipped
-      # (infrastructure error, dependency failure, etc.).
+      # ── 11. Update .hermes-last-release (cache only, not git) ────────
+      # .hermes-last-release is excluded from git tracking (.gitignore),
+      # so sync-from-gitee will never overwrite it. State is persisted via
+      # GitHub Actions Cache instead of git commits.
       - name: Update .hermes-last-release
         if: always() && steps.compare.outputs.has_new_release == 'true' && (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
         run: |
           NEW_TAG="${{ steps.latest_release.outputs.tag }}"
           echo "Updating .hermes-last-release to: $NEW_TAG"
           echo "$NEW_TAG" > .hermes-last-release
-          git config user.name "hermes-integration-test[bot]"
-          git config user.email "integration-bot@example.com"
-          git add .hermes-last-release
-          git diff --cached --quiet || git commit -m "chore: update .hermes-last-release to $NEW_TAG"
-          git push
+
+      - name: Save last tested release to cache
+        if: always() && steps.compare.outputs.has_new_release == 'true' && (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
+        uses: actions/cache/save@v4
+        with:
+          path: .hermes-last-release
+          key: hermes-last-release-${{ github.run_number }}
