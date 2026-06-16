@@ -706,23 +706,25 @@ class TestHighFrequencyLoggingDowngrade:
                 break
 
     def test_hls_wrap_guard_is_debug(self) -> None:
-        """HLS_WRAP guard check log should use warning level with HLS_DIAG prefix."""
+        """HLS_DIAG guard check log should use debug level (downgraded from warning for performance)."""
         from hermes_lark_streaming.patching import _maybe_wrap_callbacks
         import inspect
 
         source = inspect.getsource(_maybe_wrap_callbacks)
-        # The guard check was upgraded from debug to warning level (HLS_DIAG prefix)
-        # for diagnostic purposes. Verify it uses _logger.warning with HLS_DIAG.
-        assert '_logger.warning(' in source and 'HLS_DIAG' in source, \
-            "HLS_WRAP guard check should use _logger.warning with HLS_DIAG prefix"
+        # HLS_DIAG diagnostic logs were downgraded from warning to debug level
+        # to avoid log flooding in production (every reasoning token generated
+        # 3-4 warning-level log lines, causing significant I/O overhead).
+        # Verify it uses _logger.debug with HLS_DIAG prefix.
+        assert '_logger.debug(' in source and 'HLS_DIAG' in source, \
+            "HLS_WRAP guard check should use _logger.debug with HLS_DIAG prefix"
         # Verify the guard check specifically mentions GUARD CHECK
         lines = source.split('\n')
         for i, line in enumerate(lines):
             if 'HLS_DIAG' in line and 'GUARD CHECK' in line:
-                # Check the line(s) above for _logger.warning
+                # Check the line(s) above for _logger.debug
                 context = '\n'.join(lines[max(0, i-3):i+1])
-                assert '_logger.warning' in context, \
-                    f"HLS_DIAG GUARD CHECK should use _logger.warning, found context: {context}"
+                assert '_logger.debug' in context, \
+                    f"HLS_DIAG GUARD CHECK should use _logger.debug, found context: {context}"
                 break
 
     def test_hls_wrap_skip_is_debug(self) -> None:
