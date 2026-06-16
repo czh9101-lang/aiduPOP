@@ -1,3 +1,14 @@
+## v1.0.7 (2026-06-16)
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| 🐛 Bug Fix | Cron/Gateway 静态卡片表格超限 | `build_cron_card()` 和 `build_gateway_card()` 调用 `_downgrade_tables()` 时不传 `limit`，默认用 20。但飞书静态卡片（非流式）硬限 5 张表格，超限被截断或报错 | 新增 `_MAX_CRON_TABLES = 5` 常量，Cron/Gateway 卡片改用 `limit=_MAX_CRON_TABLES`；流式卡片仍用 20 阈值 |
+| 🔧 Fix | 工具步骤标题显示冗余状态文字 | 工具步骤标题有状态文字（Running/Succeeded/Failed），应去掉，只靠颜色区分；推理轮次标题没加粗、没颜色区分 | `_tool_status_info()` 去掉 label，`running` 颜色改 `orange-300`；`_build_tool_step_title()` 改为颜色+加粗统一格式；新增 `_build_reasoning_round_title()` 辅助函数统一推理标题渲染（orange-300 进行中、green 已完成、red 失败） |
+| 🔧 Fix | 推理内容缺少缩进 | 推理轮次的思考内容（markdown tag）和标题左对齐，没有缩进；而工具步骤的 detail/output 都有 22px 缩进 | 推理内容从 `markdown` tag 改为 `div` + `lark_md` + `margin: "0px 0px 0px 22px"`，与工具内容对齐 |
+| 🔧 Fix | Schema Error 300315 日志缺少关键细节 | 飞书返回 300315 错误时包含具体哪个属性非法，但日志只记录整个异常字符串，需人工翻找 | `FeishuAPIError` 新增 `extract_schema_detail()` 方法，3 处 schema error 日志新增 `detail:` 字段，一眼可见非法属性 |
+| 🐛 Bug Fix | 并发消息可能污染新卡片内容 | 用户快速连发多条消息时，旧消息的回调可能在旧 session 上继续写入，导致新卡片内容被污染 | `on_reasoning`/`on_tool_update`/`on_answer` 三个回调入口添加 epoch 校验，检测到 stale epoch 自动跳过 |
+| ✨ Feature | 新增 AGENT_GUIDE.md | Agent（AI 助手、自动化脚本）需要高信息密度文档了解安装/配置/排障，现有 README token 消耗高 | 新增 `docs/AGENT_GUIDE.md`，~2KB 高密度机器可读文档 |
+
 ## v1.0.6 (2026-06-15)
 
 | 类型 | 问题/功能 | 原因 | 修复/说明 |

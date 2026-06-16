@@ -32,6 +32,7 @@ __all__ = [
     '_loading_hint_element',
     '_build_tool_step_elements',
     '_build_tool_step_title',
+    '_build_reasoning_round_title',
     '_build_tool_step_detail',
     '_build_tool_step_output',
     '_tool_status_info',
@@ -391,33 +392,18 @@ def build_unified_panel(
         for kind, idx in panel_events:
             if kind == "reasoning" and show_reasoning and idx < len(reasoning_rounds):
                 round_ = reasoning_rounds[idx]
-                en_round_label, zh_round_label = _T["round_n"]
-                round_elapsed = _format_elapsed(round_.elapsed_ms) if round_.elapsed_ms > 0 else ""
-                en_round_text = en_round_label.format(round_.index)
-                zh_round_text = zh_round_label.format(round_.index)
-                if round_elapsed:
-                    en_round_text += f" · {round_elapsed}"
-                    zh_round_text += f" · {round_elapsed}"
-                children.append({
-                    "tag": "div",
-                    "icon": {
-                        "tag": "standard_icon",
-                        "token": "robot-add_outlined",
-                        "size": "16px 16px",
-                        "color": "grey",
-                    },
-                    "text": {
-                        "tag": "lark_md",
-                        "content": en_round_text,
-                        "i18n_content": _i18n(en_round_text, zh_round_text),
-                        "text_size": "notation",
-                    },
-                })
+                children.append(_build_reasoning_round_title(
+                    round_.index, round_.elapsed_ms, finalized=True,
+                ))
                 if round_.text.strip():
                     children.append({
-                        "tag": "markdown",
-                        "content": round_.text,
-                        "text_size": "notation",
+                        "tag": "div",
+                        "margin": "0px 0px 0px 22px",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": round_.text,
+                            "text_size": "notation",
+                        },
                     })
             elif kind == "tool" and idx < len(tool_steps):
                 if idx not in rendered_tools:
@@ -428,29 +414,18 @@ def build_unified_panel(
         # In-progress reasoning (not yet finalised into panel_events)
         if current_reasoning_text and show_reasoning:
             in_progress_idx = num_rounds  # 1-based
-            en_round_label, zh_round_label = _T["round_n"]
-            en_round_text = en_round_label.format(in_progress_idx)
-            zh_round_text = zh_round_label.format(in_progress_idx)
-            children.append({
-                "tag": "div",
-                "icon": {
-                    "tag": "standard_icon",
-                    "token": "robot-add_outlined",
-                    "size": "16px 16px",
-                    "color": "grey",
-                },
-                "text": {
-                    "tag": "lark_md",
-                    "content": en_round_text,
-                    "i18n_content": _i18n(en_round_text, zh_round_text),
-                    "text_size": "notation",
-                },
-            })
+            children.append(_build_reasoning_round_title(
+                in_progress_idx, 0, finalized=False,
+            ))
             if current_reasoning_text.strip():
                 children.append({
-                    "tag": "markdown",
-                    "content": current_reasoning_text,
-                    "text_size": "notation",
+                    "tag": "div",
+                    "margin": "0px 0px 0px 22px",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": current_reasoning_text,
+                        "text_size": "notation",
+                    },
                 })
 
         # Remaining tool steps not in panel_events (safety fallback)
@@ -463,61 +438,35 @@ def build_unified_panel(
         # Reasoning rounds
         if has_reasoning:
             for round_ in reasoning_rounds:
-                en_round_label, zh_round_label = _T["round_n"]
-                round_elapsed = _format_elapsed(round_.elapsed_ms) if round_.elapsed_ms > 0 else ""
-                en_round_text = en_round_label.format(round_.index)
-                zh_round_text = zh_round_label.format(round_.index)
-                if round_elapsed:
-                    en_round_text += f" · {round_elapsed}"
-                    zh_round_text += f" · {round_elapsed}"
-                children.append({
-                    "tag": "div",
-                    "icon": {
-                        "tag": "standard_icon",
-                        "token": "robot-add_outlined",
-                        "size": "16px 16px",
-                        "color": "grey",
-                    },
-                    "text": {
-                        "tag": "lark_md",
-                        "content": en_round_text,
-                        "i18n_content": _i18n(en_round_text, zh_round_text),
-                        "text_size": "notation",
-                    },
-                })
+                children.append(_build_reasoning_round_title(
+                    round_.index, round_.elapsed_ms, finalized=True,
+                ))
                 if round_.text.strip():
                     children.append({
-                        "tag": "markdown",
-                        "content": round_.text,
-                        "text_size": "notation",
+                        "tag": "div",
+                        "margin": "0px 0px 0px 22px",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": round_.text,
+                            "text_size": "notation",
+                        },
                     })
 
             # In-progress reasoning
             if current_reasoning_text:
                 in_progress_idx = num_rounds
-                en_round_label, zh_round_label = _T["round_n"]
-                en_round_text = en_round_label.format(in_progress_idx)
-                zh_round_text = zh_round_label.format(in_progress_idx)
-                children.append({
-                    "tag": "div",
-                    "icon": {
-                        "tag": "standard_icon",
-                        "token": "robot-add_outlined",
-                        "size": "16px 16px",
-                        "color": "grey",
-                    },
-                    "text": {
-                        "tag": "lark_md",
-                        "content": en_round_text,
-                        "i18n_content": _i18n(en_round_text, zh_round_text),
-                        "text_size": "notation",
-                    },
-                })
+                children.append(_build_reasoning_round_title(
+                    in_progress_idx, 0, finalized=False,
+                ))
                 if current_reasoning_text.strip():
                     children.append({
-                        "tag": "markdown",
-                        "content": current_reasoning_text,
-                        "text_size": "notation",
+                        "tag": "div",
+                        "margin": "0px 0px 0px 22px",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": current_reasoning_text,
+                            "text_size": "notation",
+                        },
                     })
 
         # Tool steps
@@ -600,12 +549,57 @@ def _build_tool_step_title(step: dict) -> dict:
     status = step.get("status", "running")
     status_info = _tool_status_info(status)
     title = step.get("title", step.get("name", "tool"))
-    content = f"**{_escape_md(title)}** · <font color='{status_info['color']}'>{status_info['label']}</font>"
+    # 仅用颜色区分状态，不显示状态文字；标题加粗整体上色
+    content = f"<font color='{status_info['color']}'>**{_escape_md(title)}**</font>"
     return {
         "tag": "div",
         "icon": {
             "tag": "standard_icon",
             "token": step.get("icon", "tool_02"),
+            "color": "grey",
+        },
+        "text": {
+            "tag": "lark_md",
+            "content": content,
+            "text_size": "notation",
+        },
+    }
+
+
+def _build_reasoning_round_title(
+    round_index: int,
+    elapsed_ms: float,
+    finalized: bool,
+    failed: bool = False,
+) -> dict:
+    """构建推理轮次标题 div — 图标 robot-add_outlined + 颜色加粗文字.
+
+    颜色规则：
+      - 进行中（未结束）: orange-300
+      - 已完成（已结束）: green
+      - 失败: red
+    """
+    if failed:
+        color = "red"
+    elif finalized:
+        color = "green"
+    else:
+        color = "orange-300"
+
+    # 文本格式：「第 N 轮 · Xs」或「第 N 轮」
+    en_label, zh_label = _T["round_n"]
+    text = zh_label.format(round_index)  # 用中文格式
+    elapsed = _format_elapsed(elapsed_ms) if elapsed_ms > 0 else ""
+    if elapsed:
+        text += f" · {elapsed}"
+
+    content = f"<font color='{color}'>**{text}**</font>"
+    return {
+        "tag": "div",
+        "icon": {
+            "tag": "standard_icon",
+            "token": "robot-add_outlined",
+            "size": "16px 16px",
             "color": "grey",
         },
         "text": {
@@ -666,10 +660,10 @@ def _build_tool_step_output(step: dict) -> dict | None:
 
 def _tool_status_info(status: str) -> dict[str, str]:
     return {
-        "running": {"label": "Running", "color": "turquoise"},
-        "success": {"label": "Succeeded", "color": "green"},
-        "error": {"label": "Failed", "color": "red"},
-    }.get(status, {"label": status.capitalize(), "color": "grey"})
+        "running": {"label": "", "color": "orange-300"},
+        "success": {"label": "", "color": "green"},
+        "error": {"label": "", "color": "red"},
+    }.get(status, {"label": "", "color": "grey"})
 
 
 def _format_code_block(content: str, language: str) -> str:

@@ -208,6 +208,13 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         if session is None or session.guard.should_skip("on_reasoning"):
             return
 
+        # Epoch guard: if session entered terminal phase between lookup and
+        # here (concurrent message race), skip to prevent stale writes.
+        epoch = session.create_epoch
+        if session.is_stale_create(epoch):
+            _logger.debug("on_reasoning: stale epoch, skipping msg=%s", (message_id or "?")[:12])
+            return
+
         if session.linear and session.unified_state:
             _logger.warning(
                 "HLS_DIAG: on_reasoning msg=%s text=%r "
@@ -258,6 +265,12 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         if session is None or session.guard.should_skip("on_tool_update"):
             return
 
+        # Epoch guard: prevent stale writes from previous message's callbacks
+        epoch = session.create_epoch
+        if session.is_stale_create(epoch):
+            _logger.debug("on_tool_update: stale epoch, skipping msg=%s", (message_id or "?")[:12])
+            return
+
         if status in ("running", "started", "tool.started"):
             session.tool_use.record_start(tool_name, detail)
         else:
@@ -285,6 +298,12 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             return
         session = self._get_active_session(message_id)
         if session is None or session.guard.should_skip("on_answer"):
+            return
+
+        # Epoch guard: prevent stale writes from previous message's callbacks
+        epoch = session.create_epoch
+        if session.is_stale_create(epoch):
+            _logger.debug("on_answer: stale epoch, skipping msg=%s", (message_id or "?")[:12])
             return
 
         # ── TTFB: 首字到达时间 ──

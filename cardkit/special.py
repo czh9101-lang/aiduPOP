@@ -8,6 +8,7 @@ from typing import Any
 
 from .i18n import _LOCALES, _T, _i18n, _t
 from .md import (
+    _MAX_CRON_TABLES,
     _downgrade_tables,
     _split_long_text,
     optimize_markdown_style,
@@ -35,7 +36,7 @@ def build_cron_card(content: str) -> dict[str, Any]:
     summary = content[:120].replace("\n", " ").replace("```", "").strip()
     if summary:
         card["config"]["summary"] = {"content": summary}
-    for chunk in _split_long_text(_downgrade_tables(optimize_markdown_style(content))):
+    for chunk in _split_long_text(_downgrade_tables(optimize_markdown_style(content), limit=_MAX_CRON_TABLES)):
         if chunk.strip():
             card["body"]["elements"].append({"tag": "markdown", "content": chunk})
     return card
@@ -80,7 +81,7 @@ def build_gateway_card(
         })
 
     if content.strip():
-        for chunk in _split_long_text(_downgrade_tables(optimize_markdown_style(content))):
+        for chunk in _split_long_text(_downgrade_tables(optimize_markdown_style(content), limit=_MAX_CRON_TABLES)):
             if chunk.strip():
                 elements.append({"tag": "markdown", "content": chunk})
 

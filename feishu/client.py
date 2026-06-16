@@ -67,6 +67,32 @@ class FeishuAPIError(RuntimeError):
             return int(m.group(1))
         return None
 
+    def extract_schema_detail(self) -> str:
+        """从 300315 Schema 错误中提取具体非法属性信息.
+
+        飞书返回格式示例:
+          "invalid card schema: unknown property 'icon' on 'plain_text'"
+          "Schema validation failed: property 'margin' is not allowed on tag 'markdown'"
+
+        Returns:
+            提取到的细节字符串；无法提取时返回完整错误消息.
+        """
+        msg = str(self)
+        # 尝试匹配 "unknown property 'X' on 'Y'" 模式
+        m = re.search(r"unknown property '(\w+)'.*?'(\w+)'", msg)
+        if m:
+            return f"unknown property '{m.group(1)}' on '{m.group(2)}'"
+        # 尝试匹配 "property 'X' is not allowed" 模式
+        m = re.search(r"property '(\w+)'.*?not allowed.*?tag '?(\w+)'?", msg)
+        if m:
+            return f"property '{m.group(1)}' not allowed on '{m.group(2)}'"
+        # 尝试匹配 "invalid.*property.*'X'" 模式
+        m = re.search(r"(unknown property '[^']+'[^.]*)", msg)
+        if m:
+            return m.group(1)
+        # 兜底：返回完整消息
+        return msg[:200]
+
 
 CARDKIT_RATE_LIMITED = 230020  # 频控
 CARDKIT_CONTENT_FAILED = 230099  # 卡片内容创建失败（通用码，需检查子错误）
