@@ -46,6 +46,15 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 - Hermes CLI with plugin system support (`hermes plugins` command available)
 
 ### Installation
+
+> **💡 Smart Install Prompt**: Copy the following prompt to Hermes Agent, and it will automatically complete the installation:
+> 
+> ```
+> Help me install Feishu Ao-style Cards:
+> - Gitee: https://gitee.com/Aowen-Nowor/hermes-lark-streaming/raw/master/docs/AGENT_GUIDE.md
+> - GitHub: https://raw.githubusercontent.com/Aowen-Nowor/hermes-lark-streaming/master/docs/AGENT_GUIDE.md
+> ```
+
 > The plugin automatically reads the `HERMES_HOME` environment variable to locate the installation path (`~/.hermes` by default). No extra steps are needed for non-default paths.
 
 **Gitee**
@@ -103,11 +112,6 @@ HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py pyth
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
 ```
-
-> **Note**: If auto-detection fails, manually set `HERMES_PYTHON` to your Hermes venv Python:
-> - **Hermes Desktop**: `~/.hermes/hermes-agent/venv/bin/python3`
-> - **CLI/Server install**: `/usr/local/lib/hermes-agent/venv/bin/python3`
-> - **Alternative**: `/opt/hermes-agent/venv/bin/python3`
 
 > **Troubleshooting**: If no card effect appears, check: (1) `hermes plugins list` shows enabled; (2) no `*.bak` directories under `~/.hermes/plugins/`; (3) Feishu credentials are configured.
 
