@@ -75,7 +75,7 @@ def _maybe_wrap_callbacks(agent) -> None:
     _current_reasoning = getattr(agent, "reasoning_callback", None)
     _current_bg = getattr(agent, "background_review_callback", None)
     _force_rewrap = bool(ctx and ctx.get("_force_rewrap")) if (ctx := _msg_ctx.get()) else False
-    _logger.warning(
+    _logger.debug(
         "HLS_DIAG: _maybe_wrap_callbacks GUARD CHECK eid=%s "
         "stream=%s(hls=%s) interim=%s(hls=%s) tool=%s "
         "reasoning=%s(hls=%s type=%s repr=%s) bg=%s force_rewrap=%s",
@@ -117,7 +117,7 @@ def _maybe_wrap_callbacks(agent) -> None:
         if _current_reasoning_now and not getattr(_current_reasoning_now, "_hls_wrapper", False):
             _orig_reasoning_late = _current_reasoning_now
 
-            _logger.warning(
+            _logger.debug(
                 "HLS_DIAG: late_reasoning_wrapper SETUP eid=%s "
                 "_orig_reasoning_late=%s late_type=%s late_has_hls=%s late_repr=%s",
                 eid[:12] if eid else "?",
@@ -128,7 +128,7 @@ def _maybe_wrap_callbacks(agent) -> None:
             )
 
             def _late_reasoning_wrapper(text, *args, **kwargs):
-                _logger.warning(
+                _logger.debug(
                     "HLS_DIAG: late_reasoning_wrapper CALLED eid=%s text=%r "
                     "_orig_late=%s late_type=%s late_has_hls=%s",
                     eid[:12] if eid else "?",
@@ -271,7 +271,7 @@ def _maybe_wrap_callbacks(agent) -> None:
                 # ── Check already_streamed kwarg from Hermes ──
                 already_streamed = kwargs.get("already_streamed", False)
                 if already_streamed:
-                    _logger.warning(
+                    _logger.debug(
                         "HLS_DIAG: thinking_wrapper SKIP(already_streamed) eid=%s len=%d",
                         eid[:12], len(text) if text else 0,
                     )
@@ -280,7 +280,7 @@ def _maybe_wrap_callbacks(agent) -> None:
                 # ── Length-based dedup ──
                 consumed_len = _stream_consumed_len.get(eid, 0)
                 if text and consumed_len > 0 and len(text) <= consumed_len:
-                    _logger.warning(
+                    _logger.debug(
                         "HLS_DIAG: thinking_wrapper SKIP(length_dedup) eid=%s "
                         "consumed=%d interim=%d",
                         eid[:12], consumed_len, len(text),
@@ -289,7 +289,7 @@ def _maybe_wrap_callbacks(agent) -> None:
 
                 if text:
                     from .hooks import on_thinking_delta
-                    _logger.warning(
+                    _logger.debug(
                         "HLS_DIAG: thinking_wrapper CALLING on_thinking_delta eid=%s "
                         "len=%d text_head=%r consumed_len=%d",
                         eid[:12], len(text), text[:60], consumed_len,
@@ -346,7 +346,7 @@ def _maybe_wrap_callbacks(agent) -> None:
 
     # ── REASONING: set reasoning_callback ──
     _orig_reasoning = getattr(agent, "reasoning_callback", None)
-    _logger.warning(
+    _logger.debug(
         "HLS_DIAG: reasoning_wrapper SETUP eid=%s _orig_reasoning=%s "
         "orig_type=%s orig_has_hls=%s orig_repr=%s",
         eid[:12] if eid else "?",
@@ -357,7 +357,7 @@ def _maybe_wrap_callbacks(agent) -> None:
     )
 
     def _reasoning_wrapper(text, *args, **kwargs):
-        _logger.warning(
+        _logger.debug(
             "HLS_DIAG: reasoning_wrapper CALLED eid=%s text=%r "
             "_orig_reasoning=%s orig_type=%s orig_has_hls=%s",
             eid[:12] if eid else "?",

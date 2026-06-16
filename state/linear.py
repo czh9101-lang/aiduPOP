@@ -173,7 +173,7 @@ class UnifiedLinearState:
         """Reasoning text increment. Starts a new round if not already in one."""
         import logging as _logging
         _diag_logger = _logging.getLogger("hermes_lark_streaming")
-        _diag_logger.warning(
+        _diag_logger.debug(
             "HLS_DIAG: on_reasoning_delta text=%r current_len=%d "
             "rounds=%d _native_reasoning_active=%s",
             text[:40] if text else "",

@@ -694,7 +694,7 @@ class UnifiedControllerMixin:
         reasoning = split.get("reasoning_text")
         answer = split.get("answer_text")
 
-        _logger.warning(
+        _logger.debug(
             "HLS_DIAG: _linear_on_thinking msg=%s text_head=%r "
             "reasoning=%s answer=%s _native_reasoning_active=%s "
             "show_reasoning=%s current_reasoning_len=%d",
@@ -714,7 +714,7 @@ class UnifiedControllerMixin:
         # delivers the same text in accumulated form — appending it again
         # via on_reasoning_delta would double the content.
         if reasoning and self._cfg.show_reasoning and not state._native_reasoning_active:
-            _logger.warning(
+            _logger.debug(
                 "HLS_DIAG: _linear_on_thinking APPENDS reasoning via on_reasoning_delta "
                 "msg=%s reasoning_head=%r",
                 (session.message_id or "?")[:12],
