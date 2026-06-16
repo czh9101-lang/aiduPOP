@@ -468,8 +468,9 @@ class UnifiedControllerMixin:
                         # created to prevent infinite retry loops.
                         _logger.error(
                             "unified flush phase 2 SCHEMA ERROR (permanent): %s — "
+                            "detail: %s — "
                             "marking elements as created to prevent retry loop, card=%s",
-                            e, session.card_id[:12],
+                            e, e.extract_schema_detail(), session.card_id[:12],
                         )
                         session._answer_element_created = True  # Prevent retry loop
                         session._panel_element_created = True
@@ -614,8 +615,9 @@ class UnifiedControllerMixin:
                 if is_schema_error(e):
                     _logger.error(
                         "unified flush phase 3 SCHEMA ERROR (permanent): %s — "
+                        "detail: %s — "
                         "clearing dirty flags to stop retry, card=%s",
-                        e, session.card_id[:12],
+                        e, e.extract_schema_detail(), session.card_id[:12],
                     )
                     # Clear dirty to stop retry loop on permanent errors
                     state.panel_dirty = False
@@ -1360,7 +1362,7 @@ class UnifiedControllerMixin:
                         _logger.info("drain: streaming already closed, skipping")
                         session._streaming_closed = True
                     elif is_schema_error(e):
-                        _logger.error("drain SCHEMA ERROR: %s", e)
+                        _logger.error("drain SCHEMA ERROR: %s — detail: %s", e, e.extract_schema_detail())
                         state.panel_dirty = False
                         state.tool_steps_dirty = False
                     else:

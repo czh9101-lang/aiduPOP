@@ -7,10 +7,12 @@ import re
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
-_MAX_CARD_TABLES = 20  # 用户迭代值：20表降级阈值（参考项目用3/5，但经实际迭代20更合适）
+_MAX_CARD_TABLES = 20  # 流式卡片：20表降级阈值（流式增量内容，飞书宽松执行）
+_MAX_CRON_TABLES = 5   # 静态卡片：5表降级阈值（飞书 Card 2.0 单卡硬限）
 _MAX_CHUNK_CHARS = 2400
 
 __all__ = [
+    "_MAX_CRON_TABLES",
     "_downgrade_tables",
     "_find_tables_outside_code_blocks",
     "_split_long_text",
