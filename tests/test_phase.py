@@ -498,11 +498,17 @@ class TestCardSessionGuardTerminate:
 class TestBackwardCompatibility:
     """Ensure old code patterns still work."""
 
-    def test_failed_equals_creation_failed(self) -> None:
-        """FAILED is an alias for CREATION_FAILED."""
-        from hermes_lark_streaming.controller.mixin import FAILED, CREATION_FAILED
-        assert FAILED == CREATION_FAILED
-        assert FAILED == "creation_failed"
+    def test_failed_alias_via_cardphase(self) -> None:
+        """CardPhase.FAILED is a backward-compatible alias for CREATION_FAILED.
+
+        v1.1.0: the module-level ``FAILED`` constant in ``controller.mixin``
+        was renamed to ``CREATION_FAILED``.  The class attribute
+        ``CardPhase.FAILED`` is retained as a deprecated alias for
+        backward compatibility.
+        """
+        from hermes_lark_streaming.controller.mixin import CREATION_FAILED
+        assert CardPhase.FAILED == CREATION_FAILED
+        assert CardPhase.FAILED == "creation_failed"
 
     def test_session_state_string_comparison(self) -> None:
         """session.state == 'idle' still works."""
@@ -545,11 +551,16 @@ class TestBackwardCompatibility:
         assert "creation_failed" in _TERMINAL
 
     def test_mixin_reexports(self) -> None:
-        """All phase constants are re-exported from controller.mixin."""
+        """All phase constants are re-exported from controller.mixin.
+
+        v1.1.0: the deprecated module-level ``FAILED`` constant was
+        removed from ``controller.mixin`` — callers must use
+        ``CREATION_FAILED`` (or ``CardPhase.FAILED``) instead.
+        """
         from hermes_lark_streaming.controller.mixin import (
             IDLE, CREATING, STREAMING, COMPLETING,
             COMPLETED, CREATION_FAILED, ABORTED, TERMINATED,
-            FAILED, _TERMINAL,
+            _TERMINAL,
         )
         assert IDLE == "idle"
         assert CREATING == "creating"
@@ -559,18 +570,26 @@ class TestBackwardCompatibility:
         assert CREATION_FAILED == "creation_failed"
         assert ABORTED == "aborted"
         assert TERMINATED == "terminated"
-        assert FAILED == "creation_failed"
+        # CardPhase.FAILED remains as a deprecated class-attribute alias
+        assert CardPhase.FAILED == CREATION_FAILED
 
     def test_controller_reexports(self) -> None:
-        """Phase constants re-exported from controller package."""
+        """Phase constants re-exported from controller package.
+
+        v1.1.0: the deprecated module-level ``FAILED`` constant was
+        removed from ``controller`` — callers must use ``CREATION_FAILED``
+        (or ``CardPhase.FAILED``) instead.
+        """
         from hermes_lark_streaming.controller import (
             IDLE, CREATING, STREAMING, COMPLETING,
             COMPLETED, CREATION_FAILED, ABORTED, TERMINATED,
-            FAILED, _TERMINAL,
+            _TERMINAL,
         )
         assert IDLE == "idle"
         assert CREATION_FAILED == "creation_failed"
         assert TERMINATED == "terminated"
+        # CardPhase.FAILED remains as a deprecated class-attribute alias
+        assert CardPhase.FAILED == CREATION_FAILED
 
     def test_state_package_reexports(self) -> None:
         """Phase types re-exported from state package."""

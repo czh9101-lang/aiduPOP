@@ -1,7 +1,7 @@
 # hermes-lark-streaming 安装指南
 
 > 高信息密度参考文档，专为 Agent 自动解析设计
-> 最后更新: 2026-06-16
+> 最后更新: 2026-06-17
 
 ## 快速概览
 
@@ -118,27 +118,37 @@ feishu:
 
 | 配置键 | 默认值 | 范围 | 说明 |
 |--------|---------|------|------|
-| `streaming_mode` | `true` | bool | 启用/禁用流式卡片输出 |
+| `enabled` | `true` | bool | 启用/禁用流式卡片输出 |
+| `linear` | `true` | bool | 线性模式：单卡片原地更新（统一面板架构） |
 | `show_reasoning` | `true` | bool | 显示推理/思考面板 |
 | `max_tool_steps` | `20` | 1–100 | 统一面板中工具步骤最大数量（超限折叠） |
 | `max_reasoning_rounds` | `20` | 1–100 | 统一面板中推理轮次最大数量（超限折叠） |
-| `card_duration_sec` | `600` | >0 | 会话 TTL（秒），超时卡片失效 |
-| `refresh_interval_ms` | `100` | 70–2000 | 卡片刷新间隔（毫秒） |
-| `footer_fields` | `[]` | array | 自定义页脚字段列表 |
-| `inject_time` | `true` | bool | 时间感知模式，自动注入当前时间 |
+| `card_ttl_sec` | `600` | >0 | 会话 TTL（秒），超时卡片失效 |
+| `flush_interval_ms` | `100` | 70–2000 | 卡片刷新间隔（毫秒） |
+| `inject_time` | `false` | bool | 时间感知模式，自动注入当前时间 |
+| `print_strategy` | `delay` | `fast`/`delay` | 打字机效果策略 |
+| `panel_expanded` | `false` | bool | 完成态卡片面板是否展开 |
+| `streaming_panel_expanded` | `false` | bool | 流式态卡片面板是否展开 |
+| `footer.show_label` | `false` | bool | 是否显示页脚字段标签 |
+| `footer.fields` | `[[status, elapsed, model, cost, compression_exhausted]]` | array | 页脚字段配置 |
 
 示例配置：
 
 ```yaml
 hermes_lark_streaming:
-  streaming_mode: true
+  enabled: true
+  linear: true
   show_reasoning: true
   max_tool_steps: 20
   max_reasoning_rounds: 20
-  card_duration_sec: 600
-  refresh_interval_ms: 100
-  footer_fields: []
-  inject_time: true
+  card_ttl_sec: 600
+  flush_interval_ms: 100
+  inject_time: false
+  print_strategy: delay
+  footer:
+    show_label: false
+    fields:
+      - [status, elapsed, model, cost, compression_exhausted]
 ```
 
 ## 提供的钩子（Hooks）

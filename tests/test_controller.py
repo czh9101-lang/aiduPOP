@@ -14,7 +14,7 @@ from hermes_lark_streaming.controller.mixin import (
     ABORTED,
     COMPLETED,
     COMPLETING,
-    FAILED,
+    CREATION_FAILED,
     STREAMING,
 )
 from hermes_lark_streaming.feishu import (
@@ -213,20 +213,33 @@ def test_prune_stale_sessions_ignores_none_key_and_prunes_valid_key() -> None:
 
 @pytest.mark.asyncio
 async def test_background_review_deferred_until_complete() -> None:
-    ctrl = _setup_ctrl()
-    session = _make_session("msg_bg")
+    """v1.1.0: deferred background review flushing was tied to the removed
+    non-linear ``_do_complete`` path. In the unified linear architecture,
+    linear sessions consume background reviews immediately via
+    ``UnifiedLinearState.on_background_review`` (see
+    ``defer_background_review`` in ``controller/core.py``), so there is no
+    longer a "deferred until complete" code path to test. The test that
+    previously lived here asserted on the deleted ``ctrl._do_complete``
+    method and was removed in Task 1.1+1.2.
+
+    The remaining behavior — that ``defer_background_review`` returns True
+    for an active session and the message is consumed by the unified
+    state — is covered by the linear dispatch tests below.
+    """
+    ctrl = _setup_ctrl(linear=True)
+    session = _make_session("msg_bg", linear=True)
     session.state = STREAMING
     session.card_msg_id = "card_msg"
     ctrl._sessions["msg_bg"] = session
     sent: list[str] = []
 
+    # In linear mode, defer_background_review pushes the text directly
+    # into unified_state and returns True (consumed by card, suppress
+    # plain text). The sender callback is never invoked.
     assert ctrl.defer_background_review(message_id="msg_bg", text="review", sender=sent.append)
     assert sent == []
-
-    await ctrl._do_complete(session)
-
-    assert sent == ["review"]
-    assert "msg_bg" not in ctrl._sessions
+    assert session.unified_state is not None
+    assert session.unified_state.bg_review_messages == ["review"]
 
 
 def test_background_review_without_active_session_not_deferred() -> None:
@@ -265,8 +278,10 @@ def _make_session(msg_id: str = "msg_123", *, linear: bool = False) -> CardSessi
     if linear:
         session.linear = True
         session.unified_state = UnifiedLinearState()
-    # v0.12.1: _card_ready must be set so _do_complete_inner / _do_linear_complete_inner
-    # don't hang for 30 seconds. In production, this is set by _do_create_card / _do_create_linear_card.
+    # v0.12.1: _card_ready must be set so _do_linear_complete doesn't
+    # hang for 30 seconds. In production, this is set by
+    # _do_create_linear_card (the non-linear _do_create_card was
+    # removed in v1.1.0).
     session._card_ready.set()
     return session
 
@@ -295,12 +310,21 @@ def _setup_ctrl(*, linear: bool = False) -> StreamCardController:
 
 
 @pytest.mark.asyncio
-async def test_create_card_replies_to_anchor_id() -> None:
-    ctrl = _setup_ctrl()
-    session = _make_session("msg")
-    session.anchor_id = "quoted"
+async def test_create_linear_card_replies_to_anchor_id() -> None:
+    """Anchor alias support: the linear card creator replies to ``anchor_id``
+    when set.
 
-    await ctrl._do_create_card(session)
+    v1.1.0: the legacy non-linear ``_do_create_card`` was removed; this
+    test was rewritten to drive the linear ``_do_create_linear_card``
+    path (the only creation path that remains). The behaviour under
+    test — replying to ``anchor_id`` when present — is unchanged.
+    """
+    ctrl = _setup_ctrl(linear=True)
+    session = _make_session("msg", linear=True)
+    session.anchor_id = "quoted"
+    ctrl._sessions["msg"] = session
+
+    await ctrl._do_create_linear_card(session)
 
     ctrl._client.reply_card_by_id.assert_called_once()
     assert ctrl._client.reply_card_by_id.call_args.args[0] == "quoted"
@@ -402,14 +426,24 @@ class TestLinearDispatch:
         # The actual completion happens asynchronously in _do_linear_complete
         assert session.state == COMPLETING
 
-    def test_nonlinear_answer_unchanged(self) -> None:
-        """非线性 session 不走 linear 路径."""
+    def test_nonlinear_answer_skipped(self) -> None:
+        """v1.1.0: non-linear session answer handling is dead code.
+
+        The non-linear ``on_answer`` path was removed in Task 1.1+1.2
+        (only the linear path remains). A session that is somehow not
+        flagged as linear will hit the dead-code branch in
+        ``on_answer`` which logs a warning and skips the text — the
+        answer is NOT appended to either ``session.text`` or
+        ``unified_state``. This test pins that behaviour so future
+        refactors don't silently reintroduce the non-linear path.
+        """
         ctrl = _setup_ctrl()
         session = _make_session("msg_nl", linear=False)
         ctrl._sessions["msg_nl"] = session
         ctrl.on_answer(message_id="msg_nl", text="answer text")
+        # Non-linear path is gone — both stores stay empty
         assert session.unified_state is None
-        assert session.text.display_text == "answer text"
+        assert session.text.display_text == ""
 
     def test_guard_skips_terminal(self) -> None:
         ctrl = _setup_ctrl()
@@ -473,7 +507,7 @@ class TestDoCreateLinearCard:
 
         await ctrl._do_create_linear_card(session)
 
-        assert session.state == FAILED
+        assert session.state == CREATION_FAILED
 
     @pytest.mark.asyncio
     async def test_unified_state_set_before_await(self) -> None:
@@ -530,7 +564,7 @@ class TestDoCreateLinearCard:
 
         # existing_elements should contain only 2 pre-allocated elements
         assert len(session.existing_elements) == 2
-        assert session._panel_element_created is False
+        assert "panel" not in session._creation_stages
 
     @pytest.mark.asyncio
     async def test_card_created_at_set(self) -> None:
@@ -570,7 +604,7 @@ class TestDoUnifiedFlush:
         # stream_element should have been called for answer
         ctrl._client.cardkit_stream_element.assert_called()
         # Panel should now be created
-        assert session._panel_element_created is True
+        assert "panel" in session._creation_stages
 
     @pytest.mark.asyncio
     async def test_no_api_calls_when_no_card_id(self) -> None:
@@ -607,9 +641,9 @@ class TestDoUnifiedFlush:
         session = _make_session("m2", linear=True)
         session.state = STREAMING
         session.card_id = "c"
-        session._loading_hint_removed = True
-        session._answer_element_created = True  # Answer element already exists (Phase 2 done)
-        session._panel_element_created = True  # Panel already exists (Phase 2 done)
+        session._creation_stages.add("hint_removed")
+        session._creation_stages.add("answer")  # Answer element already exists (Phase 2 done)
+        session._creation_stages.add("panel")  # Panel already exists (Phase 2 done)
         session.unified_state.on_reasoning_delta("t")
         session.unified_state.panel_dirty = False
         session.unified_state.answer_dirty = False
@@ -648,7 +682,7 @@ class TestDoUnifiedFlush:
         session = _make_session("msg_hint_del", linear=True)
         session.state = STREAMING
         session.card_id = "card_hint"
-        session._loading_hint_removed = False
+        session._creation_stages.discard("hint_removed")
         session.existing_elements = {_LOADING_HINT_ELEMENT_ID, _LOADING_ELEMENT_ID}
         session.unified_state.on_answer_delta("hello")
         ctrl._sessions["msg_hint_del"] = session
@@ -672,9 +706,9 @@ class TestDoUnifiedFlush:
         ]
         assert len(add_actions) == 1  # Phase 2: add answer element (panel not needed for answer-only content)
         assert len(delete_hint_actions) == 1  # Delete loading hint
-        assert session._loading_hint_removed is True
-        assert session._answer_element_created is True  # Answer element created (Path B: answer only)
-        # _panel_element_created remains False — no reasoning/tools, so no panel needed
+        assert "hint_removed" in session._creation_stages
+        assert "answer" in session._creation_stages  # Answer element created (Path B: answer only)
+        # panel stage remains absent — no reasoning/tools, so no panel needed
 
     @pytest.mark.asyncio
     async def test_loading_hint_removed_on_reasoning(self) -> None:
@@ -683,7 +717,7 @@ class TestDoUnifiedFlush:
         session = _make_session("msg_hint_reasoning", linear=True)
         session.state = STREAMING
         session.card_id = "card_hint_r"
-        session._loading_hint_removed = False
+        session._creation_stages.discard("hint_removed")
         session.existing_elements = {_LOADING_HINT_ELEMENT_ID, _LOADING_ELEMENT_ID}
         session.unified_state.on_reasoning_delta("thinking")
         ctrl._sessions["msg_hint_reasoning"] = session
@@ -706,8 +740,8 @@ class TestDoUnifiedFlush:
         ]
         assert len(add_actions) == 1  # Phase 2: add panel + answer element
         assert len(delete_hint_actions) == 1
-        assert session._loading_hint_removed is True
-        assert session._panel_element_created is True
+        assert "hint_removed" in session._creation_stages
+        assert "panel" in session._creation_stages
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("code", [230020, 300309])
@@ -853,7 +887,7 @@ class TestDoLinearComplete:
 
         with patch("asyncio.sleep", new_callable=AsyncMock):
             assert await ctrl._do_linear_complete(session) is False
-        assert session.state == FAILED
+        assert session.state == CREATION_FAILED
 
     @pytest.mark.asyncio
     async def test_finalize_and_cleanup(self) -> None:
@@ -890,9 +924,9 @@ class TestDoLinearComplete:
         session = _make_session("msg_drain", linear=True)
         session.state = STREAMING
         session.card_id = "card_drain"
-        session._panel_element_created = True
-        session._answer_element_created = True  # Answer element must exist for drain to work
-        session._loading_hint_removed = True
+        session._creation_stages.add("panel")
+        session._creation_stages.add("answer")  # Answer element must exist for drain to work
+        session._creation_stages.add("hint_removed")
         # Simulate: last answer delta arrived but flush hasn't fired yet
         session.unified_state.on_answer_delta("final chunk")
         assert session.unified_state.answer_dirty is True
@@ -932,9 +966,9 @@ class TestDoLinearComplete:
         session = _make_session("msg_drain_panel", linear=True)
         session.state = STREAMING
         session.card_id = "card_drain_panel"
-        session._panel_element_created = True
-        session._answer_element_created = True
-        session._loading_hint_removed = True
+        session._creation_stages.add("panel")
+        session._creation_stages.add("answer")
+        session._creation_stages.add("hint_removed")
         session.unified_state.on_reasoning_delta("think more")
         assert session.unified_state.panel_dirty is True
         ctrl._sessions["msg_drain_panel"] = session
@@ -972,9 +1006,9 @@ class TestDoLinearComplete:
         session.state = STREAMING
         session.card_id = "card_simple"
         # Simple conversation: answer element created but NO panel
-        session._answer_element_created = True
-        session._panel_element_created = False
-        session._loading_hint_removed = True
+        session._creation_stages.add("answer")
+        session._creation_stages.discard("panel")
+        session._creation_stages.add("hint_removed")
         session.unified_state.on_answer_delta("Simple answer text")
         session.unified_state.answer_dirty = False  # Already flushed
         ctrl._sessions["msg_simple"] = session
@@ -994,7 +1028,7 @@ class TestDoLinearComplete:
         assert await ctrl._do_linear_complete(session) is True
 
         # No panel operations should happen
-        assert session._panel_element_created is False
+        assert "panel" not in session._creation_stages
         # Close should be called
         assert "close" in api_calls
 
@@ -1005,9 +1039,9 @@ class TestDoLinearComplete:
         session = _make_session("msg_clean", linear=True)
         session.state = STREAMING
         session.card_id = "card_clean"
-        session._panel_element_created = True
-        session._answer_element_created = True
-        session._loading_hint_removed = True
+        session._creation_stages.add("panel")
+        session._creation_stages.add("answer")
+        session._creation_stages.add("hint_removed")
         # No dirty data
         ctrl._sessions["msg_clean"] = session
 
@@ -1036,9 +1070,9 @@ class TestDoLinearComplete:
         session = _make_session("msg_summary", linear=True)
         session.state = STREAMING
         session.card_id = "card_summary"
-        session._panel_element_created = True
-        session._answer_element_created = True
-        session._loading_hint_removed = True
+        session._creation_stages.add("panel")
+        session._creation_stages.add("answer")
+        session._creation_stages.add("hint_removed")
         session.unified_state.on_answer_delta("Hello, this is the answer text")
         # Clear dirty flag (simulates already-flushed content)
         session.unified_state.answer_dirty = False
@@ -1090,9 +1124,9 @@ class TestDoLinearComplete:
         session = _make_session("msg_double_close", linear=True)
         session.state = STREAMING
         session.card_id = "card_double"
-        session._panel_element_created = True
-        session._answer_element_created = True
-        session._loading_hint_removed = True
+        session._creation_stages.add("panel")
+        session._creation_stages.add("answer")
+        session._creation_stages.add("hint_removed")
         ctrl._sessions["msg_double_close"] = session
 
         result = await ctrl._do_linear_complete(session)
@@ -1112,14 +1146,19 @@ class TestDoLinearComplete:
 
 
 class TestLinearOnThinkingNativeReasoningDedup:
-    """Bug fix: _linear_on_thinking must skip reasoning when _native_reasoning_active.
+    """Bug fix: _linear_on_thinking must skip reasoning when already tracked.
 
     When the model provides a dedicated reasoning_callback (e.g. DeepSeek, QwQ),
     reasoning text arrives incrementally via on_reasoning → on_reasoning_delta.
     The interim_assistant_callback also delivers the same reasoning text in
-    accumulated form.  Without the _native_reasoning_active guard, appending
-    the accumulated text again via on_reasoning_delta would double every token
-    in the collapsible panel ("TheThe user user is is saying saying…").
+    accumulated form.  Without a dedup guard, appending the accumulated text
+    again via on_reasoning_delta would double every token in the collapsible
+    panel ("TheThe user user is is saying saying…").
+
+    v1.1.0 (Task 1.3): The ``_native_reasoning_active`` flag was removed.
+    Dedup now keys off ``bool(state._current_reasoning)`` — if any reasoning
+    text has already been tracked (via the native reasoning_callback),
+    ``_linear_on_thinking`` skips the ``on_reasoning_delta`` call entirely.
     """
 
     def _make_dedup_session(self) -> tuple:
@@ -1137,29 +1176,31 @@ class TestLinearOnThinkingNativeReasoningDedup:
         ctrl._sessions["msg_dedup"] = session
         return ctrl, session
 
-    def test_no_dedup_when_native_reasoning_inactive(self) -> None:
-        """When _native_reasoning_active is False, reasoning IS processed."""
+    def test_no_dedup_when_no_reasoning_tracked(self) -> None:
+        """When no reasoning has been tracked yet, reasoning IS processed."""
         ctrl, session = self._make_dedup_session()
-        assert session.unified_state._native_reasoning_active is False
+        # No native reasoning tracked yet → guard lets reasoning through
+        assert session.unified_state.has_current_reasoning is False
+        assert bool(session.unified_state._current_reasoning) is False
 
         # Use Reasoning:\n prefix so split_reasoning_text classifies
         # this as reasoning_text, not answer_text
         with patch.object(ctrl, "_schedule_linear_flush"):
             ctrl._linear_on_thinking(session, "Reasoning:\nThe user is asking about Python")
 
-        # Reasoning should have been processed (no native reasoning active)
+        # Reasoning should have been processed (no native reasoning tracked yet)
         assert session.unified_state.current_reasoning_text == "The user is asking about Python"
 
-    def test_dedup_when_native_reasoning_active(self) -> None:
-        """When _native_reasoning_active is True, reasoning is NOT re-appended."""
+    def test_dedup_when_reasoning_already_tracked(self) -> None:
+        """When reasoning has already been tracked, reasoning is NOT re-appended."""
         ctrl, session = self._make_dedup_session()
 
-        # Simulate reasoning_callback delivering text first
+        # Simulate reasoning_callback delivering text first — this populates
+        # _current_reasoning, which _linear_on_thinking now uses as the dedup
+        # guard (replacing the removed _native_reasoning_active flag).
         session.unified_state.on_reasoning_delta("The user is asking about Python")
         assert session.unified_state.current_reasoning_text == "The user is asking about Python"
-
-        # Mark native reasoning as active (set by on_reasoning)
-        session.unified_state._native_reasoning_active = True
+        assert session.unified_state.has_current_reasoning is True
 
         # Now interim_assistant_callback delivers the same accumulated text
         # Use Reasoning:\n prefix so split_reasoning_text classifies
@@ -1172,17 +1213,18 @@ class TestLinearOnThinkingNativeReasoningDedup:
         assert "TheThe" not in session.unified_state.current_reasoning_text
 
     def test_dedup_with_mixed_reasoning_and_answer(self) -> None:
-        """When native reasoning is active, only answer part is processed from thinking."""
+        """When reasoning is already tracked, only answer part is processed from thinking."""
         ctrl, session = self._make_dedup_session()
 
-        # Simulate reasoning_callback delivering text
+        # Simulate reasoning_callback delivering text — populates
+        # _current_reasoning, which serves as the dedup guard.
         session.unified_state.on_reasoning_delta("Let me think about this")
-        session.unified_state._native_reasoning_active = True
+        assert session.unified_state.has_current_reasoning is True
 
         # interim_assistant_callback delivers plain text (no Reasoning: prefix),
         # which split_reasoning_text classifies as answer_text.
-        # When _native_reasoning_active is True, reasoning part is skipped
-        # but answer part should still be processed (if no streamed answer yet)
+        # When reasoning is already tracked, the reasoning part is skipped
+        # but the answer part should still be processed (if no streamed answer yet)
         with patch.object(ctrl, "_schedule_linear_flush"):
             ctrl._linear_on_thinking(session, "Here is my answer")
 

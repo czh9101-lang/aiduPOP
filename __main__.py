@@ -193,6 +193,8 @@ def main() -> int:
         return _cmd_cleanup()
     if cmd == "python":
         return _cmd_python()
+    if cmd == "doctor":
+        return _cmd_doctor()
 
     print(f"Unknown command: {cmd}")
     _print_usage()
@@ -206,6 +208,7 @@ def _print_usage() -> None:
     print("Commands:")
     print("  status     Show current configuration and credentials status")
     print("  verify     Verify environment compatibility")
+    print("  doctor     Full diagnostic: version, config, credentials, patch status, log path")
     print("  cleanup    Remove plugin-injected config from config.yaml (run after uninstall)")
     print("  python     Print the auto-detected Hermes Python interpreter path")
     print()
@@ -276,6 +279,128 @@ def _cmd_cleanup() -> int:
         print(f"Error: Cannot import hermes_lark_streaming: {e}")
         print("Please ensure the plugin is installed correctly.")
         return 1
+    return 0
+
+
+def _cmd_doctor() -> int:
+    """Full diagnostic check — version, config, credentials, patch status, logs.
+
+    This is the primary troubleshooting command. Run it when:
+    - Cards are not appearing
+    - After a Hermes upgrade to check patch compatibility
+    - To collect info for a bug report
+
+    Exit codes:
+      0 — all checks passed
+      1 — one or more checks failed (details printed above)
+      2 — cannot import plugin (installation broken)
+    """
+    import os
+    import sys
+
+    print("=" * 60)
+    print("  hermes-lark-streaming doctor")
+    print("=" * 60)
+    print()
+
+    # ── 1. Plugin version ──
+    try:
+        from hermes_lark_streaming import __version__
+        print(f"[1/6] Plugin version:    {__version__}")
+    except ImportError as e:
+        print(f"[1/6] Plugin version:    IMPORT FAILED — {e}")
+        print("      The plugin is not installed correctly.")
+        return 2
+
+    # ── 2. Python & Hermes path ──
+    print(f"[2/6] Python:             {sys.version.split()[0]}")
+    hermes_home = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+    print(f"      HERMES_HOME:        {hermes_home}")
+    hermes_python = _find_hermes_python()
+    print(f"      Hermes Python:      {hermes_python or '(not found)'}")
+
+    # ── 3. Config ──
+    print()
+    try:
+        from hermes_lark_streaming.config import Config
+        cfg = Config()
+        print(f"[3/6] Configuration:")
+        print(f"      enabled:            {cfg.enabled}")
+        print(f"      linear:             {cfg.linear}")
+        print(f"      gateway_cards:      {cfg.gateway_cards}")
+        print(f"      inject_time:        {cfg.inject_time}")
+        print(f"      flush_interval_ms:  {cfg.flush_interval_ms}")
+        print(f"      card_ttl_sec:       {cfg.card_duration_sec}")
+        print(f"      print_strategy:     {cfg.print_strategy}")
+        print(f"      panel_expanded:     {cfg.panel_expanded}")
+        print(f"      streaming_panel_expanded: {cfg.streaming_panel_expanded}")
+        print(f"      max_tool_steps:     {cfg.max_tool_steps}")
+        print(f"      max_reasoning_rounds: {cfg.max_reasoning_rounds}")
+        print(f"      footer_fields:      {cfg.footer_fields}")
+        print(f"      footer_show_label:  {cfg.footer_show_label}")
+    except Exception as e:
+        print(f"[3/6] Configuration:     FAILED — {e}")
+        return 1
+
+    # ── 4. Feishu credentials ──
+    print()
+    has_env_creds = bool(os.environ.get("FEISHU_APP_ID") and os.environ.get("FEISHU_APP_SECRET"))
+    has_cfg_creds = bool(getattr(cfg, "feishu_app_id", None) and getattr(cfg, "feishu_app_secret", None))
+    env_file = Path(hermes_home) / ".env"
+    has_env_file = env_file.exists()
+    print(f"[4/6] Feishu credentials:")
+    print(f"      env vars:           {'configured' if has_env_creds else 'MISSING'}")
+    print(f"      config.yaml:        {'configured' if has_cfg_creds else 'not set'}")
+    print(f"      ~/.hermes/.env:     {'exists' if has_env_file else 'not found'}")
+    if not (has_env_creds or has_cfg_creds):
+        print("      ⚠ WARNING: No Feishu credentials found. Cards will NOT work.")
+        print("        Set FEISHU_APP_ID and FEISHU_APP_SECRET environment variables,")
+        print("        or add them to ~/.hermes/.env, or configure in config.yaml.")
+
+    # ── 5. Patch status ──
+    print()
+    try:
+        from hermes_lark_streaming.patching import _patch_status
+        if _patch_status:
+            print(f"[5/6] Patch status (from last gateway start):")
+            for key, val in _patch_status.items():
+                if key in ("version", "hermes_layout"):
+                    continue
+                status_icon = "✓" if val == "✓" or val == "applied" else ("⚠" if "pending" in str(val) else "✗")
+                print(f"      {status_icon} {key}: {val}")
+            layout = _patch_status.get("hermes_layout", {})
+            print(f"      Hermes layout: {layout}")
+        else:
+            print(f"[5/6] Patch status:      (not available — gateway not started or patches not applied)")
+            print("      Run this command from within the Hermes gateway process,")
+            print("      or check agent.log for 'HLS: patch summary' line.")
+    except Exception as e:
+        print(f"[5/6] Patch status:      FAILED — {e}")
+
+    # ── 6. Log file ──
+    print()
+    log_dir = Path(hermes_home) / "logs"
+    agent_log = log_dir / "agent.log"
+    print(f"[6/6] Logs:")
+    print(f"      Log directory:      {log_dir}")
+    print(f"      agent.log:          {'exists' if agent_log.exists() else 'not found'}")
+    if agent_log.exists():
+        try:
+            size = agent_log.stat().st_size
+            print(f"      agent.log size:     {size:,} bytes")
+        except Exception:
+            pass  # stat() failed, non-critical
+    print()
+    print("To check plugin logs:")
+    print(f"  grep 'HLS:' {agent_log} | tail -100")
+    print()
+    print("To check for errors:")
+    print(f"  grep -E 'ERROR|WARNING' {agent_log} | tail -50")
+
+    print()
+    print("=" * 60)
+    print("  Doctor check complete.")
+    print("=" * 60)
     return 0
 
 

@@ -28,17 +28,26 @@ from __future__ import annotations
 
 import contextvars
 import functools
-import importlib
-import importlib.util
 import logging
 import sys
 import threading
 import time
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from typing import Any, Callable
 
 from .. import __version__
+
+# ── Hermes compatibility adapter (Task 3.2 + 3.3) ──────────────────
+# All Hermes internal module access is funneled through HermesCompat.
+# When Hermes upgrades, only hermes_adapter.py needs to be updated.
+# The try/except mirrors the root __init__.py pattern: relative import
+# works when loaded by Hermes's plugin loader; absolute import works
+# when pytest imports this file directly (conftest pre-registers the
+# package in sys.modules).
+try:
+    from ..hermes_adapter import HermesCompat
+except ImportError:  # pragma: no cover — fallback for pytest-only path
+    from hermes_lark_streaming.hermes_adapter import HermesCompat  # type: ignore[no-redef]
 
 
 __all__ = [
@@ -52,6 +61,7 @@ __all__ = [
     '_gateway_cards',
     '_gateway_cards_lock',
     '_gw_runner_patched',
+    '_patch_status',
     '_inject_time_guard',
     # Functions
     '_get_config',
@@ -154,6 +164,12 @@ _gateway_cards_lock = threading.Lock()
 # Set to True once _apply_gateway_runner_patches() succeeds (either
 # immediately or from the delayed-poll thread).  Prevents double-patching.
 _gw_runner_patched: bool = False
+
+# ── Patch status report (v1.1.0) ────────────────────────────────────
+# Populated by apply_patches() after all patching is done.  Read by the
+# doctor CLI command (__main__.py doctor) to report which patches were
+# successfully applied and which failed/skipped.
+_patch_status: dict[str, Any] = {}
 
 # ── Thread-local re-entrancy guard for _inject_time_prefix ───────────
 # When both the module-level patch and the direct AIAgent patch are active,
@@ -260,110 +276,27 @@ def _resolve_hermes_agent_module() -> tuple[Any, Any] | None:
 
     Returns ``(conversation_loop_module, run_conversation_func)`` or
     ``None`` if the module cannot be found.
+
+    .. note::
+        As of Task 3.2/3.3, all Hermes internal access is funneled
+        through :class:`HermesCompat`. This function is preserved as a
+        backward-compat shim and simply delegates to ``HermesCompat``.
     """
-    # ── Strategy 1: sys.modules ──
-    # Hermes MUST have imported agent.conversation_loop before loading
-    # plugins (it's used by run_agent.py which gateway.run imports).
-    # If it's here, just use it — no path issues possible.
-    cl_mod = sys.modules.get("agent.conversation_loop")
-    if cl_mod is not None:
-        func = getattr(cl_mod, "run_conversation", None)
-        if func is not None:
-            _logger.info(
-                "hermes-lark-streaming: agent.conversation_loop resolved "
-                "via sys.modules (path=%s)",
-                getattr(cl_mod, "__file__", "?"),
-            )
-            return cl_mod, func
-        else:
-            _logger.warning(
-                "hermes-lark-streaming: agent.conversation_loop found in "
-                "sys.modules but has no 'run_conversation' attribute"
-            )
-
-    # ── Strategy 2: Anchor-based discovery ──
-    # Use known Hermes modules to find the repo root, then load
-    # agent/conversation_loop.py directly by file path.
-    for anchor_name in ("gateway.run", "run_agent"):
-        anchor = sys.modules.get(anchor_name)
-        if anchor is None:
-            try:
-                anchor = importlib.import_module(anchor_name)
-            except ImportError:
-                continue
-
-        anchor_file = getattr(anchor, "__file__", None)
-        if not anchor_file:
-            continue
-
-        # gateway/run.py → repo root;  run_agent.py → repo root
-        repo_root = Path(anchor_file).resolve().parent
-        if anchor_name == "gateway.run":
-            repo_root = repo_root.parent
-
-        cl_file = repo_root / "agent" / "conversation_loop.py"
-        if not cl_file.is_file():
-            _logger.debug(
-                "hermes-lark-streaming: anchor %s → %s, but %s not found",
-                anchor_name, repo_root, cl_file,
-            )
-            continue
-
-        _logger.info(
-            "hermes-lark-streaming: found conversation_loop.py via anchor "
-            "%s → %s", anchor_name, cl_file,
-        )
-
-        # Load the module directly by file path, bypassing the
-        # ``agent`` namespace entirely.
-        spec = importlib.util.spec_from_file_location(
-            "agent.conversation_loop",  # canonical name
-            str(cl_file),
-        )
-        if spec is None or spec.loader is None:
-            continue
-
-        try:
-            mod = importlib.util.module_from_spec(spec)
-            # Register in sys.modules so subsequent imports find it
-            sys.modules["agent.conversation_loop"] = mod
-            # Also ensure the parent 'agent' package can find it
-            agent_pkg = sys.modules.get("agent")
-            if agent_pkg is not None:
-                if not hasattr(agent_pkg, "conversation_loop"):
-                    agent_pkg.conversation_loop = mod  # type: ignore[attr-defined]
-            spec.loader.exec_module(mod)
-            func = getattr(mod, "run_conversation", None)
-            if func is not None:
-                _logger.info(
-                    "hermes-lark-streaming: agent.conversation_loop loaded "
-                    "via anchor-based discovery ✓",
-                )
-                return mod, func
-        except Exception as e:
-            _logger.warning(
-                "hermes-lark-streaming: anchor-based load of "
-                "agent.conversation_loop failed: %s", e,
-                exc_info=True,
-            )
-
-    # ── Strategy 3: Standard import ──
-    try:
-        from agent.conversation_loop import run_conversation as _func
-        import agent.conversation_loop as _mod
+    compat = HermesCompat()
+    if compat.has_conversation_loop:
         _logger.info(
             "hermes-lark-streaming: agent.conversation_loop resolved "
-            "via standard import",
+            "via HermesCompat (path=%s)",
+            getattr(compat.conversation_loop_module, "__file__", "?"),
         )
-        return _mod, _func
-    except (ImportError, AttributeError) as e:
-        _logger.warning(
-            "hermes-lark-streaming: agent.conversation_loop standard "
-            "import failed: %s. This is likely caused by a namespace "
-            "collision (another Python package named 'agent' shadowing "
-            "Hermes's 'agent'). Try: pip uninstall agent", e,
-        )
+        return compat.conversation_loop_module, compat.conversation_loop_func
 
+    _logger.warning(
+        "hermes-lark-streaming: agent.conversation_loop could not be "
+        "resolved by HermesCompat. This is likely caused by a namespace "
+        "collision (another Python package named 'agent' shadowing "
+        "Hermes's 'agent'). Try: pip uninstall agent"
+    )
     return None
 
 
@@ -384,39 +317,15 @@ def _detect_hermes_layout() -> dict[str, bool]:
 
     Both layouts are fully supported — the probe just tells us which
     patch strategy to prefer.
+
+    .. note::
+        As of Task 3.2/3.3, this function delegates to
+        :meth:`HermesCompat.get_layout_report`. The returned dict keys
+        match the ``HermesCompat`` property names (``has_gateway_runner``
+        rather than the legacy ``has_gateway_run``). The dict is still
+        printed verbatim by the ``doctor`` CLI command.
     """
-    layout = {
-        "has_conversation_loop": False,
-        "has_gateway_run": False,
-        "has_cron_scheduler": False,
-    }
-
-    # Use _resolve_hermes_agent_module() instead of bare import —
-    # this handles the Apple Silicon namespace collision bug.
-    resolved = _resolve_hermes_agent_module()
-    if resolved is not None:
-        layout["has_conversation_loop"] = True
-
-    try:
-        from gateway.run import GatewayRunner  # noqa: F401
-        layout["has_gateway_run"] = True
-    except (ImportError, AttributeError):
-        pass
-
-    # Cron scheduler: probe for the module-level _deliver_result function.
-    # In Hermes, _deliver_result is a module-level function in cron.scheduler,
-    # NOT a class method on Scheduler.  We check for the module directly.
-    try:
-        import cron.scheduler as _cron_probe  # noqa: F401
-        if hasattr(_cron_probe, "_deliver_result"):
-            layout["has_cron_scheduler"] = True
-    except ImportError:
-        try:
-            import gateway.cron.scheduler as _cron_probe  # noqa: F401
-            if hasattr(_cron_probe, "_deliver_result"):
-                layout["has_cron_scheduler"] = True
-        except (ImportError, AttributeError):
-            pass
+    layout = HermesCompat().get_layout_report()
 
     _logger.info(
         "hermes-lark-streaming: Hermes layout probe → %s",
@@ -445,9 +354,11 @@ def _apply_gateway_runner_patches() -> bool:
     if _gw_runner_patched:
         return True  # Already patched (e.g. immediate path succeeded)
 
-    try:
-        from gateway.run import GatewayRunner
-    except (ImportError, AttributeError):
+    # Use HermesCompat instead of a direct ``from gateway.run import GatewayRunner``.
+    # HermesCompat handles the import once, recording availability; the
+    # delayed-poll thread re-checks by constructing a fresh instance.
+    GatewayRunner = HermesCompat().gateway_runner_class
+    if GatewayRunner is None:
         return False  # Not available yet
 
     try:
@@ -509,14 +420,20 @@ def apply_patches() -> None:
 
     _logger.info("hermes-lark-streaming v%s: apply_patches() starting", __version__)
 
-    # ── Probe Hermes layout ──
-    layout = _detect_hermes_layout()
+    # ── HermesCompat: single source of truth for Hermes internals ──
+    # All Hermes internal module access (GatewayRunner, AIAgent,
+    # FeishuAdapter, cron.scheduler, agent.conversation_loop) is funneled
+    # through this one instance.  See hermes_adapter.py for the full list.
+    compat = HermesCompat()
+    # ``layout`` is kept for the doctor CLI's ``hermes_layout`` print and
+    # for parity with the legacy ``_detect_hermes_layout()`` contract.
+    layout = compat.get_layout_report()
 
     # ── Patch GatewayRunner ──
     # This is the core patch — without it, streaming cards cannot work.
     gw_patched = False
     gw_delayed = False
-    if layout["has_gateway_run"]:
+    if compat.has_gateway_runner:
         # gateway.run already loaded — patch immediately
         if _apply_gateway_runner_patches():
             gw_patched = True
@@ -564,29 +481,29 @@ def apply_patches() -> None:
     # ALL callers, not just AIAgent.
 
     _module_patch_applied = False
-    if layout["has_conversation_loop"]:
-        # Hermes v0.10+: patch the module-level function (preferred)
-        # Use _resolve_hermes_agent_module() to get the module safely,
-        # bypassing any namespace collision.
-        resolved = _resolve_hermes_agent_module()
-        if resolved is not None:
-            _cl_mod, _cl_run_conversation = resolved
-            try:
-                _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
-                _module_patch_applied = True
-                _logger.info("hermes-lark-streaming: agent.conversation_loop module patched ✓")
-            except (AttributeError, TypeError) as e:
-                _logger.warning(
-                    "hermes-lark-streaming: agent.conversation_loop found but "
-                    "patch failed (%s). Falling back to direct AIAgent patch.", e,
-                )
+    if compat.has_conversation_loop:
+        # Hermes v0.10+: patch the module-level function (preferred).
+        # HermesCompat has already resolved the module via its 3-strategy
+        # fallback (sys.modules → anchor-based → standard import) which
+        # bypasses any namespace collision.
+        _cl_mod = compat.conversation_loop_module
+        _cl_run_conversation = compat.conversation_loop_func
+        try:
+            _cl_mod.run_conversation = _wrap_run_conversation(_cl_run_conversation)
+            _module_patch_applied = True
+            _logger.info("hermes-lark-streaming: agent.conversation_loop module patched ✓")
+        except (AttributeError, TypeError) as e:
+            _logger.warning(
+                "hermes-lark-streaming: agent.conversation_loop found but "
+                "patch failed (%s). Falling back to direct AIAgent patch.", e,
+            )
 
     if not _module_patch_applied:
         # Hermes <v0.10 OR module patch failed: use direct AIAgent patch
         _logger.info(
             "hermes-lark-streaming: using direct AIAgent patch "
             "(Hermes %s conversation_loop module)",
-            "has no" if not layout["has_conversation_loop"] else "has incompatible",
+            "has no" if not compat.has_conversation_loop else "has incompatible",
         )
 
     # Always apply the direct AIAgent patch as well — it serves as:
@@ -599,23 +516,21 @@ def apply_patches() -> None:
     # Patch the module-level _deliver_result function instead of the
     # Scheduler class method.  In Hermes, _deliver_result is a standalone
     # function in cron.scheduler, not Scheduler._deliver_result.
+    # HermesCompat already probed both ``cron.scheduler`` and
+    # ``gateway.cron.scheduler`` and stored whichever resolved in
+    # ``compat.cron_scheduler_module``.
     cron_patched = False
-    if layout["has_cron_scheduler"]:
+    if compat.has_cron_scheduler:
         try:
-            import cron.scheduler as _cron_mod
+            _cron_mod = compat.cron_scheduler_module
             _cron_mod._deliver_result = _wrap_cron_deliver(_cron_mod._deliver_result)
             cron_patched = True
-            _logger.info("hermes-lark-streaming: cron scheduler patched ✓")
-        except (ImportError, AttributeError) as e:
+            _logger.info(
+                "hermes-lark-streaming: cron scheduler patched ✓ (module=%s)",
+                getattr(_cron_mod, "__name__", "?"),
+            )
+        except (AttributeError, TypeError) as e:
             _logger.debug("hermes-lark-streaming: cron.scheduler patch failed (%s)", e)
-        if not cron_patched:
-            try:
-                import gateway.cron.scheduler as _cron_mod
-                _cron_mod._deliver_result = _wrap_cron_deliver(_cron_mod._deliver_result)
-                cron_patched = True
-                _logger.info("hermes-lark-streaming: cron scheduler patched (gateway path) ✓")
-            except (ImportError, AttributeError) as e:
-                _logger.info("hermes-lark-streaming: cron scheduler not found (%s), cron cards disabled", e)
 
     # ── FeishuAdapter interception (Phase 1: gateway message cards) ──
     # Patch FeishuAdapter.send() and edit_message() to intercept ALL
@@ -623,74 +538,88 @@ def apply_patches() -> None:
     # This covers: slash commands, auth messages, errors, notifications,
     # session lifecycle, busy-ack, gateway lifecycle, etc.
     feishu_patched = False
-    try:
-        from gateway.platforms.feishu import FeishuAdapter
-
-        FeishuAdapter.send = _wrap_feishu_adapter_send(FeishuAdapter.send)
+    FeishuAdapter = compat.feishu_adapter_class
+    if FeishuAdapter is not None:
         try:
-            FeishuAdapter.edit_message = _wrap_feishu_adapter_edit(FeishuAdapter.edit_message)
-        except AttributeError:
-            _logger.debug("hermes-lark-streaming: FeishuAdapter.edit_message not found, edit interception skipped")
-        # Phase 3: Reaction → card status indicator
-        # Hermes ≥某个版本 将 add_reaction/delete_reaction 改为
-        # _add_reaction/_remove_reaction（private），需兼容两种命名
-        try:
-            FeishuAdapter.add_reaction = _wrap_feishu_adapter_add_reaction(FeishuAdapter.add_reaction)
-        except AttributeError:
+            FeishuAdapter.send = _wrap_feishu_adapter_send(FeishuAdapter.send)
             try:
-                FeishuAdapter._add_reaction = _wrap_feishu_adapter_add_reaction(FeishuAdapter._add_reaction)
+                FeishuAdapter.edit_message = _wrap_feishu_adapter_edit(FeishuAdapter.edit_message)
             except AttributeError:
-                _logger.debug("hermes-lark-streaming: FeishuAdapter.add_reaction/_add_reaction not found, reaction interception skipped")
-        try:
-            FeishuAdapter.delete_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter.delete_reaction)
-        except AttributeError:
+                _logger.debug("hermes-lark-streaming: FeishuAdapter.edit_message not found, edit interception skipped")
+            # Phase 3: Reaction → card status indicator
+            # Hermes ≥某个版本 将 add_reaction/delete_reaction 改为
+            # _add_reaction/_remove_reaction（private），需兼容两种命名
             try:
-                FeishuAdapter._remove_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter._remove_reaction)
+                FeishuAdapter.add_reaction = _wrap_feishu_adapter_add_reaction(FeishuAdapter.add_reaction)
             except AttributeError:
-                _logger.debug("hermes-lark-streaming: FeishuAdapter.delete_reaction/_remove_reaction not found, reaction interception skipped")
-        # NOTE(v0.15.4): send_image_file / send_image interceptors DELETED (2026-06-09).
-        # The v0.15.3 interception was fundamentally broken — it injected file:// URLs
-        # into session.text.on_partial() which were then stripped by
-        # _strip_invalid_image_keys(), and suppressed the original standalone
-        # send, causing images to disappear entirely.
-        # Images are now sent as standalone messages (pre-v0.15.3 behavior).
-        # The three zombie functions (_try_add_image_to_session,
-        # _wrap_feishu_adapter_send_image_file, _wrap_feishu_adapter_send_image)
-        # have been fully removed from patching/ sub-package.
+                try:
+                    FeishuAdapter._add_reaction = _wrap_feishu_adapter_add_reaction(FeishuAdapter._add_reaction)
+                except AttributeError:
+                    _logger.debug("hermes-lark-streaming: FeishuAdapter.add_reaction/_add_reaction not found, reaction interception skipped")
+            try:
+                FeishuAdapter.delete_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter.delete_reaction)
+            except AttributeError:
+                try:
+                    FeishuAdapter._remove_reaction = _wrap_feishu_adapter_delete_reaction(FeishuAdapter._remove_reaction)
+                except AttributeError:
+                    _logger.debug("hermes-lark-streaming: FeishuAdapter.delete_reaction/_remove_reaction not found, reaction interception skipped")
+            # NOTE(v0.15.4): send_image_file / send_image interceptors DELETED (2026-06-09).
+            # The v0.15.3 interception was fundamentally broken — it injected file:// URLs
+            # into session.text.on_partial() which were then stripped by
+            # _strip_invalid_image_keys(), and suppressed the original standalone
+            # send, causing images to disappear entirely.
+            # Images are now sent as standalone messages (pre-v0.15.3 behavior).
+            # The three zombie functions (_try_add_image_to_session,
+            # _wrap_feishu_adapter_send_image_file, _wrap_feishu_adapter_send_image)
+            # have been fully removed from patching/ sub-package.
 
-        # ── Clarify interactive card patches ──
-        # Patch send_clarify to render interactive CardKit cards instead of
-        # text-based numbered lists.  Patch _on_card_action_trigger to handle
-        # clarify card callbacks (dropdown select, text input).
-        clarify_patched = False
-        try:
-            FeishuAdapter.send_clarify = _wrap_feishu_adapter_send_clarify(FeishuAdapter.send_clarify)
-            clarify_patched = True
-            _logger.info("hermes-lark-streaming: FeishuAdapter.send_clarify patched ✓ (clarify interactive card)")
-        except AttributeError:
-            _logger.debug("hermes-lark-streaming: FeishuAdapter.send_clarify not found, clarify card skipped")
-        try:
-            FeishuAdapter._on_card_action_trigger = _wrap_feishu_card_action_trigger(FeishuAdapter._on_card_action_trigger)
-            _logger.info("hermes-lark-streaming: FeishuAdapter._on_card_action_trigger patched ✓ (clarify card callback)")
-        except AttributeError:
-            _logger.debug("hermes-lark-streaming: FeishuAdapter._on_card_action_trigger not found, clarify callback skipped")
+            # ── Clarify interactive card patches ──
+            # Patch send_clarify to render interactive CardKit cards instead of
+            # text-based numbered lists.  Patch _on_card_action_trigger to handle
+            # clarify card callbacks (dropdown select, text input).
+            clarify_patched = False
+            try:
+                FeishuAdapter.send_clarify = _wrap_feishu_adapter_send_clarify(FeishuAdapter.send_clarify)
+                clarify_patched = True
+                _logger.info("hermes-lark-streaming: FeishuAdapter.send_clarify patched ✓ (clarify interactive card)")
+            except AttributeError:
+                _logger.debug("hermes-lark-streaming: FeishuAdapter.send_clarify not found, clarify card skipped")
+            try:
+                FeishuAdapter._on_card_action_trigger = _wrap_feishu_card_action_trigger(FeishuAdapter._on_card_action_trigger)
+                _logger.info("hermes-lark-streaming: FeishuAdapter._on_card_action_trigger patched ✓ (clarify card callback)")
+            except AttributeError:
+                _logger.debug("hermes-lark-streaming: FeishuAdapter._on_card_action_trigger not found, clarify callback skipped")
 
-        feishu_patched = True
-        _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit/reaction/image/clarify patched ✓ (gateway message cards enabled)")
-    except (ImportError, AttributeError) as e:
-        _logger.info("hermes-lark-streaming: FeishuAdapter patch skipped (%s)", e)
+            feishu_patched = True
+            _logger.info("hermes-lark-streaming: FeishuAdapter.send/edit/reaction/image/clarify patched ✓ (gateway message cards enabled)")
+        except AttributeError as e:
+            _logger.info("hermes-lark-streaming: FeishuAdapter patch skipped (%s)", e)
+    else:
+        _logger.info("hermes-lark-streaming: FeishuAdapter not available via HermesCompat, patch skipped")
 
     # ── Summary ──
+    # v1.1.0: Record patch status in a structured dict for doctor command
+    global _patch_status
+    _patch_status = {
+        "version": __version__,
+        "gateway_runner": "✓" if gw_patched else ("pending" if gw_delayed else "✗"),
+        "conversation_loop": "✓" if _module_patch_applied else "n/a (direct AIAgent)",
+        "aiagent_direct": "applied",
+        "cron_scheduler": "✓" if cron_patched else "n/a",
+        "background_task": "✓" if gw_patched else ("pending" if gw_delayed else "n/a"),
+        "feishu_adapter": "✓" if feishu_patched else "✗",
+        "hermes_layout": layout,
+    }
     _logger.info(
-        "hermes-lark-streaming v%s: patch summary — "
-        "GatewayRunner=%s, conversation_loop=%s, AIAgent=applied, cron=%s, "
-        "background=%s, FeishuAdapter=%s",
+        "HLS: patch summary v%s — GatewayRunner=%s conversation_loop=%s "
+        "AIAgent=applied cron=%s background=%s FeishuAdapter=%s layout=%s",
         __version__,
-        "✓" if gw_patched else ("pending (delayed poll)" if gw_delayed else "✗"),
-        "✓" if _module_patch_applied else "n/a (direct AIAgent used)",
-        "✓" if cron_patched else "n/a",
-        "✓" if gw_patched else ("pending" if gw_delayed else "n/a"),  # background task patch is part of GatewayRunner
-        "✓" if feishu_patched else "✗",
+        _patch_status["gateway_runner"],
+        _patch_status["conversation_loop"],
+        _patch_status["cron_scheduler"],
+        _patch_status["background_task"],
+        _patch_status["feishu_adapter"],
+        layout,
     )
 
     # Deferred direct patch: retry AIAgent.run_conversation after Hermes
@@ -720,9 +649,16 @@ def _apply_direct_agent_patch() -> None:
     doesn't propagate to the AIAgent method's lazy import.  This function
     patches the instance method directly.
     """
-    try:
-        from run_agent import AIAgent
+    # Use HermesCompat to resolve AIAgent — keeps all Hermes internal
+    # imports in one file (Task 3.2/3.3). HermesCompat returns None
+    # silently when run_agent isn't loaded yet, matching the legacy
+    # ``except ImportError`` deferred-patch behavior.
+    AIAgent = HermesCompat().aiagent_class
+    if AIAgent is None:
+        _logger.info("hermes-lark-streaming: AIAgent.run_conversation direct patch deferred (run_agent not yet loaded)")
+        return
 
+    try:
         _orig_method = AIAgent.run_conversation
 
         # Guard: skip if already patched
@@ -765,5 +701,5 @@ def _apply_direct_agent_patch() -> None:
         _patched_run_conversation._hls_direct_patched = True
         AIAgent.run_conversation = _patched_run_conversation
         _logger.info("hermes-lark-streaming: AIAgent.run_conversation patched directly")
-    except ImportError:
-        _logger.info("hermes-lark-streaming: AIAgent.run_conversation direct patch deferred (run_agent not yet loaded)")
+    except AttributeError as e:
+        _logger.info("hermes-lark-streaming: AIAgent.run_conversation direct patch deferred (run_agent not yet loaded: %s)", e)

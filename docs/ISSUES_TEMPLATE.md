@@ -90,17 +90,20 @@
 ```bash
 # 自动检测 Hermes Python 路径：
 HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
-grep hermes_lark_streaming ~/.hermes/logs/gateway.log | tail -200
+grep hermes_lark_streaming ~/.hermes/logs/agent.log | tail -200
 ```
 
 如果有报错，也可以查看完整日志：
 
 ```bash
 # 查看最近 500 行日志
-tail -500 ~/.hermes/logs/gateway.log
+tail -500 ~/.hermes/logs/agent.log
 
-# 搜索特定错误码（如 300317、300305、300309）
-grep -E "300317|300305|300309|element_limit" ~/.hermes/logs/gateway.log | tail -50
+# 搜索特定错误码（如 300313、300317、300305、300309）
+grep -E "300313|300317|300305|300309|element_limit" ~/.hermes/logs/agent.log | tail -50
+
+# 查看 HLS: 前缀的插件日志（v1.1.0+ 统一前缀）
+grep 'HLS:' ~/.hermes/logs/agent.log | tail -100
 ```
 
 **贴日志时请注意**：

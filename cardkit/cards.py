@@ -37,7 +37,7 @@ from .md import (
 )
 
 if TYPE_CHECKING:
-    from ..state.linear import ReasoningRound, Segment
+    from ..state.linear import ReasoningRound
 
 
 
@@ -402,7 +402,7 @@ def build_complete_card(
 
 def build_linear_complete_card(
     *,
-    segments: list[Segment] | None = None,
+    segments: list[Any] | None = None,
     all_tool_steps: list[dict] | None = None,
     footer_data: dict | None = None,
     is_error: bool = False,
@@ -427,8 +427,9 @@ def build_linear_complete_card(
     Supports two code paths:
 
     **Legacy path** (``segments`` provided):
-        Iterates over Segment objects to build the card — used by the
-        old segment-based LinearState.
+        Iterates over legacy segment-like objects to build the card — used
+        by the old segment-based LinearState (now removed).  Kept for
+        backward compatibility with tests and any external callers.
 
     **Unified path** (``reasoning_rounds`` provided):
         Uses ``build_unified_panel()`` to render all reasoning rounds

@@ -38,14 +38,10 @@ from hermes_lark_streaming.cardkit.md import (
     _strip_invalid_image_keys,
     optimize_markdown_style,
 )
-import warnings
 
 import pytest
 
 from hermes_lark_streaming.state.linear import ReasoningRound
-
-# Segment is deprecated; suppress warnings in tests that still use the legacy path
-from hermes_lark_streaming.state.linear import Segment as _Segment  # noqa: F401
 
 # --- Markdown 优化 ---
 
@@ -651,20 +647,29 @@ class TestBuildCompleteCard:
 # --- 线性完成态卡片 ---
 
 
-def _seg(seg_type: str, text: str = "", **kwargs: int | float) -> _Segment:
-    """创建测试用 Segment mock (deprecated — for legacy build_linear_complete_card path)."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        seg = _Segment(seg_type, f"{seg_type}_0")
-    seg.text = text
+def _seg(seg_type: str, text: str = "", **kwargs: int | float):
+    """Create a Segment-like mock for the legacy ``build_linear_complete_card`` path.
+
+    v1.1.0: the real ``Segment`` class was removed (the linear state now
+    uses ``ReasoningRound`` + ``UnifiedLinearState``).  The legacy segment
+    path in ``build_linear_complete_card`` still accepts any duck-typed
+    object exposing the attributes accessed below, so we build a
+    ``SimpleNamespace`` here instead of importing the removed class.
+    """
+    from types import SimpleNamespace
+    seg = SimpleNamespace(
+        type=seg_type,
+        el_id=f"{seg_type}_0",
+        text=text,
+        tool_offset=int(kwargs.get("tool_offset", 0)),
+        tool_end_offset=int(kwargs.get("tool_end_offset", 0)),
+        elapsed_ms=float(kwargs.get("elapsed_ms", 0.0)),
+        start_time=float(kwargs.get("start_time", 0.0)),
+        created=True,
+        dirty=False,
+    )
     if seg_type == "reasoning":
         seg.text_el_id = f"{seg_type}_0_text"
-    seg.tool_offset = int(kwargs.get("tool_offset", 0))
-    seg.tool_end_offset = int(kwargs.get("tool_end_offset", 0))
-    seg.elapsed_ms = float(kwargs.get("elapsed_ms", 0.0))
-    seg.start_time = float(kwargs.get("start_time", 0.0))
-    seg.created = True
-    seg.dirty = False
     return seg
 
 

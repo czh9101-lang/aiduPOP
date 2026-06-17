@@ -14,9 +14,8 @@ from .mixin import (  # noqa: F401
     COMPLETED,
     CREATION_FAILED,
     TERMINATED,
-    FAILED,
     ABORTED,
     _TERMINAL,
     ControllerMixin,
 )
-from .linear_mixin import UnifiedControllerMixin, LinearControllerMixin  # noqa: F401
+from .linear_mixin import UnifiedControllerMixin  # noqa: F401

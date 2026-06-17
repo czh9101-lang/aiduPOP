@@ -12,18 +12,11 @@ limit. ``UnifiedLinearState`` collapses all reasoning rounds and tool calls
 into **one** unified collapsible panel (1 element) plus **one** streaming
 element for the answer — at most 2 top-level elements regardless of
 conversation length.
-
-Backward compatibility
----------------------
-The old ``Segment`` and ``LinearState`` names are re-exported as deprecated
-aliases pointing to ``ReasoningRound`` and ``UnifiedLinearState`` respectively.
-They will be removed in a future release; migrate all call-sites.
 """
 
 from __future__ import annotations
 
 import time
-import warnings
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +112,6 @@ class UnifiedLinearState:
         "bg_review_panel_id",
         "_panel_events",
         "_tool_count",
-        "_native_reasoning_active",
     )
 
     def __init__(self) -> None:
@@ -156,15 +148,6 @@ class UnifiedLinearState:
         self._panel_events: list[tuple[str, int]] = []
         self._tool_count: int = 0
 
-        # ── Native reasoning dedup ──
-        # When the model provides a dedicated reasoning_callback (e.g.
-        # DeepSeek, QwQ), reasoning text arrives incrementally via
-        # on_reasoning.  The interim_assistant_callback also delivers the
-        # same reasoning text in accumulated form.  Without this flag,
-        # _linear_on_thinking would append the same text again via
-        # on_reasoning_delta, causing doubled content in the panel.
-        self._native_reasoning_active: bool = False
-
     # ------------------------------------------------------------------
     # Event handlers
     # ------------------------------------------------------------------
@@ -174,24 +157,24 @@ class UnifiedLinearState:
         import logging as _logging
         _diag_logger = _logging.getLogger("hermes_lark_streaming")
         _diag_logger.debug(
-            "HLS_DIAG: on_reasoning_delta text=%r current_len=%d "
-            "rounds=%d _native_reasoning_active=%s",
+            "HLS: on_reasoning_delta text=%r current_len=%d rounds=%d",
             text[:40] if text else "",
             len(self._current_reasoning),
             len(self.reasoning_rounds),
-            self._native_reasoning_active,
         )
         # Post-stream dedup: if reasoning was already delivered incrementally
-        # and the incoming text looks like the full accumulated text, skip it.
+        # (i.e. _current_reasoning is non-empty) and the incoming text looks
+        # like the full accumulated text, skip it.  This replaces the old
+        # _native_reasoning_active flag with a simple "has any reasoning
+        # been tracked yet?" check (len(self._current_reasoning) > 0).
         if (
-            self._native_reasoning_active
-            and self._current_reasoning
+            self._current_reasoning
             and len(text) >= len(self._current_reasoning)
             and text[:min(30, len(self._current_reasoning))]
             == self._current_reasoning[:min(30, len(self._current_reasoning))]
         ):
             _diag_logger.debug(
-                "HLS_FIX: on_reasoning_delta skips post-stream duplicate "
+                "HLS: on_reasoning_delta skips post-stream duplicate "
                 "text_len=%d current_len=%d",
                 len(text), len(self._current_reasoning),
             )
@@ -325,49 +308,3 @@ class UnifiedLinearState:
         if self._current_reasoning:
             parts.append("reasoning=active")
         return f"UnifiedLinearState({', '.join(parts)})"
-
-
-# ---------------------------------------------------------------------------
-# Deprecated backward-compatible aliases
-# ---------------------------------------------------------------------------
-# These exist solely so that existing imports (tests, sibling modules) do not
-# break immediately.  They will be removed in a future release.
-
-class _DeprecatedSegmentAlias:
-    """Stub that mimics the old Segment constructor signature for import compat.
-
-    DEPRECATED: Use :class:`ReasoningRound` instead.  This class exists only
-    to prevent ``ImportError`` in code that still references ``Segment``.
-    """
-
-    __slots__ = (
-        "type", "el_id", "created", "dirty", "element_estimate",
-        "text", "text_el_id", "tool_offset", "tool_end_offset",
-        "start_time", "elapsed_ms", "reasoning_finalized",
-    )
-
-    def __init__(self, seg_type: str, el_id: str) -> None:  # noqa: D401
-        """DEPRECATED — use ReasoningRound instead."""
-        warnings.warn(
-            "Segment is deprecated; use ReasoningRound instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.type = seg_type
-        self.el_id = el_id
-        self.created = False
-        self.dirty = True
-        self.element_estimate: int = 0
-        self.text: str = ""
-        self.text_el_id: str = ""
-        self.tool_offset: int = 0
-        self.tool_end_offset: int = 0
-        self.start_time: float = 0.0
-        self.elapsed_ms: float = 0.0
-        self.reasoning_finalized: bool = False
-
-
-# Public aliases — importable as ``from .linear import Segment, LinearState``.
-# Both emit DeprecationWarning on first use.
-Segment = _DeprecatedSegmentAlias  # DEPRECATED: use ReasoningRound
-LinearState = UnifiedLinearState   # DEPRECATED: use UnifiedLinearState

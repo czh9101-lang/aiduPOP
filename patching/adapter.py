@@ -144,7 +144,7 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                                 except (ImportError, AttributeError):
                                     return None
                     except Exception:
-                        pass
+                        _logger.debug("HLS: suppressed exception", exc_info=True)
                     # Agent still running, card not yet sent — don't interfere
                     return await orig_send(self_feishu, chat_id, content, reply_to=reply_to, metadata=metadata, **kwargs)
 
@@ -178,7 +178,7 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                                 from .hooks import on_message_aborted
                                 on_message_aborted(message_id=_sess.message_id)
                             except Exception:
-                                pass
+                                _logger.debug("HLS: suppressed exception", exc_info=True)
                             # Suppress the "⚡ 已停止" gateway card —
                             # the streaming card will show the stopped state.
                             try:
@@ -187,8 +187,7 @@ def _wrap_feishu_adapter_send(orig_send: Callable) -> Callable:
                             except (ImportError, AttributeError):
                                 return None
             except Exception:
-                pass
-
+                _logger.debug("HLS: suppressed exception", exc_info=True)
         _logger.info(
             "gateway_send: entering gateway-internal path, chat=%s content_len=%d",
             chat_id[:12] if chat_id else "?",

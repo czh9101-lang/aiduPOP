@@ -21,8 +21,8 @@ try:
                 PLUGIN_VERSION = _line.split(":", 1)[1].strip().strip('"').strip("'")
                 break
 except Exception:
-    pass
-
+    import sys, traceback
+    traceback.print_exc(file=sys.stderr)
 # ── 从环境变量读取配置 ──
 
 FEISHU_WEBHOOK = os.environ["FEISHU_WEBHOOK"]
@@ -166,8 +166,8 @@ try:
             if line:
                 commit_lines.append(line)
 except Exception:
-    pass
-
+    import sys, traceback
+    traceback.print_exc(file=sys.stderr)
 # ── Gitee MR 合并去重 ──
 # Gitee 合并 MR 时会产生两条 commit：原始 commit 和带 "!N" 前缀的合并 commit，
 # 内容相同但 git 把它们当作两条。去掉 "!N " 前缀后内容一致的只保留一条（优先保留带前缀的）。

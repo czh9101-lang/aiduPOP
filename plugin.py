@@ -57,6 +57,7 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "footer": {
         "fields": [
             ["status", "elapsed", "model", "cost", "compression_exhausted"],
+            ["tokens", "context"],
         ],
         "show_label": False,
     },
@@ -254,6 +255,30 @@ def register(ctx: "PluginContext") -> None:
                 _logger.debug("hermes-lark-streaming v%s: event loop not running, skipping pre-warm", __version__)
     except Exception:
         _logger.debug("hermes-lark-streaming v%s: FeishuClient pre-warm skipped", __version__, exc_info=True)
+
+    # ── v1.1.0: Start monitor server (Task 3.7) ──
+    try:
+        from .monitor import start_monitor_server
+        from .config import Config
+        import asyncio as _asyncio
+
+        _monitor_cfg = Config()
+        loop = _asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(start_monitor_server(_monitor_cfg))
+        else:
+            _logger.debug("hermes-lark-streaming v%s: monitor server deferred (no event loop)", __version__)
+    except Exception:
+        _logger.debug("hermes-lark-streaming v%s: monitor server start skipped", __version__, exc_info=True)
+
+    # ── v1.1.0: Register theme cache invalidation on config reload (Task 3.5+3.6) ──
+    try:
+        from .cardkit.theme import invalidate_theme_cache
+        from .config import Config as _Cfg
+
+        _Cfg().on_reload(invalidate_theme_cache)
+    except Exception:
+        _logger.debug("hermes-lark-streaming v%s: theme cache invalidation registration skipped", __version__, exc_info=True)
 
 
 def unregister(ctx: "PluginContext") -> None:

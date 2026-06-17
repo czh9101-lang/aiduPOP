@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 1.0.7 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
+| 版本 | 1.1.0 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
 
 ---
 
@@ -93,15 +93,15 @@ Background: _run_background_task ── [Hook 1/2]
 
 **4.6 统一面板架构 (v1.0.2)**: 所有推理轮次和工具步骤放在 1 个可折叠面板中（图标 `robot_filled`），回答使用 1 个流式元素。无论对话多长，卡片始终只有 3–4 个元素。面板标题动态显示 `agent loop · N rounds · M tools · Xs`（中英文统一使用 "agent loop"）。`display.show_reasoning` 控制推理内容是否出现在面板中。`panel_events` 时间线记录事件发生顺序，面板内容按时间线交错渲染（reasoning→tool→reasoning→tool），而非全部推理后再全部工具。
 
-**4.12 静态卡片表格降级 (v1.0.7)**: Cron/Gateway 静态卡片使用 `_MAX_CRON_TABLES = 5` 表格降级阈值（飞书 Card 2.0 单卡硬限），超过 5 张表格自动降级为代码块渲染。流式卡片仍使用 `_MAX_CARD_TABLES = 20` 阈值不变。
+**4.12 静态卡片表格降级 (v1.1.0)**: Cron/Gateway 静态卡片使用 `_MAX_CRON_TABLES = 5` 表格降级阈值（飞书 Card 2.0 单卡硬限），超过 5 张表格自动降级为代码块渲染。流式卡片仍使用 `_MAX_CARD_TABLES = 20` 阈值不变。
 
-**4.13 标题颜色统一 (v1.0.7)**: 工具步骤标题去掉状态文字（Running/Succeeded/Failed），改为仅用颜色+加粗区分状态：`orange-300` 进行中、`green` 已完成、`red` 失败。推理轮次标题新增 `_build_reasoning_round_title()` 辅助函数，统一格式为 `<font color='颜色'>**加粗文字**</font>`，与工具标题对齐。
+**4.13 标题颜色统一 (v1.1.0)**: 工具步骤标题去掉状态文字（Running/Succeeded/Failed），改为仅用颜色+加粗区分状态：`orange-300` 进行中、`green` 已完成、`red` 失败。推理轮次标题新增 `_build_reasoning_round_title()` 辅助函数，统一格式为 `<font color='颜色'>**加粗文字**</font>`，与工具标题对齐。
 
-**4.14 推理内容缩进 (v1.0.7)**: 推理轮次的思考内容从 `markdown` tag 改为 `div` + `lark_md` + `margin: "0px 0px 0px 22px"`，与工具步骤的 detail/output 缩进对齐。
+**4.14 推理内容缩进 (v1.1.0)**: 推理轮次的思考内容从 `markdown` tag 改为 `div` + `lark_md` + `margin: "0px 0px 0px 22px"`，与工具步骤的 detail/output 缩进对齐。
 
-**4.15 Schema 错误详情提取 (v1.0.7)**: `FeishuAPIError` 新增 `extract_schema_detail()` 方法，从 300315 错误中提取具体非法属性信息（如 `unknown property 'icon' on 'plain_text'`），3 处 schema error 日志新增 `detail:` 字段。
+**4.15 Schema 错误详情提取 (v1.1.0)**: `FeishuAPIError` 新增 `extract_schema_detail()` 方法，从 300315 错误中提取具体非法属性信息（如 `unknown property 'icon' on 'plain_text'`），3 处 schema error 日志新增 `detail:` 字段。
 
-**4.16 并发消息 Epoch 校验 (v1.0.7)**: `on_reasoning`/`on_tool_update`/`on_answer` 三个回调入口添加 epoch 校验，防止用户快速连发多条消息时旧回调污染新卡片内容。
+**4.16 并发消息 Epoch 校验 (v1.1.0)**: `on_reasoning`/`on_tool_update`/`on_answer` 三个回调入口添加 epoch 校验，防止用户快速连发多条消息时旧回调污染新卡片内容。
 
 **4.9 统一面板超限压缩 (v1.0.6)**: 飞书卡片2.0硬性限制200个元素/组件，每个带 `tag` 属性的 JSON 对象都算1个元素（包括嵌套的 `standard_icon`、`plain_text`、`lark_md`）。当推理轮次或工具步骤过多导致元素数接近200时，`build_unified_panel` 自动裁剪超出部分，将早期项目折叠为一行提示（`⚡ 还有X轮早期推理、Y步早期操作已折叠`），确保卡片元素永不超限。配置项：`max_tool_steps`（默认20，范围1~100）和 `max_reasoning_rounds`（默认20，范围1~100）。面板标题始终显示实际总数，折叠提示仅影响面板内展示的内容。
 
@@ -504,4 +504,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-16 | Version: 1.0.7*
+*Last updated: 2026-06-17 | Version: 1.1.0*

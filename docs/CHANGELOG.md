@@ -1,3 +1,70 @@
+## v1.1.0 (2026-06-17)
+
+**重大版本：基于 roadmap.md 全面优化，涵盖阶段 0-3 共 25 个任务。**
+
+### 🔴 生产 Bug 修复
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| 🐛 Bug Fix | 300313 "not find elementID" 短回复卡片闪烁 | add_elements 后 1s 内 stream_element 返回 300313（飞书服务端元素持久化传播延迟），源码无此错误码处理，drain 8 轮全失败后 full rebuild 导致卡片闪烁 | 新增 `CARDKIT_ELEMENT_NOT_FOUND = 300313` 常量 + `is_element_not_found_error()` 判断；stream_element 内置 200ms×3 次专用重试；drain/seal 阶段 300313 时 fallback 到 `partial_update_element` 写入 answer（绕过 stream_element） |
+| ✨ Feature | stream_element 成功日志 | 生产日志 22h 内 0 次成功的 stream_element 日志，无法判断是否工作 | 新增 INFO 级 `HLS: stream_element OK` 日志，记录 card/element/len/seq |
+
+### 阶段 0：稳定性与可观测性
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| 🔧 Fix | 日志前缀混乱 | HLS_DIAG/HLS_WRAP/HLS_CALLED/HLS_FIX 四个前缀无规范，22 处散落 | 统一为 `HLS:` 前缀；诊断日志全部降为 DEBUG；WARNING 只留给功能受损 |
+| ✨ Feature | card_trace_id | 同一张卡片的日志散落不同时间点，靠 msg_id 人工串联 | CardSession 新增 `card_trace_id`（msg_id 后 6 位），关键生命周期日志统一带 trace |
+| ✨ Feature | 启动补丁应用报告 | Hermes 升级后补丁静默失效，无结构化状态 | `apply_patches()` 结束时记录 `_patch_status` 字典（6 个补丁目标 + Hermes layout） |
+| ✨ Feature | `doctor` 命令 | 用户排障需要手动跑多个命令 | `__main__.py doctor`：6 步检查（版本/Python/配置/凭据/补丁状态/日志路径） |
+| 🔧 Fix | 文档错误 | ISSUES_TEMPLATE 让用户 grep `gateway.log`（实际在 `agent.log`）；AGENT_GUIDE 配置项名写错 | 修正日志路径；配置项名对齐代码（`enabled`/`flush_interval_ms`/`card_ttl_sec` 等） |
+| 🔧 Fix | 19 处 `except Exception: pass` | 异常被静默吞掉，排查时看不到 | 替换为 `_logger.debug("HLS: suppressed exception", exc_info=True)` |
+
+### 阶段 1：去重与降复杂度
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| 🏗️ Architecture | 删除非线性 ControllerMixin 主路径 | 631 行代码几乎不用（CardKit 创建失败时直接降级到 IM 卡片） | 删除 `_do_create_card`/`_do_update_card`/`_do_tool_use_status_update`/`_do_reasoning_update`/`_do_complete`/`_do_complete_inner`（−407 行）；core.py 始终走线性路径 |
+| 🔧 Fix | 去重机制 5 层叠加 | `_hls_wrapper` + `already_streamed` + `_stream_consumed_len` + `_native_reasoning_active` + `_force_rewrap`，逻辑难追踪 | 移除 `_native_reasoning_active`（用 `bool(state._current_reasoning)` 代替）和 `_force_rewrap`（用 `_resolve_eid()` ContextVar 重解析代替）；简化 late_reasoning_wrapper（58→17 行） |
+| 🔧 Fix | 状态机 8 个布尔标志位 | `_panel_element_created`/`_answer_element_created`/`_loading_hint_removed` 等标志位组合爆炸 | 合并为 `_creation_stages: set[str]`（含 `"panel"`/`"answer"`/`"hint_removed"`），24 处机械替换 |
+| 🏗️ Architecture | 删除 backward-compat 别名 | `LinearState`/`Segment`/`linear_state`/`FAILED`/`LinearControllerMixin` 占据维护成本 | 全部删除，源码引用改为 `UnifiedLinearState`/`ReasoningRound`/`unified_state`/`CREATION_FAILED`/`UnifiedControllerMixin` |
+| ✨ Feature | 拆分 build_unified_panel | 每次 flush 重建整个 panel JSON | 拆为 `build_panel_header()` + `build_panel_children()`，支持只重建 children |
+
+### 阶段 2：性能与体验
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| ✨ Feature | 错误卡片友好化 | 错误卡片直接显示技术细节（如 `300315 unknown property 'icon'`） | 改为"AI 回复出错，请重试"+ 调试 ID + 可折叠技术详情 |
+| 🔧 Fix | 页脚默认字段 | 用户最常问"用了多少 token"但 tokens 默认不显示 | 默认页脚新增第二行 `[tokens, context]` |
+| ✨ Feature | 并发限流 | 同一 chat_id 多张活跃卡片竞争 API 调用 | `on_message_started` 时 seal 同 chat_id 的旧活跃卡片为"被新消息取代" |
+
+### 阶段 3：长期架构演进
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| 🏗️ Architecture | Hermes 适配层 | Hermes 内部接口散落在 patching/__init__.py，升级时改多处 | 新建 `hermes_adapter.py`，`HermesCompat` 类封装所有 Hermes 内部模块访问 |
+| ✨ Feature | 版本探测 + 适配 | Hermes 升级后无法自动选择正确的适配实现 | `HermesCompat._detect_version()` 探测 Hermes 版本，`_resolve_modules()` 3 层策略解析 conversation_loop |
+| ✨ Feature | 完整端到端测试框架 | 无"发消息→看卡片 JSON"全链路测试 | `tests/e2e/` 新增 MockFeishuServer + E2ETestRunner + 14 个测试用例（简单回答/推理/工具/错误处理/并发/卡片结构） |
+| ✨ Feature | 配置项运行时热更新 | 改配置要重启网关 | `Config.reload()` 清缓存 + mtime 自动检测 + `on_reload` 回调注册 |
+| ✨ Feature | 多卡片样式主题 | 卡片颜色/图标硬编码 | `cardkit/theme.py` 提供 3 个预设主题（default/dark/compact）+ 用户自定义覆盖 |
+| ✨ Feature | 监控面板 | 无实时插件健康指标 | `monitor.py` 轻量 HTTP 服务器（aiohttp），`/` HTML 仪表盘 + `/metrics` JSON + `/health` 健康检查；配置 `monitor.enabled/port/host` |
+
+### 量化改进
+
+| 指标 | v1.0.7 | v1.1.0 |
+|------|--------|--------|
+| 源代码行数（不含测试） | ~12,600 | ~13,165（+565，新增 4 个功能文件） |
+| 已知错误码覆盖 | 11（缺 300313） | 12（含 300313） |
+| 去重机制层数 | 5 | 2 |
+| 状态机布尔标志位 | 8 | 5（+1 set） |
+| `except Exception: pass` | 19 | 1（doctor 的 stat 调用） |
+| 处理飞书错误码的文件数 | 5 | 集中到 feishu/client.py |
+| Monkey patch 目标数 | 8+（散落） | 8+（集中到 HermesCompat） |
+| 端到端测试 | 0 | 14 个用例 |
+| 新增功能文件 | — | hermes_adapter.py, monitor.py, cardkit/theme.py, tests/e2e/ |
+
+---
+
 ## v1.0.7 (2026-06-16)
 
 | 类型 | 问题/功能 | 原因 | 修复/说明 |

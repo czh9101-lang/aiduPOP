@@ -17,14 +17,13 @@ from concurrent.futures import Future as ConcurrentFuture
 from typing import TYPE_CHECKING, Any
 
 from ..config import Config
-from .linear_mixin import LinearControllerMixin
+from .linear_mixin import UnifiedControllerMixin
 from .mixin import (
     _TERMINAL,
     ABORTED,
     COMPLETED,
     COMPLETING,
     CREATION_FAILED,
-    FAILED,
     IDLE,
     TERMINATED,
     ControllerMixin,
@@ -34,7 +33,7 @@ from ..feishu import (
     FeishuClient,
     FeishuClientConfig,
 )
-from ..state.text import TextState, split_reasoning_text, strip_reasoning_tags
+from ..state.text import TextState, strip_reasoning_tags
 from ..state.tooluse import ToolUseTracker
 
 _logger = logging.getLogger("hermes_lark_streaming")
@@ -43,7 +42,7 @@ _logger = logging.getLogger("hermes_lark_streaming")
 from ..state.session import CardSession  # noqa: F401 — re-exported for backward compatibility
 
 
-class StreamCardController(ControllerMixin, LinearControllerMixin):
+class StreamCardController(ControllerMixin, UnifiedControllerMixin):
     """流式卡片控制器 — 管理多条消息的卡片生命周期."""
 
     def __init__(self) -> None:
@@ -134,32 +133,70 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
         chat_id: str,
         anchor_id: str | None = None,
     ) -> None:
-        """消息处理开始 — 创建会话 + 发占位卡片."""
+        """消息处理开始 — 创建会话 + 发占位卡片.
+
+        v1.1.0 (Task 2.7): Concurrency limiting — when a new message arrives
+        in the same chat_id while an old card is still active (streaming/creating),
+        the old card is immediately sealed as "interrupted by new message"
+        before the new session is created. This prevents two active cards
+        in the same chat competing for API calls.
+        """
         if not self.enabled:
             return
         if not message_id:
-            _logger.warning("on_message_started: missing message_id, chat=%s", chat_id[:12])
+            _logger.warning("HLS: on_message_started missing message_id chat=%s", chat_id[:12])
             return
         if message_id in self._sessions:
             return
 
         self._prune_stale_sessions()
 
+        # ── v1.1.0 Concurrency limiting (Task 2.7) ──
+        # Seal any active (non-terminal) session in the same chat_id
+        # before creating the new one. This prevents resource contention
+        # and ensures the user only sees one active card at a time.
+        for existing_msg_id, existing_session in list(self._sessions.items()):
+            if existing_session.chat_id != chat_id:
+                continue
+            if existing_session.is_terminal_phase:
+                continue
+            if existing_msg_id == message_id:
+                continue
+            _logger.info(
+                "HLS: concurrency limit — sealing old active card "
+                "msg=%s trace=%s chat=%s (new msg=%s arriving)",
+                existing_msg_id[:12],
+                existing_session.card_trace_id,
+                chat_id[:12],
+                message_id[:12],
+            )
+            # Fire interrupt hook to seal the old card
+            try:
+                self.on_message_interrupted(
+                    message_id=existing_msg_id,
+                    new_message_id=message_id,
+                    chat_id=chat_id,
+                    anchor_id=anchor_id,
+                )
+            except Exception:
+                _logger.debug("HLS: concurrency seal failed", exc_info=True)
+
         loop = self._get_loop()
         if loop is None:
-            _logger.warning("no event loop available, skipping: msg=%s", (message_id or "?")[:12])
+            _logger.warning("HLS: no event loop, skipping msg=%s", (message_id or "?")[:12])
             return
         session = CardSession(message_id, chat_id, loop)
         self._sessions[message_id] = session
         if anchor_id and anchor_id != message_id:
             session.anchor_id = anchor_id
             self._sessions[anchor_id] = session
-        _logger.info("session created: msg=%s chat=%s anchor=%s", (message_id or "?")[:12], chat_id[:12], (anchor_id or "")[:12])
+        _logger.info("HLS: session created msg=%s trace=%s chat=%s anchor=%s", (message_id or "?")[:12], session.card_trace_id, chat_id[:12], (anchor_id or "")[:12])
 
-        if self._cfg.linear:
-            self._fire_and_forget(self._do_create_linear_card(session), loop)
-        else:
-            self._fire_and_forget(self._do_create_card(session), loop)
+        # v1.1.0 (Task 1.1+1.2): The non-linear _do_create_card path was
+        # removed — linear is the only creation path now. When CardKit v2
+        # creation fails, _do_create_linear_card falls back directly to
+        # build_im_fallback_card (NOT to the legacy segmented v1 cards).
+        self._fire_and_forget(self._do_create_linear_card(session), loop)
 
     def on_thinking(self, *, message_id: str, text: str) -> None:
         """思考内容增量."""
@@ -173,30 +210,14 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             self._linear_on_thinking(session, text)
             return
 
-        split = split_reasoning_text(text)
-
-        if split.get("reasoning_text") and not split.get("answer_text"):
-            session.reasoning_text = split["reasoning_text"] or ""
-            session.reasoning_dirty = True
-            if not session.reasoning_start:
-                session.reasoning_start = time.time()
-        elif split.get("answer_text"):
-            if split.get("reasoning_text"):
-                session.reasoning_text = split["reasoning_text"] or ""
-                session.reasoning_dirty = True
-                if not session.reasoning_start:
-                    session.reasoning_start = time.time()
-            # ── Dedup: skip answer text already delivered via stream_delta_callback ──
-            # When streaming is active, answer text arrives via on_answer
-            # (from stream_delta_callback). The interim_assistant_callback also
-            # delivers the same text. Appending it here would duplicate because
-            # session.text.on_partial() appends.
-            # Only push answer text when no streamed answer exists yet
-            # (non-streaming fallback where stream_delta_callback is absent).
-            if not session.text.accumulated:
-                session.text.on_partial(split["answer_text"] or "")
-
-        self._schedule_card_update(session)
+        # v1.1.0 (Task 1.1+1.2): non-linear thinking path was removed.
+        # All sessions are created via _do_create_linear_card, so this
+        # branch should never execute — log a safety-net warning and bail.
+        _logger.warning(
+            "on_thinking: non-linear session reached dead code (linear path "
+            "removed in v1.1.0), skipping msg=%s",
+            (message_id or "?")[:12],
+        )
 
     def on_reasoning(self, *, message_id: str, text: str) -> None:
         """Native model reasoning delta (incremental append)."""
@@ -217,38 +238,30 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
 
         if session.linear and session.unified_state:
             _logger.debug(
-                "HLS_DIAG: on_reasoning msg=%s text=%r "
-                "_native_reasoning_active BEFORE=%s current_reasoning_len=%d",
+                "HLS: on_reasoning msg=%s text=%r current_reasoning_len=%d",
                 (message_id or "?")[:12],
                 text[:50] if text else "",
-                session.unified_state._native_reasoning_active,
                 len(session.unified_state._current_reasoning),
             )
             session.unified_state.on_reasoning_delta(text)
-            # Mark that native reasoning_callback is active — prevents
-            # _linear_on_thinking from appending the same reasoning text
-            # again when interim_assistant_callback delivers accumulated text.
-            session.unified_state._native_reasoning_active = True
+            # v1.1.0 (Task 1.3): The _native_reasoning_active flag was
+            # removed.  _linear_on_thinking now uses
+            # ``len(state._current_reasoning) > 0`` as the dedup guard,
+            # which is updated automatically by on_reasoning_delta above.
             _logger.debug(
-                "HLS_DIAG: on_reasoning _native_reasoning_active SET=True msg=%s "
-                "current_reasoning_len=%d",
+                "HLS: on_reasoning delta applied msg=%s current_reasoning_len=%d",
                 (message_id or "?")[:12],
                 len(session.unified_state._current_reasoning),
             )
             self._schedule_linear_flush(session)
             return
 
-        if not session.reasoning_start:
-            session.reasoning_start = time.time()
-            _logger.info("reasoning started: msg=%s", (message_id or "?")[:12])
-
-        session.reasoning_text += text
-        session.reasoning_dirty = True
-
-        if session.use_cardkit and session.card_id:
-            self._schedule_reasoning_update(session)
-        else:
-            self._schedule_card_update(session)
+        # v1.1.0 (Task 1.1+1.2): non-linear reasoning path was removed.
+        _logger.warning(
+            "on_reasoning: non-linear session reached dead code (linear path "
+            "removed in v1.1.0), skipping msg=%s",
+            (message_id or "?")[:12],
+        )
 
     def on_tool_update(
         self,
@@ -287,10 +300,12 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             self._schedule_linear_flush(session)
             return
 
-        if session.use_cardkit and session.card_id:
-            self._schedule_tool_use_status_update(session)
-        else:
-            self._schedule_card_update(session)
+        # v1.1.0 (Task 1.1+1.2): non-linear tool-update path was removed.
+        _logger.warning(
+            "on_tool_update: non-linear session reached dead code (linear path "
+            "removed in v1.1.0), skipping msg=%s",
+            (message_id or "?")[:12],
+        )
 
     def on_answer(self, *, message_id: str, text: str) -> None:
         """答案文本增量（流式）."""
@@ -322,18 +337,12 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                 self._schedule_linear_flush(session)
             return
 
-        split = split_reasoning_text(text)
-        if split.get("reasoning_text"):
-            session.reasoning_text = split["reasoning_text"] or ""
-            if not session.reasoning_start:
-                session.reasoning_start = time.time()
-
-        answer_text = split.get("answer_text") or strip_reasoning_tags(text)
-        if not answer_text:
-            return
-
-        session.text.on_partial(answer_text)
-        self._schedule_card_update(session)
+        # v1.1.0 (Task 1.1+1.2): non-linear answer path was removed.
+        _logger.warning(
+            "on_answer: non-linear session reached dead code (linear path "
+            "removed in v1.1.0), skipping msg=%s",
+            (message_id or "?")[:12],
+        )
 
     def on_aborted(self, *, message_id: str) -> None:
         """用户 /stop 导致消息被中断.
@@ -471,10 +480,8 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
                     chat_id[:12],
                     (reply_anchor_id or new_message_id)[:12],
                 )
-                if self._cfg.linear:
-                    self._fire_and_forget(self._do_create_linear_card(session), loop)
-                else:
-                    self._fire_and_forget(self._do_create_card(session), loop)
+                # v1.1.0 (Task 1.1+1.2): linear is the only creation path now.
+                self._fire_and_forget(self._do_create_linear_card(session), loop)
 
         self._interrupt_map[old_message_id] = new_message_id
         for key, val in list(self._interrupt_map.items()):
@@ -744,30 +751,6 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             except Exception:
                 _logger.debug("background review sender failed", exc_info=True)
 
-    def _schedule_card_update(self, session: CardSession) -> None:
-        if session.state == IDLE or session.is_terminal_phase or session.state == COMPLETING:
-            return
-        if session.guard.should_skip("_schedule_card_update"):
-            return
-
-        session.flush.schedule_update(lambda: self._do_update_card(session))
-
-    def _schedule_tool_use_status_update(self, session: CardSession) -> None:
-        if not session.use_cardkit or not session.card_id:
-            return
-        now = time.time()
-        if now - session.last_tool_use_update < 1.5:
-            return
-        session.last_tool_use_update = now
-        session.flush.schedule_update(lambda: self._do_tool_use_status_update(session))
-
-    def _schedule_reasoning_update(self, session: CardSession) -> None:
-        if not session.use_cardkit or not session.card_id:
-            return
-        if not session.reasoning_dirty:
-            return
-        session.flush.schedule_update(lambda: self._do_reasoning_update(session))
-
     def _cleanup(self, message_id: str) -> None:
         session = self._sessions.pop(message_id, None)
         if session is None:
@@ -798,16 +781,30 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
     def _complete_session(self, session: CardSession) -> None:
         """根据 session 线性/非线性选择完成路径.
 
+        v1.1.0 (Task 1.1+1.2): The non-linear ``_do_complete`` path was
+        removed. Linear is now the only completion path; the previous
+        ``else`` branch that dispatched to ``_do_complete_with_fallback``
+        is gone. ``_do_complete_with_fallback`` is retained as a thin
+        backward-compatibility shim that routes to the linear completer.
+
         Note: We intentionally do NOT call session.flush.mark_completed() here.
         That call cancels any pending flush timer, which would drop the
         last chunk of answer text that hasn't been flushed yet.  Instead,
-        the completion methods (_do_linear_complete / _do_complete) handle
-        mark_completed() themselves after draining remaining dirty data.
+        the completion method (_do_linear_complete) handles
+        mark_completed() itself after draining remaining dirty data.
         """
         if session.linear and session.unified_state:
             self._fire_and_forget(self._do_linear_complete_with_fallback(session), session._loop)
         else:
-            self._fire_and_forget(self._do_complete_with_fallback(session), session._loop)
+            # Safety net: a non-linear session should never reach here
+            # after Task 1.1+1.2, but if it does, route to the linear
+            # path so the card still completes (rather than deadlocking).
+            _logger.warning(
+                "_complete_session: non-linear session dispatched to linear "
+                "completer (non-linear path removed in v1.1.0), msg=%s",
+                (session.message_id or "?")[:12],
+            )
+            self._fire_and_forget(self._do_linear_complete_with_fallback(session), session._loop)
 
     async def _do_linear_complete_with_fallback(self, session: CardSession) -> None:
         """线性模式完成，卡片不可用时回退为文本回复."""
@@ -824,9 +821,15 @@ class StreamCardController(ControllerMixin, LinearControllerMixin):
             await self._send_text_fallback(session)
 
     async def _do_complete_with_fallback(self, session: CardSession) -> None:
-        """非线性模式完成，卡片不可用时回退为文本回复."""
+        """DEPRECATED: 非线性模式完成入口 — v1.1.0 起统一走线性路径.
+
+        Kept as a backward-compatibility shim. The original non-linear
+        ``_do_complete`` was removed in Task 1.1+1.2; this method now
+        routes directly to ``_do_linear_complete`` so any remaining
+        callers (or tests) still get a working completion path.
+        """
         try:
-            result = await self._do_complete(session)
+            result = await self._do_linear_complete(session)
             if not result:
                 await self._send_text_fallback(session)
         except Exception:
