@@ -225,7 +225,14 @@ class FeishuClient:
         last_error: FeishuAPIError | None = None
         for attempt in range(max_retries + 1):
             try:
-                return await coro_factory()
+                result = await coro_factory()
+                # v1.1.0: Record successful API call
+                try:
+                    from ..monitor import record_api_call
+                    record_api_call(operation)
+                except Exception:
+                    pass
+                return result
             except FeishuAPIError as e:
                 last_error = e
                 if not _is_transient_error(e):
@@ -247,6 +254,12 @@ class FeishuClient:
         if not response.success():
             code = response.code or 0
             msg = response.msg or ""
+            # v1.1.0: Record API error metrics
+            try:
+                from ..monitor import record_api_error
+                record_api_error(code, operation)
+            except Exception:
+                pass
             raise FeishuAPIError(
                 _sanitize_message(f"{operation}: code={code}, msg={msg}"),
                 code,

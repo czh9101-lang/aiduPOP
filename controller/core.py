@@ -192,6 +192,14 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
             self._sessions[anchor_id] = session
         _logger.info("HLS: session created msg=%s trace=%s chat=%s anchor=%s", (message_id or "?")[:12], session.card_trace_id, chat_id[:12], (anchor_id or "")[:12])
 
+        # v1.1.0: Record metrics
+        try:
+            from ..monitor import record_card_created, set_active_sessions
+            record_card_created()
+            set_active_sessions(sum(1 for s in self._sessions.values() if not s.is_terminal_phase))
+        except Exception:
+            pass
+
         # v1.1.0 (Task 1.1+1.2): The non-linear _do_create_card path was
         # removed — linear is the only creation path now. When CardKit v2
         # creation fails, _do_create_linear_card falls back directly to
@@ -377,6 +385,13 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
         session.state = ABORTED
         session.flush.mark_completed()
         _logger.info("on_aborted: msg=%s state=ABORTED", (message_id or "?")[:12])
+
+        # v1.1.0: Record metrics
+        try:
+            from ..monitor import record_card_aborted
+            record_card_aborted()
+        except Exception:
+            pass
 
         self._complete_session(session)
 

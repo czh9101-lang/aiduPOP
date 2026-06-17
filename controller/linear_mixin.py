@@ -1636,6 +1636,12 @@ class UnifiedControllerMixin:
                     session.card_id[:12],
                     session.card_trace_id,
                 )
+                # v1.1.0: Record metrics
+                try:
+                    from ..monitor import record_full_rebuild
+                    record_full_rebuild()
+                except Exception:
+                    pass
             except Exception:
                 _logger.warning(
                     "full rebuild also failed: card=%s",
@@ -1646,12 +1652,24 @@ class UnifiedControllerMixin:
 
         if seal_ok:
             session.state = COMPLETED
+            # v1.1.0: Record metrics
+            try:
+                from ..monitor import record_card_completed
+                record_card_completed()
+            except Exception:
+                pass
         else:
             session.state = CREATION_FAILED
             session.enter_terminal(
                 reason=TerminalReason.CREATION_FAILED,
                 source="_do_linear_complete_seal_failed",
             )
+            # v1.1.0: Record metrics
+            try:
+                from ..monitor import record_card_failed
+                record_card_failed()
+            except Exception:
+                pass
 
         return seal_ok
 
