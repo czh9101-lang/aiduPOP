@@ -100,13 +100,13 @@ def _format_uptime(seconds: float) -> str:
 def build_monitor_card() -> dict[str, Any]:
     """Build a Feishu CardKit v2.0 card showing current metrics.
 
-    Returns a card dict suitable for FeishuClient.send_card_to_chat().
+    Uses only div + lark_md + hr tags — all confirmed v2-compatible.
+    No column_set/note/text_color (these have v2 compatibility issues).
     """
     m = get_metrics()
 
-    # ── Build metric items as a grid of cards ──
-    def _metric_item(label: str, value: Any, color: str = "default") -> dict:
-        # 飞书 v2 的 div 不支持 text_color 属性，用 lark_md 的 <font color> 实现颜色
+    # ── Build metrics text ──
+    def _fmt(label: str, value: Any, color: str = "default") -> str:
         color_map = {
             "default": None,
             "error": "red",
@@ -115,47 +115,32 @@ def build_monitor_card() -> dict[str, Any]:
         }
         font_color = color_map.get(color)
         if font_color:
-            content = f"**{label}**\n<font color='{font_color}'>{value}</font>"
-        else:
-            content = f"**{label}**\n{value}"
-        return {
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": content,
-            },
-        }
+            return f"  • **{label}**: <font color='{font_color}'>{value}</font>"
+        return f"  • **{label}**: {value}"
 
-    items = [
-        _metric_item("卡片创建", m["cards_created"]),
-        _metric_item("已完成", m["cards_completed"], "success"),
-        _metric_item("失败", m["cards_failed"], "error"),
-        _metric_item("已停止", m["cards_aborted"]),
-        _metric_item("API 调用", m["api_calls"]),
-        _metric_item("API 错误", m["api_errors"], "error" if m["api_errors"] > 0 else "default"),
-        _metric_item("流式调用", m["stream_element_calls"]),
-        _metric_item("流式失败", m["stream_element_failures"], "error" if m["stream_element_failures"] > 0 else "default"),
-        _metric_item("批量更新", m["batch_update_calls"]),
-        _metric_item("全卡重建", m["full_rebuilds"], "warning" if m["full_rebuilds"] > 0 else "default"),
-        _metric_item("活跃会话", m["active_sessions"]),
-        _metric_item("运行时间", m["uptime_human"]),
+    metrics_lines = [
+        _fmt("卡片创建", m["cards_created"]),
+        _fmt("已完成", m["cards_completed"], "success"),
+        _fmt("失败", m["cards_failed"], "error"),
+        _fmt("已停止", m["cards_aborted"]),
+        _fmt("API 调用", m["api_calls"]),
+        _fmt("API 错误", m["api_errors"], "error" if m["api_errors"] > 0 else "default"),
+        _fmt("流式调用", m["stream_element_calls"]),
+        _fmt("流式失败", m["stream_element_failures"], "error" if m["stream_element_failures"] > 0 else "default"),
+        _fmt("批量更新", m["batch_update_calls"]),
+        _fmt("全卡重建", m["full_rebuilds"], "warning" if m["full_rebuilds"] > 0 else "default"),
+        _fmt("活跃会话", m["active_sessions"]),
+        _fmt("运行时间", m["uptime_human"]),
     ]
 
     # ── Error code breakdown (if any) ──
-    error_elements: list[dict] = []
     if m["error_codes"]:
-        error_lines = []
-        for code, count in sorted(m["error_codes"].items()):
-            error_lines.append(f"  • 错误码 `{code}`: {count} 次")
-        error_elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": "<font color='orange'>**错误码分布**</font>\n" + "\n".join(error_lines),
-            },
-        })
+        error_lines = [f"  • 错误码 `{code}`: {count} 次" for code, count in sorted(m["error_codes"].items())]
+        metrics_lines.append("")
+        metrics_lines.append("<font color='orange'>**错误码分布**</font>")
+        metrics_lines.extend(error_lines)
 
-    # ── Build card ──
+    # ── Build card — pure div + lark_md, v2-safe ──
     card = {
         "schema": "2.0",
         "config": {
@@ -179,48 +164,12 @@ def build_monitor_card() -> dict[str, Any]:
                 },
                 {"tag": "hr"},
                 {
-                    "tag": "column_set",
-                    "flex_mode": "none",
-                    "background_style": "default",
-                    "columns": [
-                        {
-                            "tag": "column",
-                            "elements": [items[i]],
-                            "width": "weighted",
-                            "weight": 1,
-                        }
-                        for i in range(0, min(4, len(items)))
-                    ],
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": "\n".join(metrics_lines),
+                    },
                 },
-                {
-                    "tag": "column_set",
-                    "flex_mode": "none",
-                    "background_style": "default",
-                    "columns": [
-                        {
-                            "tag": "column",
-                            "elements": [items[i]],
-                            "width": "weighted",
-                            "weight": 1,
-                        }
-                        for i in range(4, min(8, len(items)))
-                    ],
-                },
-                {
-                    "tag": "column_set",
-                    "flex_mode": "none",
-                    "background_style": "default",
-                    "columns": [
-                        {
-                            "tag": "column",
-                            "elements": [items[i]],
-                            "width": "weighted",
-                            "weight": 1,
-                        }
-                        for i in range(8, min(12, len(items)))
-                    ],
-                },
-                *error_elements,
                 {"tag": "hr"},
                 {
                     "tag": "div",
