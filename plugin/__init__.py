@@ -266,7 +266,7 @@ def register(ctx: "PluginContext") -> None:
     try:
         from ..monitor import handle_pre_gateway_dispatch
         ctx.register_hook("pre_gateway_dispatch", handle_pre_gateway_dispatch)
-        _logger.info("hermes-lark-streaming v%s: /aowen commands registered (monitor, help)", __version__)
+        _logger.info("hermes-lark-streaming v%s: /aowen commands registered (monitor, config, status, reset, logs, test, help)", __version__)
     except Exception:
         _logger.debug("hermes-lark-streaming v%s: /aowen hook registration skipped", __version__, exc_info=True)
 

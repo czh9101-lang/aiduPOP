@@ -219,13 +219,11 @@ def build_monitor_card() -> dict[str, Any]:
                 *error_elements,
                 {"tag": "hr"},
                 {
-                    "tag": "note",
-                    "elements": [
-                        {
-                            "tag": "plain_text",
-                            "content": f"数据更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}  |  发送 /monitor 刷新",
-                        }
-                    ],
+                    "tag": "div",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": f"数据更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}  |  发送 /aowen monitor 刷新",
+                    },
                 },
             ],
         },
@@ -603,8 +601,8 @@ def _handle_logs_command(chat_id: str) -> dict:
                         "text": {"tag": "lark_md", "content": content},
                     },
                     {
-                        "tag": "note",
-                        "elements": [{"tag": "plain_text", "content": f"来源: {log_path} | 过滤: hermes_lark_streaming / HLS:"}],
+                        "tag": "div",
+                        "text": {"tag": "plain_text", "content": f"来源: {log_path} | 过滤: hermes_lark_streaming / HLS:"},
                     },
                 ],
             },
@@ -697,13 +695,11 @@ def _build_help_card() -> dict:
                 },
                 {"tag": "hr"},
                 {
-                    "tag": "note",
-                    "elements": [
-                        {
-                            "tag": "plain_text",
-                            "content": "发送 /aowen <命令名> 使用对应功能",
-                        }
-                    ],
+                    "tag": "div",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": "发送 /aowen <命令名> 使用对应功能",
+                    },
                 },
             ],
         },
