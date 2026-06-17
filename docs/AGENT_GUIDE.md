@@ -178,6 +178,11 @@ display:
 | 命令 | 说明 |
 |------|------|
 | `/aowen monitor` | 显示插件监控面板（卡片创建数、API 调用数、错误码分布等） |
+| `/aowen config` | 查看当前生效的插件配置 |
+| `/aowen status` | 查看插件运行状态（补丁应用、飞书凭据、活跃会话等） |
+| `/aowen reset` | 重置统计计数器（方便重新观察一段时间的指标） |
+| `/aowen logs` | 查看最近的 HLS 插件日志（排障用，免 SSH） |
+| `/aowen test` | 发送一张测试卡片，验证飞书连通性 |
 | `/aowen help` | 显示所有 `/aowen` 命令列表 |
 | `/aowen` | 同 `/aowen help` |
 
