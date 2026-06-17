@@ -11,79 +11,37 @@ triggers:
 stages:
   - name: release-stage
     displayName: 创建 Gitee 发行版
+    strategy: naturally
     trigger: auto
+    executor: []
     steps:
-      - step: shell@agent
+      # 步骤 1: 读取 plugin.yaml 版本号，写入流水线变量
+      - step: build@python
+        name: read_version
+        displayName: 读取版本号
+        pythonVersion: '3.11'
+        commands:
+          - VERSION=$(python3 -c "import yaml;print(yaml.safe_load(open('plugin.yaml'))['version'])")
+          - 'echo "检测到版本号: $VERSION"'
+          - 'echo "RELEASE_VERSION=$VERSION" >> GITEE_PARAMS'
+        notify: []
+        strategy:
+          retry: '0'
+
+      # 步骤 2: 创建 Gitee Release
+      # release@gitee 插件会自动:
+      #   - 创建 tag（如果不存在）
+      #   - 创建 Release 页面
+      #   - 自动生成 Source code (zip) 和 (tar.gz)
+      # description 用 "| 文件路径" 语法从 CHANGELOG.md 读取内容
+      - step: release@gitee
         name: create_release
-        displayName: 读取版本号并创建 Gitee Release
-        inputs:
-          script: |
-            #!/bin/bash
-            set -e
-
-            # ── 1. 读取版本号 ──
-            VERSION=$(grep '^version:' plugin.yaml | sed 's/version: *"\(.*\)"/\1/')
-            TAG="v${VERSION}"
-            echo "📦 版本号: $VERSION (tag: $TAG)"
-
-            # ── 2. 检查 tag 是否已存在 ──
-            if git rev-parse "$TAG" >/dev/null 2>&1; then
-              echo "📌 Tag $TAG 已存在，跳过 Release 创建"
-              exit 0
-            fi
-
-            # ── 3. 打 tag 并推送 ──
-            git tag "$TAG"
-            git push origin "$TAG"
-            echo "✅ Tag $TAG 已创建"
-
-            # ── 4. 从 CHANGELOG.md 提取 release notes ──
-            python3 << 'PYEOF'
-            import re
-            import subprocess
-
-            # 读版本号
-            result = subprocess.run(
-                ["grep", "^version:", "plugin.yaml"],
-                capture_output=True, text=True
-            )
-            version = result.stdout.split('"')[1] if '"' in result.stdout else result.stdout.split(':')[1].strip()
-            tag = f"v{version}"
-            print(f"📦 读取版本号: {version} (tag: {tag})")
-
-            # 提取 CHANGELOG
-            with open("docs/CHANGELOG.md", "r") as f:
-                content = f.read()
-            pattern = rf"(## v{re.escape(version)}.*?)(?=\n## v|\Z)"
-            match = re.search(pattern, content, re.DOTALL)
-            if match:
-                notes = match.group(1).strip()
-            else:
-                notes = f"## v{version}\n\n详见 CHANGELOG.md"
-
-            with open("/tmp/release_notes.md", "w") as f:
-                f.write(notes)
-            print("📝 Release notes 已提取到 /tmp/release_notes.md")
-            PYEOF
-
-            # ── 5. 调用 Gitee Release API 创建发行版 ──
-            # GITEE_OWNER 和 GITEE_TOKEN 需要在 Gitee Go 流水线环境变量中配置
-            # Gitee 会自动生成 Source code (zip) 和 Source code (tar.gz)
-            NOTES=$(cat /tmp/release_notes.md)
-
-            RESPONSE=$(curl -s -X POST \
-              "https://gitee.com/api/v5/repos/${GITEE_OWNER}/hermes-lark-streaming/releases" \
-              -H "Content-Type: application/json;charset=UTF-8" \
-              -d "{
-                \"access_token\": \"${GITEE_TOKEN}\",
-                \"tag_name\": \"${TAG}\",
-                \"name\": \"${TAG}\",
-                \"body\": \"$(echo "$NOTES" | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/\"/\\\\"/g')\",
-                \"target_commitish\": \"github_sync\",
-                \"prerelease\": false
-              }")
-
-            echo "📋 Gitee API 响应: $RESPONSE"
-            echo "✅ Gitee Release $TAG 创建完成"
-            echo "   源码 zip 和 tar.gz 会自动生成"
-            echo "   查看: https://gitee.com/${GITEE_OWNER}/hermes-lark-streaming/releases"
+        displayName: 创建 Gitee Release
+        releaseName: v${RELEASE_VERSION}
+        tagName: v${RELEASE_VERSION}
+        description: "v${RELEASE_VERSION} 发行版 | docs/CHANGELOG.md"
+        prerelease: false
+        allowUpdate: false
+        notify: []
+        strategy:
+          retry: '0'
