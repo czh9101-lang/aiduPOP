@@ -106,19 +106,24 @@ def build_monitor_card() -> dict[str, Any]:
 
     # ── Build metric items as a grid of cards ──
     def _metric_item(label: str, value: Any, color: str = "default") -> dict:
-        text_color = {
-            "default": "default",
+        # 飞书 v2 的 div 不支持 text_color 属性，用 lark_md 的 <font color> 实现颜色
+        color_map = {
+            "default": None,
             "error": "red",
             "warning": "orange",
             "success": "green",
-        }.get(color, "default")
+        }
+        font_color = color_map.get(color)
+        if font_color:
+            content = f"**{label}**\n<font color='{font_color}'>{value}</font>"
+        else:
+            content = f"**{label}**\n{value}"
         return {
             "tag": "div",
             "text": {
                 "tag": "lark_md",
-                "content": f"**{label}**\n{value}",
+                "content": content,
             },
-            "text_color": text_color,
         }
 
     items = [
@@ -146,9 +151,8 @@ def build_monitor_card() -> dict[str, Any]:
             "tag": "div",
             "text": {
                 "tag": "lark_md",
-                "content": "**错误码分布**\n" + "\n".join(error_lines),
+                "content": "<font color='orange'>**错误码分布**</font>\n" + "\n".join(error_lines),
             },
-            "text_color": "orange",
         })
 
     # ── Build card ──
