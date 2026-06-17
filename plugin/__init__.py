@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from . import __version__
+from .. import __version__
 
 if TYPE_CHECKING:
     from hermes_cli.plugins import PluginContext
@@ -57,7 +57,6 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "footer": {
         "fields": [
             ["status", "elapsed", "model", "cost", "compression_exhausted"],
-            ["tokens", "context"],
         ],
         "show_label": False,
     },
@@ -205,7 +204,7 @@ def register(ctx: "PluginContext") -> None:
 
     # ── Diagnostic: log key config for troubleshooting ──
     try:
-        from .config import Config
+        from ..config import Config
         _diag_cfg = Config()
         _logger.info(
             "hermes-lark-streaming v%s: config diagnostic — "
@@ -230,7 +229,7 @@ def register(ctx: "PluginContext") -> None:
 
     _logger.info("hermes-lark-streaming v%s: applying runtime patches...", __version__)
     try:
-        from .patching import apply_patches
+        from ..patching import apply_patches
 
         apply_patches()
         _logger.info("hermes-lark-streaming v%s: patches applied (check logs for per-module status)", __version__)
@@ -242,7 +241,7 @@ def register(ctx: "PluginContext") -> None:
     # lazily on the first message.  This eliminates ~50-100ms latency on the
     # first card creation, improving the time-to-first-paint for users.
     try:
-        from .controller import get_controller
+        from ..controller import get_controller
         import asyncio
 
         ctrl = get_controller()
@@ -258,8 +257,8 @@ def register(ctx: "PluginContext") -> None:
 
     # ── v1.1.0: Start monitor server (Task 3.7) ──
     try:
-        from .monitor import start_monitor_server
-        from .config import Config
+        from ..monitor import start_monitor_server
+        from ..config import Config
         import asyncio as _asyncio
 
         _monitor_cfg = Config()
@@ -273,8 +272,8 @@ def register(ctx: "PluginContext") -> None:
 
     # ── v1.1.0: Register theme cache invalidation on config reload (Task 3.5+3.6) ──
     try:
-        from .cardkit.theme import invalidate_theme_cache
-        from .config import Config as _Cfg
+        from ..cardkit.theme import invalidate_theme_cache
+        from ..config import Config as _Cfg
 
         _Cfg().on_reload(invalidate_theme_cache)
     except Exception:

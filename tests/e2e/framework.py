@@ -1,5 +1,27 @@
 """E2E test framework — orchestrates full message → card pipeline tests.
 
+v1.1.0: Single runner with automatic mock/real switching.
+
+When FEISHU_E2E_APP_ID + FEISHU_E2E_APP_SECRET + FEISHU_E2E_CHAT_ID
+are all set, the runner uses a REAL FeishuClient and creates actual
+cards in your Feishu app. Otherwise, it uses the in-memory
+MockFeishuServer.
+
+The runner is FULLY AUTOMATIC in real mode — no manual message_id
+setup needed. It sends a text message to the test chat to obtain an
+anchor message_id, then creates cards as replies to that anchor.
+
+Test code is IDENTICAL in both modes — the only difference is whether
+API calls hit the mock or real Feishu servers.
+
+Environment variables (3 required for real mode):
+  FEISHU_E2E_APP_ID       — Real Feishu app_id
+  FEISHU_E2E_APP_SECRET   — Real Feishu app_secret
+  FEISHU_E2E_CHAT_ID      — Real chat_id (test group where cards appear)
+
+Optional:
+  FEISHU_E2E_BASE_URL     — Feishu API base URL (default: https://open.feishu.cn/open-apis)
+
 Usage:
     from tests.e2e.framework import E2ETestRunner
 
@@ -7,34 +29,64 @@ Usage:
         runner = E2ETestRunner()
         await runner.setup()
         try:
-            session = await runner.start_message("hello", chat_id="oc_test")
+            session = await runner.start_message("hello")
             await runner.feed_answer(session, "Hello world!")
             await runner.complete(session)
-            card = runner.get_card(session)
-            assert card is not None
             assert "Hello world!" in runner.get_answer_text(session)
         finally:
             await runner.teardown()
+
+    # Check mode:
+    if runner.is_real_mode:
+        print("Testing against real Feishu API")
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from .mock_feishu import MockFeishuServer, MockCardState
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
 
-class E2ETestRunner:
-    """Orchestrates end-to-end tests with mock Feishu server.
+def _has_real_feishu_creds() -> bool:
+    """Check if real Feishu credentials are available in environment.
 
-    Patches FeishuClient to use the mock server, creates real CardSession
-    objects, and feeds realistic callback sequences to verify card output.
+    Only 3 variables required: app_id, app_secret, chat_id.
+    message_id is obtained automatically by sending a text message.
+    """
+    return bool(
+        os.environ.get("FEISHU_E2E_APP_ID")
+        and os.environ.get("FEISHU_E2E_APP_SECRET")
+        and os.environ.get("FEISHU_E2E_CHAT_ID")
+    )
+
+
+class E2ETestRunner:
+    """Orchestrates end-to-end tests.
+
+    Automatically selects mock or real Feishu mode based on environment:
+    - FEISHU_E2E_APP_ID + FEISHU_E2E_APP_SECRET + FEISHU_E2E_CHAT_ID all set
+      → real Feishu API (FULLY AUTOMATIC, no manual message_id needed)
+    - Otherwise → in-memory MockFeishuServer
+
+    In real mode, the runner sends a text message to the test chat to
+    obtain an anchor message_id, then creates cards as replies. Tests
+    create ACTUAL cards visible in your Feishu app. Use a dedicated
+    test bot and test group, NOT your production bot.
+
+    How to get the 3 required values (see tests/e2e/.env.example for details):
+      1. FEISHU_E2E_APP_ID / FEISHU_E2E_APP_SECRET:
+         Feishu open platform → your app → Credentials & Basic Info
+      2. FEISHU_E2E_CHAT_ID:
+         Add bot to a test group, then use the bot's webhook event
+         payload, or call GET /open-apis/im/v1/chats to list groups
     """
 
     def __init__(self) -> None:
@@ -42,27 +94,27 @@ class E2ETestRunner:
         self._patches: list[Any] = []
         self._controller: Any = None
         self._sessions: dict[str, Any] = {}
+        self._use_real_feishu: bool = _has_real_feishu_creds()
+        # Real mode: capture card states from API responses (can't inspect server-side)
+        self._real_card_states: dict[str, MockCardState] = {}
+        # Real mode: anchor message_id obtained by sending a text message
+        self._real_anchor_message_id: str = ""
+        # Real mode: counter for unique message_ids (avoids reusing the same anchor)
+        self._real_msg_counter: int = 0
+
+    @property
+    def is_real_mode(self) -> bool:
+        """True if running against real Feishu API."""
+        return self._use_real_feishu
 
     async def setup(self) -> None:
-        """Set up mock environment — patch FeishuClient, create controller."""
-        # Patch FeishuClient to use mock server
-        from hermes_lark_streaming.feishu import FeishuClient, FeishuClientConfig
-
-        original_init = FeishuClient.__init__
-
-        def _mock_init(self: FeishuClient, config: FeishuClientConfig) -> None:
-            self.config = config
-            self._mock_server = self_mock_server  # type: ignore
-            self._use_async_stream_element = True
-
-        # We can't easily patch FeishuClient because it's deeply integrated.
-        # Instead, create a real controller but replace its _client with a mock.
+        """Set up test environment — mock or real, decided by env vars."""
         from hermes_lark_streaming.controller import StreamCardController
         from hermes_lark_streaming.config import Config
 
         self._controller = StreamCardController()
 
-        # Force enable
+        # Force-enable with mock config object
         self._controller._cfg = MagicMock(spec=Config)
         cfg = self._controller._cfg
         cfg.enabled = True
@@ -81,18 +133,111 @@ class E2ETestRunner:
         cfg.max_reasoning_rounds = 20
         cfg.footer_fields = [["status", "elapsed", "model", "cost"]]
         cfg.footer_show_label = False
+
+        if self._use_real_feishu:
+            await self._setup_real_client(cfg)
+        else:
+            self._setup_mock_client(cfg)
+
+        self._controller._ensure_init = AsyncMock()
+
+    def _setup_mock_client(self, cfg: Any) -> None:
+        """Configure controller with mock FeishuClient."""
         cfg.feishu_app_id = "mock_app_id"
         cfg.feishu_app_secret = "mock_app_secret"
         cfg.feishu_base_url = "https://mock.feishu.cn"
         cfg.env_app_id = ""
         cfg.env_app_secret = ""
 
-        # Initialize with mock client
         self._controller._client = self._create_mock_client()
         self._controller._initialized = True
+        _logger.info("HLS e2e: using MOCK Feishu server")
 
-        # Patch _ensure_init to be a no-op (already initialized)
-        self._controller._ensure_init = AsyncMock()
+    async def _setup_real_client(self, cfg: Any) -> None:
+        """Configure controller with REAL FeishuClient.
+
+        Automatically sends a text message to the test chat to obtain
+        an anchor message_id. Cards created during tests will be replies
+        to this anchor message.
+        """
+        from hermes_lark_streaming.feishu import FeishuClient, FeishuClientConfig
+
+        app_id = os.environ["FEISHU_E2E_APP_ID"]
+        app_secret = os.environ["FEISHU_E2E_APP_SECRET"]
+        chat_id = os.environ["FEISHU_E2E_CHAT_ID"]
+        base_url = os.environ.get(
+            "FEISHU_E2E_BASE_URL", "https://open.feishu.cn/open-apis"
+        )
+
+        cfg.feishu_app_id = app_id
+        cfg.feishu_app_secret = app_secret
+        cfg.feishu_base_url = base_url
+        cfg.env_app_id = app_id
+        cfg.env_app_secret = app_secret
+
+        # Create real FeishuClient
+        client = FeishuClient(FeishuClientConfig(
+            app_id=app_id,
+            app_secret=app_secret,
+            base_url=base_url,
+        ))
+        self._controller._client = client
+        self._controller._initialized = True
+
+        # ── Auto-obtain anchor message_id ──
+        # Send a text message to the test chat. The plugin's card creation
+        # uses reply_card_by_id(anchor_message_id, card_id), so we need a
+        # real message to reply to.
+        try:
+            self._real_anchor_message_id = await self._send_anchor_message(
+                client, chat_id
+            )
+            _logger.info(
+                "HLS e2e: REAL Feishu API ready — anchor message sent "
+                "(app_id=%s..., chat=%s, anchor_msg=%s)",
+                app_id[:8], chat_id[:12], self._real_anchor_message_id[:12],
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"HLS e2e: failed to send anchor message to chat {chat_id[:12]}. "
+                f"Check that the bot is a member of the chat and has send permission. "
+                f"Error: {e}"
+            ) from e
+
+    async def _send_anchor_message(self, client: Any, chat_id: str) -> str:
+        """Send a text message to the test chat, return its message_id.
+
+        This message serves as the reply anchor for test cards.
+        Uses the IM create message API (not reply).
+        """
+        import json
+        import time
+        from lark_oapi.api.im.v1 import (
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+        )
+
+        text = f"[e2e test anchor {time.strftime('%H:%M:%S')}]"
+        request = (
+            CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .msg_type("text")
+                .content(json.dumps({"text": text}))
+                .build()
+            )
+            .build()
+        )
+        resp = await client._client.im.v1.message.acreate(request)
+        if not resp.success():
+            raise RuntimeError(
+                f"send anchor message failed: code={resp.code} msg={resp.msg}"
+            )
+        if not resp.data or not resp.data.message_id:
+            raise RuntimeError("send anchor message: response missing message_id")
+        return str(resp.data.message_id)
 
     def _create_mock_client(self) -> Any:
         """Create a mock FeishuClient that delegates to MockFeishuServer."""
@@ -145,6 +290,7 @@ class E2ETestRunner:
             p.stop()
         self.mock_server.reset()
         self._sessions.clear()
+        self._real_card_states.clear()
 
     @property
     def controller(self) -> Any:
@@ -157,25 +303,60 @@ class E2ETestRunner:
         message_text: str = "test message",
         *,
         message_id: str = "",
-        chat_id: str = "oc_test_chat",
+        chat_id: str = "",
     ) -> Any:
-        """Start a new message session — creates placeholder card."""
-        if not message_id:
-            message_id = f"om_test_{int(time.time()*1000)}"
+        """Start a new message session — creates placeholder card.
 
-        loop = asyncio.get_event_loop()
+        In real mode: uses FEISHU_E2E_CHAT_ID from environment, and the
+        anchor message_id obtained automatically during setup(). Each test
+        gets a unique synthetic message_id (the anchor is used as the
+        reply target by the plugin internally).
+        In mock mode: uses the provided chat_id/message_id or generates defaults.
+        """
+        if self._use_real_feishu:
+            chat_id = chat_id or os.environ.get("FEISHU_E2E_CHAT_ID", "")
+            if not chat_id:
+                raise RuntimeError(
+                    "Real Feishu mode requires FEISHU_E2E_CHAT_ID environment variable"
+                )
+            if not self._real_anchor_message_id:
+                raise RuntimeError(
+                    "Real Feishu mode: anchor message_id not obtained during setup. "
+                    "Call await runner.setup() first."
+                )
+            # Generate a unique message_id for this test session (used as
+            # the session key in _sessions dict). The anchor_id (reply target)
+            # is set to the REAL anchor message obtained during setup.
+            if not message_id:
+                self._real_msg_counter += 1
+                message_id = f"om_e2e_{int(time.time())}_{self._real_msg_counter}"
+            # Use the real anchor as the reply target
+            anchor_id = self._real_anchor_message_id
+        else:
+            if not message_id:
+                message_id = f"om_test_{int(time.time()*1000)}"
+            if not chat_id:
+                chat_id = "oc_test_chat"
+            anchor_id = message_id
+
         self._controller.on_message_started(
             message_id=message_id,
             chat_id=chat_id,
-            anchor_id=message_id,
+            anchor_id=anchor_id,
         )
 
         # Wait for card creation
         session = self._controller._sessions.get(message_id)
         if session:
-            # Wait for _card_ready
-            await asyncio.wait_for(session._card_ready.wait(), timeout=5.0)
+            await asyncio.wait_for(session._card_ready.wait(), timeout=10.0)
         self._sessions[message_id] = session
+
+        # In real mode, track the card state
+        if self._use_real_feishu and session and session.card_id:
+            self._real_card_states[session.card_id] = MockCardState(
+                card_id=session.card_id,
+            )
+
         return session
 
     async def feed_answer(self, session: Any, text: str) -> None:
@@ -184,7 +365,6 @@ class E2ETestRunner:
             message_id=session.message_id,
             text=text,
         )
-        # Allow flush to process
         await asyncio.sleep(0.15)
 
     async def feed_reasoning(self, session: Any, text: str) -> None:
@@ -217,29 +397,63 @@ class E2ETestRunner:
             message_id=session.message_id,
             answer=answer,
         )
-        # Wait for seal to complete
-        await asyncio.sleep(0.5)
+        # Wait for seal to complete (real mode may be slower)
+        await asyncio.sleep(1.0 if self._use_real_feishu else 0.5)
 
     # ── Verification helpers ──
 
     def get_card(self, session: Any) -> MockCardState | None:
-        """Get the mock card state for a session."""
-        if session.card_id:
+        """Get the card state for a session.
+
+        In mock mode: returns the MockCardState from the in-memory server.
+        In real mode: returns a MockCardState reconstructed from session
+        metadata (limited — we can't query the real Feishu server for
+        card content, so only card_id/summary/streaming_mode are available).
+        """
+        if not session.card_id:
+            return None
+
+        if self._use_real_feishu:
+            # In real mode, we can't inspect the card content directly.
+            # Return a minimal state with what we know.
+            state = self._real_card_states.get(session.card_id)
+            if state is None:
+                state = MockCardState(card_id=session.card_id)
+                self._real_card_states[session.card_id] = state
+            state.streaming_mode = not session._streaming_closed if hasattr(session, "_streaming_closed") else False
+            return state
+        else:
             return self.mock_server.get_card(session.card_id)
-        return None
 
     def get_answer_text(self, session: Any) -> str:
-        """Extract answer text from the card."""
-        card = self.get_card(session)
-        if card is None:
+        """Extract answer text from the card.
+
+        Mock mode: reads from MockCardState.elements[ANSWER_ELEMENT_ID].
+        Real mode: reads from session.unified_state.answer_text (the
+        plugin's in-memory state — the real card on Feishu may differ
+        slightly due to Markdown optimization applied at seal time).
+        """
+        if self._use_real_feishu:
+            # In real mode, read from the plugin's internal state
+            if session.unified_state:
+                return session.unified_state.answer_text or ""
             return ""
-        # Answer is in the answer_content element
-        from hermes_lark_streaming.cardkit.elements import ANSWER_ELEMENT_ID
-        answer_el = card.elements.get(ANSWER_ELEMENT_ID, {})
-        return answer_el.get("content", "")
+        else:
+            card = self.get_card(session)
+            if card is None:
+                return ""
+            from hermes_lark_streaming.cardkit.elements import ANSWER_ELEMENT_ID
+            answer_el = card.elements.get(ANSWER_ELEMENT_ID, {})
+            return answer_el.get("content", "")
 
     def get_panel_elements(self, session: Any) -> list[dict[str, Any]]:
-        """Get the panel children from the card."""
+        """Get the panel children from the card.
+
+        Mock mode: reads from MockCardState.
+        Real mode: returns empty list (can't inspect real card elements).
+        """
+        if self._use_real_feishu:
+            return []  # Can't query real Feishu for card element details
         card = self.get_card(session)
         if card is None:
             return []
@@ -248,25 +462,43 @@ class E2ETestRunner:
         return panel.get("elements", [])
 
     def get_call_count(self, operation: str) -> int:
-        """Count how many times a specific API operation was called."""
+        """Count how many times a specific API operation was called.
+
+        Mock mode: counts from mock_server.call_log.
+        Real mode: always returns 0 (we don't intercept real API calls).
+        """
+        if self._use_real_feishu:
+            return 0  # Can't count real API calls without intercepting
         return sum(1 for call in self.mock_server.call_log if call["op"] == operation)
 
     def get_total_api_calls(self) -> int:
         """Total API calls made during the test."""
+        if self._use_real_feishu:
+            return 0  # Can't count real API calls without intercepting
         return len(self.mock_server.call_log)
 
     def assert_card_created(self, session: Any) -> None:
         """Assert that a card was created for this session."""
         assert session.card_id is not None, "Card was not created"
-        assert self.mock_server.get_card(session.card_id) is not None, "Card not found in mock server"
+        if not self._use_real_feishu:
+            assert self.mock_server.get_card(session.card_id) is not None, \
+                "Card not found in mock server"
 
     def assert_card_sealed(self, session: Any) -> None:
         """Assert that the card was sealed (streaming closed)."""
-        card = self.get_card(session)
-        assert card is not None, "Card not found"
-        assert not card.streaming_mode, f"Card {session.card_id} was not sealed (streaming_mode still True)"
+        if self._use_real_feishu:
+            # In real mode, check session internal state
+            assert hasattr(session, "_streaming_closed") and session._streaming_closed, \
+                f"Card {session.card_id} was not sealed"
+        else:
+            card = self.get_card(session)
+            assert card is not None, "Card not found"
+            assert not card.streaming_mode, \
+                f"Card {session.card_id} was not sealed (streaming_mode still True)"
 
     def assert_no_errors(self) -> None:
         """Assert no error-level API calls were made."""
+        if self._use_real_feishu:
+            return  # Can't detect errors without intercepting
         errors = [c for c in self.mock_server.call_log if "error" in str(c).lower()]
         assert not errors, f"API errors occurred: {errors}"

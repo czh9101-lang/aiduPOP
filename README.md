@@ -217,6 +217,58 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ---
 
+## v1.1.0 New Features
+
+### Monitor Dashboard
+
+Built-in lightweight HTTP server providing real-time plugin health metrics.
+
+```yaml
+hermes_lark_streaming:
+  monitor:
+    enabled: true        # Enable monitor dashboard
+    port: 9191           # Port
+    host: "127.0.0.1"    # Bind address (0.0.0.0 for external access)
+```
+
+Endpoints:
+- `http://<host>:<port>/` — HTML dashboard (auto-refresh every 5s)
+- `http://<host>:<port>/metrics` — JSON metrics (scrape-friendly)
+- `http://<host>:<port>/health` — Health check
+
+Metrics include: cards created/completed/failed, API call count, error code distribution, active sessions, uptime.
+
+### Card Theme System
+
+Customizable card colors, icons, and layout:
+
+```yaml
+hermes_lark_streaming:
+  theme:
+    name: default    # Preset: default / dark / compact
+    # Override individual values (optional):
+    # panel_icon: robot_filled
+    # header_color_success: green
+    # tool_color_running: orange
+```
+
+### Hot Config Reload
+
+After modifying `~/.hermes/config.yaml`, the plugin auto-detects file changes and reloads config (up to 5s delay). No gateway restart needed. Manual trigger via `Config.reload()`.
+
+### Doctor Diagnostic Command
+
+```bash
+# Auto-detect Hermes Python path
+HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
+# Run full diagnostic
+$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
+```
+
+Checks: plugin version, Python environment, config, Feishu credentials, patch status, log paths.
+
+---
+
 ## Developer Guide & Changelog
 
 > 📖 **[SKILL.md](docs/SKILL.md)** — LLM quick-start guide. Architecture, key design decisions, common pitfalls, efficient code modification guide.

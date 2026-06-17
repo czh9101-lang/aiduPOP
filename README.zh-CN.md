@@ -217,6 +217,58 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ---
 
+## v1.1.0 新功能
+
+### 监控面板
+
+插件内置轻量监控 HTTP 服务器，提供实时插件健康指标。
+
+```yaml
+hermes_lark_streaming:
+  monitor:
+    enabled: true        # 启用监控面板
+    port: 9191           # 端口
+    host: "127.0.0.1"    # 绑定地址（0.0.0.0 允许外部访问）
+```
+
+启用后访问：
+- `http://<host>:<port>/` — HTML 仪表盘（每 5 秒自动刷新）
+- `http://<host>:<port>/metrics` — JSON 格式指标（便于采集）
+- `http://<host>:<port>/health` — 健康检查
+
+展示的指标包括：卡片创建数、完成数、失败数、API 调用数、错误码分布、活跃会话数、运行时间等。
+
+### 卡片样式主题
+
+支持自定义卡片颜色、图标等外观：
+
+```yaml
+hermes_lark_streaming:
+  theme:
+    name: default    # 预设主题：default / dark / compact
+    # 可覆盖单个值（可选）：
+    # panel_icon: robot_filled
+    # header_color_success: green
+    # tool_color_running: orange
+```
+
+### 配置热更新
+
+修改 `~/.hermes/config.yaml` 后无需重启网关，插件会自动检测文件变化并重新加载配置（最多 5 秒延迟）。也可通过 `Config.reload()` 手动触发。
+
+### doctor 诊断命令
+
+```bash
+# 自动检测 Hermes Python 路径
+HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
+# 运行完整诊断
+$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
+```
+
+检查项：插件版本、Python 环境、配置项、飞书凭据、补丁应用状态、日志路径。
+
+---
+
 ## 开发者指南与更新日志
 
 > 📖 **[SKILL.md](docs/SKILL.md)** — LLM 快速上手指南。项目架构、关键设计决策、常见陷阱，高效代码修改指南。

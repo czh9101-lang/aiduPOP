@@ -116,11 +116,12 @@ feishu:
 
 ## 可选配置项 (config.yaml)
 
+### hermes_lark_streaming 节
+
 | 配置键 | 默认值 | 范围 | 说明 |
 |--------|---------|------|------|
 | `enabled` | `true` | bool | 启用/禁用流式卡片输出 |
 | `linear` | `true` | bool | 线性模式：单卡片原地更新（统一面板架构） |
-| `show_reasoning` | `true` | bool | 显示推理/思考面板 |
 | `max_tool_steps` | `20` | 1–100 | 统一面板中工具步骤最大数量（超限折叠） |
 | `max_reasoning_rounds` | `20` | 1–100 | 统一面板中推理轮次最大数量（超限折叠） |
 | `card_ttl_sec` | `600` | >0 | 会话 TTL（秒），超时卡片失效 |
@@ -131,6 +132,18 @@ feishu:
 | `streaming_panel_expanded` | `false` | bool | 流式态卡片面板是否展开 |
 | `footer.show_label` | `false` | bool | 是否显示页脚字段标签 |
 | `footer.fields` | `[[status, elapsed, model, cost, compression_exhausted]]` | array | 页脚字段配置 |
+| `monitor.enabled` | `false` | bool | 启用监控面板 HTTP 服务器 |
+| `monitor.port` | `9191` | int | 监控面板端口 |
+| `monitor.host` | `127.0.0.1` | str | 监控面板绑定地址（`0.0.0.0` 允许外部访问） |
+| `theme.name` | `default` | str | 卡片主题预设（`default`/`dark`/`compact`） |
+| `theme.*` | — | str | 覆盖主题的单个值（如 `theme.panel_icon`） |
+
+### display 节（Hermes 全局配置，非 hermes_lark_streaming 节）
+
+| 配置键 | 默认值 | 说明 |
+|--------|---------|------|
+| `display.show_reasoning` | `false` | 是否展示推理/思考面板（全局，影响所有平台） |
+| `display.platforms.feishu.show_reasoning` | — | 飞书平台专属推理显示开关（优先于全局） |
 
 示例配置：
 
@@ -138,7 +151,6 @@ feishu:
 hermes_lark_streaming:
   enabled: true
   linear: true
-  show_reasoning: true
   max_tool_steps: 20
   max_reasoning_rounds: 20
   card_ttl_sec: 600
@@ -149,6 +161,22 @@ hermes_lark_streaming:
     show_label: false
     fields:
       - [status, elapsed, model, cost, compression_exhausted]
+  # v1.1.0 新增：监控面板（可选）
+  monitor:
+    enabled: false
+    port: 9191
+    host: "127.0.0.1"
+  # v1.1.0 新增：卡片主题（可选）
+  theme:
+    name: default
+
+# display 节是 Hermes 全局配置，不在 hermes_lark_streaming 下
+display:
+  show_reasoning: true
+  # 或按平台配置：
+  # platforms:
+  #   feishu:
+  #     show_reasoning: true
 ```
 
 ## 提供的钩子（Hooks）

@@ -39,15 +39,15 @@ from .. import __version__
 
 # ── Hermes compatibility adapter (Task 3.2 + 3.3) ──────────────────
 # All Hermes internal module access is funneled through HermesCompat.
-# When Hermes upgrades, only hermes_adapter.py needs to be updated.
+# When Hermes upgrades, only patching/hermes_adapter.py needs to be updated.
 # The try/except mirrors the root __init__.py pattern: relative import
 # works when loaded by Hermes's plugin loader; absolute import works
 # when pytest imports this file directly (conftest pre-registers the
 # package in sys.modules).
 try:
-    from ..hermes_adapter import HermesCompat
+    from .hermes_adapter import HermesCompat
 except ImportError:  # pragma: no cover — fallback for pytest-only path
-    from hermes_lark_streaming.hermes_adapter import HermesCompat  # type: ignore[no-redef]
+    from hermes_lark_streaming.patching.hermes_adapter import HermesCompat  # type: ignore[no-redef]
 
 
 __all__ = [
@@ -423,7 +423,7 @@ def apply_patches() -> None:
     # ── HermesCompat: single source of truth for Hermes internals ──
     # All Hermes internal module access (GatewayRunner, AIAgent,
     # FeishuAdapter, cron.scheduler, agent.conversation_loop) is funneled
-    # through this one instance.  See hermes_adapter.py for the full list.
+    # through this one instance.  See patching/hermes_adapter.py for the full list.
     compat = HermesCompat()
     # ``layout`` is kept for the doctor CLI's ``hermes_layout`` print and
     # for parity with the legacy ``_detect_hermes_layout()`` contract.

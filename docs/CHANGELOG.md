@@ -1,6 +1,17 @@
 ## v1.1.0 (2026-06-17)
 
-**重大版本：基于 roadmap.md 全面优化，涵盖阶段 0-3 共 25 个任务。**
+**重大版本：基于 roadmap.md 全面优化，涵盖阶段 0-3 共 25 个任务 + 6 项细节修复。**
+
+### v1.1.0 细节修复（第二轮）
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| 🔧 Fix | AGENT_GUIDE.md show_reasoning 配置位置错误 | 文档把 show_reasoning 放在 hermes_lark_streaming 节下，实际代码读的是 display.platforms.feishu.show_reasoning 或 display.show_reasoning | 文档拆分为"hermes_lark_streaming 节"和"display 节"两个表格，明确 show_reasoning 在 display 下 |
+| 🔧 Fix | 还原页脚默认值 | v1.1.0 第一轮误改了 footer.fields 默认值（新增 tokens/context 第二行），用户未要求改默认值 | 还原为 `[[status, elapsed, model, cost, compression_exhausted]]` 单行 |
+| 🏗️ Architecture | 根目录文件模块化 | hermes_adapter.py/monitor.py/plugin.py/conftest.py 散落在根目录，不便维护 | hermes_adapter.py → patching/hermes_adapter.py；monitor.py → monitor/__init__.py；plugin.py → plugin/__init__.py；conftest.py 合并到 tests/conftest.py |
+| 📝 Docs | README 补充新功能文档 | v1.1.0 新增的监控面板/主题/热更新/doctor 命令未在 README 记录 | 中英文 README 各新增"v1.1.0 New Features"章节 |
+| ✨ Feature | e2e 测试统一 runner（mock/真飞书自动切换） | 原设计需要两套 runner（mock vs real），且真飞书模式需要手动获取 message_id | 单一 E2ETestRunner：有 FEISHU_E2E_APP_ID+APP_SECRET+CHAT_ID 环境变量→真飞书（自动发文本消息获取 anchor message_id）；无→mock。测试代码完全一致 |
+| 📝 Docs | e2e 环境变量获取方式详细说明 | 用户不知道怎么获取 app_id/app_secret/chat_id | tests/e2e/.env.example 详细说明每个值的获取步骤（飞书开放平台路径、API 调用方式、webhook 事件方式） |
 
 ### 🔴 生产 Bug 修复
 

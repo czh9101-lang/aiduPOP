@@ -26,7 +26,7 @@ import logging
 import time
 from typing import Any
 
-from .config import Config
+from ..config import Config
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
