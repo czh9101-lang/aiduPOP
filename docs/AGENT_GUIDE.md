@@ -135,6 +135,7 @@ feishu:
 | `monitor.enabled` | `false` | bool | 启用监控面板 HTTP 服务器 |
 | `monitor.port` | `9191` | int | 监控面板端口 |
 | `monitor.host` | `127.0.0.1` | str | 监控面板绑定地址（`0.0.0.0` 允许外部访问） |
+| `monitor.refresh_interval` | `10` | int | 仪表盘自动刷新间隔（秒，范围 5~300） |
 | `theme.name` | `default` | str | 卡片主题预设（`default`/`dark`/`compact`） |
 | `theme.*` | — | str | 覆盖主题的单个值（如 `theme.panel_icon`） |
 

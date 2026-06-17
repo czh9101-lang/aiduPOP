@@ -3,16 +3,17 @@
 v1.1.0 (Task 3.7): Provides real-time visibility into plugin health.
 
 Endpoints:
-  GET /          — Simple HTML dashboard (auto-refresh every 5s)
+  GET /          — Simple HTML dashboard (auto-refresh, interval configurable)
   GET /metrics   — JSON metrics (scrape-friendly)
   GET /health    — Simple health check (200 OK if running)
 
 Configuration (in config.yaml):
   hermes_lark_streaming:
     monitor:
-      enabled: false      # default off
-      port: 9191          # metrics server port
-      host: "127.0.0.1"   # bind address (use 0.0.0.0 for external access)
+      enabled: false        # default off
+      port: 9191            # metrics server port
+      host: "127.0.0.1"     # bind address (use 0.0.0.0 for external access)
+      refresh_interval: 10  # dashboard auto-refresh interval in seconds (default 10)
 
 The server runs in a background asyncio task within the Hermes gateway
 process. It shares the event loop with the plugin's card operations.
@@ -109,7 +110,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="5">
+<meta http-equiv="refresh" content="{refresh_interval}">
 <title>hermes-lark-streaming Monitor</title>
 <style>
 body {{ font-family: -apple-system, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
@@ -142,7 +143,7 @@ h1 {{ color: #333; font-size: 24px; }}
   <div class="card"><div class="label">Uptime</div><div class="value" style="font-size:20px">{uptime_human}</div></div>
 </div>
 {error_codes_html}
-<div class="footer">Auto-refresh every 5s · <a href="/metrics">JSON Metrics</a> · <a href="/health">Health</a></div>
+<div class="footer">Auto-refresh every {refresh_interval}s · <a href="/metrics">JSON Metrics</a> · <a href="/health">Health</a></div>
 </div>
 </body>
 </html>"""
@@ -173,6 +174,7 @@ async def _handle_root(request: Any) -> Any:
         active_sessions=m["active_sessions"],
         uptime_human=m["uptime_human"],
         error_codes_html=error_codes_html,
+        refresh_interval=_refresh_interval,
     )
     from aiohttp import web
     return web.Response(text=html, content_type="text/html")
@@ -195,13 +197,18 @@ async def _handle_health(request: Any) -> Any:
 _server_task: asyncio.Task | None = None
 _app: Any = None
 
+# v1.1.0: Dashboard auto-refresh interval (seconds), configurable via
+# hermes_lark_streaming.monitor.refresh_interval in config.yaml.
+# Default 10s — balances real-time visibility with browser resource usage.
+_refresh_interval: int = 10
+
 
 async def start_monitor_server(config: Config) -> None:
     """Start the monitor HTTP server if enabled in config.
 
     Called from plugin.register() after patches are applied.
     """
-    global _server_task, _app
+    global _server_task, _app, _refresh_interval
 
     sec = config._plugin_sec()
     monitor_cfg = sec.get("monitor", {})
@@ -214,6 +221,8 @@ async def start_monitor_server(config: Config) -> None:
 
     port = int(monitor_cfg.get("port", 9191))
     host = str(monitor_cfg.get("host", "127.0.0.1"))
+    # v1.1.0: configurable refresh interval (default 10s, range 5-300)
+    _refresh_interval = max(5, min(300, int(monitor_cfg.get("refresh_interval", 10))))
 
     try:
         from aiohttp import web

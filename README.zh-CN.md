@@ -111,9 +111,10 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
+$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
 ```
 
-> **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无 `*.bak` 目录干扰；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。
+> **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无 `*.bak` 目录干扰；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。`doctor` 命令可一键诊断插件版本、Python 环境、配置项、飞书凭据、补丁应用状态、日志路径。
 
 ---
 
@@ -200,43 +201,23 @@ hermes_lark_streaming:
 
 面板标题始终显示**实际总数**（如"3轮 · 44个工具"），折叠提示仅影响面板内展示的内容。
 
-### 飞书凭据
-
-| 优先级 | 来源 | 示例 |
-|--------|------|------|
-| 1 | 环境变量 | `FEISHU_APP_ID`、`FEISHU_APP_SECRET` |
-| 2 | 文件 | `~/.hermes/.env` |
-| 3 | 配置文件 | `hermes_lark_streaming.feishu.app_id` |
-
-```bash
-# ~/.hermes/.env 示例
-FEISHU_APP_ID=cli_xxxxxx
-FEISHU_APP_SECRET=xxxxxx
-FEISHU_BASE_URL=https://open.feishu.cn/open-apis
-```
-
----
-
-## v1.1.0 新功能
-
 ### 监控面板
 
-插件内置轻量监控 HTTP 服务器，提供实时插件健康指标。
+插件内置轻量监控 HTTP 服务器，提供实时插件健康指标（卡片创建数、完成数、失败数、API 调用数、错误码分布、活跃会话数、运行时间等）。
 
 ```yaml
 hermes_lark_streaming:
   monitor:
-    enabled: true        # 启用监控面板
-    port: 9191           # 端口
-    host: "127.0.0.1"    # 绑定地址（0.0.0.0 允许外部访问）
+    enabled: false                # 启用监控面板（默认关闭）
+    port: 9191                    # 监控面板端口
+    host: "127.0.0.1"             # 绑定地址（0.0.0.0 允许外部访问）
+    refresh_interval: 10          # 仪表盘自动刷新间隔（秒，默认 10，范围 5~300）
 ```
 
 启用后访问：
-- `http://<host>:<port>/` — HTML 仪表盘（每 5 秒自动刷新）
+- `http://<host>:<port>/` — HTML 仪表盘（自动刷新）
 - `http://<host>:<port>/metrics` — JSON 格式指标（便于采集）
 - `http://<host>:<port>/health` — 健康检查
-
-展示的指标包括：卡片创建数、完成数、失败数、API 调用数、错误码分布、活跃会话数、运行时间等。
 
 ### 卡片样式主题
 
@@ -254,18 +235,22 @@ hermes_lark_streaming:
 
 ### 配置热更新
 
-修改 `~/.hermes/config.yaml` 后无需重启网关，插件会自动检测文件变化并重新加载配置（最多 5 秒延迟）。也可通过 `Config.reload()` 手动触发。
+修改 `~/.hermes/config.yaml` 后无需重启网关，插件会自动检测文件变化并重新加载配置（最多 5 秒延迟）。
 
-### doctor 诊断命令
+### 飞书凭据
+
+| 优先级 | 来源 | 示例 |
+|--------|------|------|
+| 1 | 环境变量 | `FEISHU_APP_ID`、`FEISHU_APP_SECRET` |
+| 2 | 文件 | `~/.hermes/.env` |
+| 3 | 配置文件 | `hermes_lark_streaming.feishu.app_id` |
 
 ```bash
-# 自动检测 Hermes Python 路径
-HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
-# 运行完整诊断
-$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
+# ~/.hermes/.env 示例
+FEISHU_APP_ID=cli_xxxxxx
+FEISHU_APP_SECRET=xxxxxx
+FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 ```
-
-检查项：插件版本、Python 环境、配置项、飞书凭据、补丁应用状态、日志路径。
 
 ---
 

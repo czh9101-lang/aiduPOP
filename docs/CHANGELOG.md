@@ -135,3 +135,73 @@
 | ✨ Feature | 打字机效果 | 流式卡片输出按字符渲染，匹配飞书 CardKit v2.0 文档行为 | `print_frequency_ms=70`、`print_step=1`、默认 `flush_interval_ms=100ms`、仅回答快流 70ms |
 | 🚀 Performance | 延迟 Markdown 优化 | 流式期间每次 flush 都执行 `optimize_markdown_style` 开销大 | 流式期间发送原始文本，仅在封卡时执行完整 Markdown 优化 |
 | 🚀 Performance | 间隔计时器优化 | `LONG_GAP_MS` 和 `BATCH_AFTER_GAP_MS` 过长 | `LONG_GAP_MS` 2.0s → 1.0s，`BATCH_AFTER_GAP_MS` 300ms → 100ms；瞬态重试延迟缩减 |
+
+---
+
+## 附录：历史陷阱与经验教训
+
+> 以下内容记录了插件开发过程中遇到的关键陷阱和修复经验，按主题分类。这些经验已融入代码设计，记录于此供后续维护参考。
+
+### A. 异步与线程安全
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| A1 | 事件循环死锁 | 在 async 函数中绝不用 `run_coroutine_threadsafe().result()`，直接 `await` |
+| A2 | contextvars 不跨线程 | 用 `_thread_local_ctx` 手动传递；`_run_agent` 中设置 thread-local |
+| A3 | FlushController 线程安全 | worker 线程必须用 `call_soon_threadsafe()`，`call_soon()` 不唤醒事件循环→flush 永不执行 |
+
+### B. 内容去重
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| B1 | `already_streamed` 忽略导致双重投递 | Hermes 调用 `interim_assistant_callback(text, already_streamed=True)` 时，必须跳过 `on_thinking_delta`，直接透传给原始回调 |
+| B2 | 精确字符串去重失败 | `interim_assistant_callback` 投递累积文本，与增量块长度不同，精确匹配永远失败。改用 `_stream_consumed_len` 按 eid 追踪已消费总长度 |
+| B3 | `_maybe_wrap_callbacks` 双重包装 | 当 `stream_delta_callback` 为 None 时，守卫必须同时检查 `stream_delta_callback` AND `interim_assistant_callback` 的 `_hls_wrapper` 标记 |
+| B4 | 推理内容重复（DeepSeek 模型） | 当原生 `reasoning_callback` 已激活时，`_linear_on_thinking` 必须跳过 `on_reasoning_delta`，避免累积文本再次追加 |
+
+### C. 状态机与竞态
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| C1 | `on_interrupted` 误触发于 COMPLETING | 旧 session 处于 COMPLETING 时，只跳过 abort 逻辑，但新 session 创建和 `_interrupt_map` 更新仍照常执行 |
+| C2 | `card_sent` 区分完成与中断 | 返回 None 两种含义：`card_sent=True`→正常完成抑制文本；`card_sent=False`→真正 abort/error |
+| C3 | Epoch 机制防止过期创建回调 | 创建前快照 `epoch = session.create_epoch`，创建后检查 `is_stale_create(epoch)`——epoch 已变则跳过转换 |
+| C4 | 幂等守卫 | COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态 |
+
+### D. 封卡与流式关闭
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| D1 | `close_streaming` 重复调用 | 对同一张卡片只能调用一次。重复调用导致 300317 sequence conflict。`CardSession` 新增 `_streaming_closed` 布尔标志 |
+| D2 | 重试路径引用 try 块局部变量 | `_preservative_seal` 的 300317 重试路径引用了 `panel["header"]`，但 `panel` 仅在 try 块中赋值。重试路径必须从当前状态重建变量 |
+| D3 | 封卡只删除实际存在的元素 | v1.0.2 之前盲目删除所有已知元素 ID，导致 300314 失败。现在只删除 `existing_elements` 中的元素 |
+| D4 | 状态标志必须在 API 成功后设置 | `_loading_hint_removed` 等标志在 `batch_update` 成功后才设置，否则 API 失败时标志已设但实际未生效 |
+| D5 | 完成前排空剩余脏数据 | `on_completed` 触发时可能还有脏数据未 flush。drain 步骤显式 flush 剩余内容，再 `mark_completed()` → close streaming → add footer |
+| D6 | 关闭流式时必须更新摘要（含 i18n_content） | `close_streaming` 时同时更新 `summary.content` 和 `summary.i18n_content`（zh_cn + en_us），否则中文用户会话列表永久显示"处理中..." |
+
+### E. Monkey Patching
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| E1 | 签名确认 | 必须确认目标是类方法还是模块级函数；签名不匹配 = 静默失败 |
+| E2 | `add_reaction` 改名 | Hermes 新版本将 `add_reaction`/`delete_reaction` 改为 `_add_reaction`/`_remove_reaction`，补丁需 fallback 尝试两种命名 |
+
+### F. 性能与参数
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| F1 | 性能参数应可配置 | 性能敏感参数不应硬编码。默认 100ms 刷新间隔（可配置 70~2000ms，最低 70ms 对齐飞书官方 `print_frequency_ms`） |
+| F2 | 流式参数不低于官方推荐值 | `print_frequency_ms` 官方默认 70ms，`print_step` 官方默认 1，不可低于此值 |
+| F3 | 主动 TTL 延长 | 卡片生存时间接近 540s 时自动延长 600s，防止 300309 流式关闭 |
+| F4 | 延迟 Markdown 优化 | 流式期间发送原始文本，仅在封卡时执行完整 Markdown 优化 |
+| F5 | 卡片未就绪时的延迟 flush | `card_message_ready=False` 时标记 `_pending_flush`，卡片创建完成后立即执行 |
+
+### G. 架构设计
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| G1 | 统一面板消除元素爆炸 | v1.0.2 之前每个 reasoning round 创建独立面板（4 元素/面板），元素数线性增长。统一面板架构集中在 1 个面板 + 1 个回答元素 = 3–4 元素恒定 |
+| G2 | 按时间线交错渲染 | `panel_events` 时间线记录事件顺序，面板内容按时间线交错渲染（reasoning→tool→reasoning→tool） |
+| G3 | 卡片生命周期 4 阶段渐进构建 | Phase 1 占位卡片（2 元素）→ Phase 2 首 token 添加面板/回答 → Phase 3 流式更新 → Phase 4 添加页脚 |
+| G4 | `CREATION_FAILED` 替代 `FAILED` | 旧的 `FAILED` 是 catch-all，拆分为 `CREATION_FAILED`（创建失败）和 `TERMINATED`（消息删除） |
+| G5 | 外部参数 NoneType 防护 | 外部字符串做切片/下标时必须防御 None：`(message_id or "?")[:12]` |

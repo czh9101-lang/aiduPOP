@@ -111,9 +111,10 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
+$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
 ```
 
-> **Troubleshooting**: If no card effect appears, check: (1) `hermes plugins list` shows enabled; (2) no `*.bak` directories under `~/.hermes/plugins/`; (3) Feishu credentials are configured.
+> **Troubleshooting**: If no card effect appears, check: (1) `hermes plugins list` shows enabled; (2) no `*.bak` directories under `~/.hermes/plugins/`; (3) Feishu credentials are configured. The `doctor` command provides a one-stop diagnostic covering plugin version, Python environment, config, Feishu credentials, patch status, and log paths.
 
 ---
 
@@ -200,43 +201,23 @@ When the limit is exceeded, early items are collapsed into a single summary line
 
 The panel title always shows the **actual total** (e.g. "3 rounds · 44 tools"); the fold hint only affects what is displayed inside the panel.
 
-### Feishu Credentials
-
-| Priority | Source | Example |
-|----------|--------|---------|
-| 1 | Environment Variables | `FEISHU_APP_ID`, `FEISHU_APP_SECRET` |
-| 2 | File | `~/.hermes/.env` |
-| 3 | Config File | `hermes_lark_streaming.feishu.app_id` |
-
-```bash
-# ~/.hermes/.env example
-FEISHU_APP_ID=cli_xxxxxx
-FEISHU_APP_SECRET=xxxxxx
-FEISHU_BASE_URL=https://open.feishu.cn/open-apis
-```
-
----
-
-## v1.1.0 New Features
-
 ### Monitor Dashboard
 
-Built-in lightweight HTTP server providing real-time plugin health metrics.
+Built-in lightweight HTTP server providing real-time plugin health metrics (cards created/completed/failed, API call count, error code distribution, active sessions, uptime, etc.).
 
 ```yaml
 hermes_lark_streaming:
   monitor:
-    enabled: true        # Enable monitor dashboard
-    port: 9191           # Port
-    host: "127.0.0.1"    # Bind address (0.0.0.0 for external access)
+    enabled: false                # Enable monitor dashboard (default off)
+    port: 9191                    # Monitor dashboard port
+    host: "127.0.0.1"             # Bind address (0.0.0.0 for external access)
+    refresh_interval: 10          # Dashboard auto-refresh interval in seconds (default 10, range 5~300)
 ```
 
 Endpoints:
-- `http://<host>:<port>/` — HTML dashboard (auto-refresh every 5s)
+- `http://<host>:<port>/` — HTML dashboard (auto-refresh)
 - `http://<host>:<port>/metrics` — JSON metrics (scrape-friendly)
 - `http://<host>:<port>/health` — Health check
-
-Metrics include: cards created/completed/failed, API call count, error code distribution, active sessions, uptime.
 
 ### Card Theme System
 
@@ -254,18 +235,22 @@ hermes_lark_streaming:
 
 ### Hot Config Reload
 
-After modifying `~/.hermes/config.yaml`, the plugin auto-detects file changes and reloads config (up to 5s delay). No gateway restart needed. Manual trigger via `Config.reload()`.
+After modifying `~/.hermes/config.yaml`, the plugin auto-detects file changes and reloads config (up to 5s delay). No gateway restart needed.
 
-### Doctor Diagnostic Command
+### Feishu Credentials
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 | Environment Variables | `FEISHU_APP_ID`, `FEISHU_APP_SECRET` |
+| 2 | File | `~/.hermes/.env` |
+| 3 | Config File | `hermes_lark_streaming.feishu.app_id` |
 
 ```bash
-# Auto-detect Hermes Python path
-HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
-# Run full diagnostic
-$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
+# ~/.hermes/.env example
+FEISHU_APP_ID=cli_xxxxxx
+FEISHU_APP_SECRET=xxxxxx
+FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 ```
-
-Checks: plugin version, Python environment, config, Feishu credentials, patch status, log paths.
 
 ---
 
