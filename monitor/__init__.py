@@ -1,33 +1,24 @@
-"""Monitoring dashboard — lightweight HTTP server for plugin metrics.
+"""Monitoring metrics + Feishu card command.
 
-v1.1.0 (Task 3.7): Provides real-time visibility into plugin health.
+v1.1.0: Monitoring via /monitor command instead of HTTP server.
+Users send "/monitor" in Feishu, plugin intercepts it (via
+pre_gateway_dispatch hook) and replies with a metrics card.
 
-Endpoints:
-  GET /          — Simple HTML dashboard (auto-refresh, interval configurable)
-  GET /metrics   — JSON metrics (scrape-friendly)
-  GET /health    — Simple health check (200 OK if running)
+This avoids running a background HTTP server — zero memory overhead
+when not in use, and users get metrics in Feishu where they already are.
 
-Configuration (in config.yaml):
-  hermes_lark_streaming:
-    monitor:
-      enabled: false        # default off
-      port: 9191            # metrics server port
-      host: "127.0.0.1"     # bind address (use 0.0.0.0 for external access)
-      refresh_interval: 10  # dashboard auto-refresh interval in seconds (default 10)
-
-The server runs in a background asyncio task within the Hermes gateway
-process. It shares the event loop with the plugin's card operations.
+Metrics are collected globally throughout the plugin's lifetime:
+  - record_card_created/completed/failed/aborted
+  - record_api_call/error
+  - record_full_rebuild
+  - set_active_sessions
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import time
 from typing import Any
-
-from ..config import Config
 
 _logger = logging.getLogger("hermes_lark_streaming")
 
@@ -104,163 +95,358 @@ def _format_uptime(seconds: float) -> str:
     return f"{hours}h {minutes % 60}m"
 
 
-# ── HTTP server ──
+# ── Monitor card builder ──
 
-_HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="zh">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="refresh" content="{refresh_interval}">
-<title>hermes-lark-streaming Monitor</title>
-<style>
-body {{ font-family: -apple-system, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
-.container {{ max-width: 800px; margin: 0 auto; }}
-h1 {{ color: #333; font-size: 24px; }}
-.grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-top: 20px; }}
-.card {{ background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-.card .label {{ color: #666; font-size: 12px; text-transform: uppercase; }}
-.card .value {{ color: #333; font-size: 28px; font-weight: bold; margin-top: 4px; }}
-.card .sub {{ color: #999; font-size: 12px; margin-top: 4px; }}
-.errors {{ background: #fff3e0; }}
-.errors .value {{ color: #e65100; }}
-.footer {{ margin-top: 20px; color: #999; font-size: 12px; text-align: center; }}
-</style>
-</head>
-<body>
-<div class="container">
-<h1>hermes-lark-streaming Monitor</h1>
-<div class="grid">
-  <div class="card"><div class="label">Cards Created</div><div class="value">{cards_created}</div></div>
-  <div class="card"><div class="label">Completed</div><div class="value">{cards_completed}</div></div>
-  <div class="card errors"><div class="label">Failed</div><div class="value">{cards_failed}</div></div>
-  <div class="card"><div class="label">Aborted</div><div class="value">{cards_aborted}</div></div>
-  <div class="card"><div class="label">API Calls</div><div class="value">{api_calls}</div></div>
-  <div class="card errors"><div class="label">API Errors</div><div class="value">{api_errors}</div></div>
-  <div class="card"><div class="label">Stream Calls</div><div class="value">{stream_element_calls}</div><div class="sub">Failures: {stream_element_failures}</div></div>
-  <div class="card"><div class="label">Batch Updates</div><div class="value">{batch_update_calls}</div></div>
-  <div class="card errors"><div class="label">Full Rebuilds</div><div class="value">{full_rebuilds}</div></div>
-  <div class="card"><div class="label">Active Sessions</div><div class="value">{active_sessions}</div></div>
-  <div class="card"><div class="label">Uptime</div><div class="value" style="font-size:20px">{uptime_human}</div></div>
-</div>
-{error_codes_html}
-<div class="footer">Auto-refresh every {refresh_interval}s · <a href="/metrics">JSON Metrics</a> · <a href="/health">Health</a></div>
-</div>
-</body>
-</html>"""
+def build_monitor_card() -> dict[str, Any]:
+    """Build a Feishu CardKit v2.0 card showing current metrics.
 
-
-async def _handle_root(request: Any) -> Any:
-    """Serve the HTML dashboard."""
-    m = get_metrics()
-    error_codes_html = ""
-    if m["error_codes"]:
-        items = "".join(
-            f"<div class='card'><div class='label'>Error {code}</div><div class='value'>{count}</div></div>"
-            for code, count in sorted(m["error_codes"].items())
-        )
-        error_codes_html = f"<h2 style='margin-top:20px;color:#e65100'>Error Codes</h2><div class='grid'>{items}</div>"
-
-    html = _HTML_TEMPLATE.format(
-        cards_created=m["cards_created"],
-        cards_completed=m["cards_completed"],
-        cards_failed=m["cards_failed"],
-        cards_aborted=m["cards_aborted"],
-        api_calls=m["api_calls"],
-        api_errors=m["api_errors"],
-        stream_element_calls=m["stream_element_calls"],
-        stream_element_failures=m["stream_element_failures"],
-        batch_update_calls=m["batch_update_calls"],
-        full_rebuilds=m["full_rebuilds"],
-        active_sessions=m["active_sessions"],
-        uptime_human=m["uptime_human"],
-        error_codes_html=error_codes_html,
-        refresh_interval=_refresh_interval,
-    )
-    from aiohttp import web
-    return web.Response(text=html, content_type="text/html")
-
-
-async def _handle_metrics(request: Any) -> Any:
-    """Serve JSON metrics."""
-    from aiohttp import web
-    return web.json_response(get_metrics())
-
-
-async def _handle_health(request: Any) -> Any:
-    """Simple health check."""
-    from aiohttp import web
-    return web.Response(text="OK", status=200)
-
-
-# ── Server lifecycle ──
-
-_server_task: asyncio.Task | None = None
-_app: Any = None
-
-# v1.1.0: Dashboard auto-refresh interval (seconds), configurable via
-# hermes_lark_streaming.monitor.refresh_interval in config.yaml.
-# Default 10s — balances real-time visibility with browser resource usage.
-_refresh_interval: int = 10
-
-
-async def start_monitor_server(config: Config) -> None:
-    """Start the monitor HTTP server if enabled in config.
-
-    Called from plugin.register() after patches are applied.
+    Returns a card dict suitable for FeishuClient.send_card_to_chat().
     """
-    global _server_task, _app, _refresh_interval
+    m = get_metrics()
 
-    sec = config._plugin_sec()
-    monitor_cfg = sec.get("monitor", {})
-    if not isinstance(monitor_cfg, dict):
-        monitor_cfg = {}
+    # ── Build metric items as a grid of cards ──
+    def _metric_item(label: str, value: Any, color: str = "default") -> dict:
+        text_color = {
+            "default": "default",
+            "error": "red",
+            "warning": "orange",
+            "success": "green",
+        }.get(color, "default")
+        return {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"**{label}**\n{value}",
+            },
+            "text_color": text_color,
+        }
 
-    if not monitor_cfg.get("enabled", False):
-        _logger.debug("HLS: monitor disabled in config")
-        return
+    items = [
+        _metric_item("卡片创建", m["cards_created"]),
+        _metric_item("已完成", m["cards_completed"], "success"),
+        _metric_item("失败", m["cards_failed"], "error"),
+        _metric_item("已停止", m["cards_aborted"]),
+        _metric_item("API 调用", m["api_calls"]),
+        _metric_item("API 错误", m["api_errors"], "error" if m["api_errors"] > 0 else "default"),
+        _metric_item("流式调用", m["stream_element_calls"]),
+        _metric_item("流式失败", m["stream_element_failures"], "error" if m["stream_element_failures"] > 0 else "default"),
+        _metric_item("批量更新", m["batch_update_calls"]),
+        _metric_item("全卡重建", m["full_rebuilds"], "warning" if m["full_rebuilds"] > 0 else "default"),
+        _metric_item("活跃会话", m["active_sessions"]),
+        _metric_item("运行时间", m["uptime_human"]),
+    ]
 
-    port = int(monitor_cfg.get("port", 9191))
-    host = str(monitor_cfg.get("host", "127.0.0.1"))
-    # v1.1.0: configurable refresh interval (default 10s, range 5-300)
-    _refresh_interval = max(5, min(300, int(monitor_cfg.get("refresh_interval", 10))))
+    # ── Error code breakdown (if any) ──
+    error_elements: list[dict] = []
+    if m["error_codes"]:
+        error_lines = []
+        for code, count in sorted(m["error_codes"].items()):
+            error_lines.append(f"  • 错误码 `{code}`: {count} 次")
+        error_elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": "**错误码分布**\n" + "\n".join(error_lines),
+            },
+            "text_color": "orange",
+        })
 
+    # ── Build card ──
+    card = {
+        "schema": "2.0",
+        "config": {
+            "update_multi": True,
+        },
+        "header": {
+            "title": {
+                "tag": "plain_text",
+                "content": "📊 插件监控面板",
+            },
+            "template": "blue",
+        },
+        "body": {
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**版本**: v{_get_version()}  |  **运行时间**: {m['uptime_human']}",
+                    },
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "column_set",
+                    "flex_mode": "none",
+                    "background_style": "default",
+                    "columns": [
+                        {
+                            "tag": "column",
+                            "elements": [items[i]],
+                            "width": "weighted",
+                            "weight": 1,
+                        }
+                        for i in range(0, min(4, len(items)))
+                    ],
+                },
+                {
+                    "tag": "column_set",
+                    "flex_mode": "none",
+                    "background_style": "default",
+                    "columns": [
+                        {
+                            "tag": "column",
+                            "elements": [items[i]],
+                            "width": "weighted",
+                            "weight": 1,
+                        }
+                        for i in range(4, min(8, len(items)))
+                    ],
+                },
+                {
+                    "tag": "column_set",
+                    "flex_mode": "none",
+                    "background_style": "default",
+                    "columns": [
+                        {
+                            "tag": "column",
+                            "elements": [items[i]],
+                            "width": "weighted",
+                            "weight": 1,
+                        }
+                        for i in range(8, min(12, len(items)))
+                    ],
+                },
+                *error_elements,
+                {"tag": "hr"},
+                {
+                    "tag": "note",
+                    "elements": [
+                        {
+                            "tag": "plain_text",
+                            "content": f"数据更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}  |  发送 /monitor 刷新",
+                        }
+                    ],
+                },
+            ],
+        },
+    }
+    return card
+
+
+def _get_version() -> str:
+    """Get plugin version from plugin.yaml."""
     try:
-        from aiohttp import web
-    except ImportError:
-        _logger.warning("HLS: aiohttp not available, monitor server disabled")
-        return
+        from pathlib import Path
+        import os
+        yaml_path = Path(__file__).resolve().parent.parent / "plugin.yaml"
+        if yaml_path.exists():
+            for line in yaml_path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("version:"):
+                    return line.split(":", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return "unknown"
 
-    _app = web.Application()
-    _app.router.add_get("/", _handle_root)
-    _app.router.add_get("/metrics", _handle_metrics)
-    _app.router.add_get("/health", _handle_health)
 
-    async def _run():
-        runner = web.AppRunner(_app)
-        await runner.setup()
-        site = web.TCPSite(runner, host=host, port=port)
-        await site.start()
-        _logger.info("HLS: monitor server started on %s:%d", host, port)
-        # Keep running until cancelled
+# ── pre_gateway_dispatch hook handler ──
+
+# /aowen 是插件的命令前缀，所有 /aowen 开头的命令都由此插件处理
+# 不经过 Hermes agent，直接返回卡片
+# 当前支持的子命令：
+#   /aowen monitor  — 显示监控面板卡片
+#   /aowen help     — 显示可用命令列表
+_AOWEN_COMMANDS = {
+    "monitor": "显示插件监控面板（卡片创建数、API 调用数、错误码分布等）",
+    "help": "显示 /aowen 系列命令列表",
+}
+
+
+def handle_pre_gateway_dispatch(event: Any, gateway: Any = None, **kwargs) -> dict | None:
+    """Handle /aowen commands — intercept and reply with cards.
+
+    This is registered as a pre_gateway_dispatch hook callback. When the
+    user sends "/aowen <subcommand>" in Feishu, this function:
+    1. Detects the /aowen prefix
+    2. Routes to the appropriate subcommand handler
+    3. Sends a card to the chat
+    4. Returns {"action": "skip"} to prevent the message from reaching the agent
+
+    Returns None for non-/aowen messages (normal dispatch continues).
+
+    Supported commands:
+      /aowen monitor  — show metrics card
+      /aowen help     — show available commands
+      /aowen          — same as /aowen help
+    """
+    try:
+        text = getattr(event, "text", "") or ""
+        text_stripped = text.strip()
+
+        # Only handle commands starting with /aowen (case-insensitive)
+        if not text_stripped.lower().startswith("/aowen"):
+            return None
+
+        # Only handle on Feishu platform
+        source = getattr(event, "source", None)
+        platform = getattr(getattr(source, "platform", None), "value", "")
+        if platform != "feishu":
+            return None
+
+        chat_id = getattr(source, "chat_id", "") if source else ""
+        if not chat_id:
+            _logger.warning("HLS: /aowen command but no chat_id")
+            return None
+
+        # Parse subcommand
+        # /aowen          → help
+        # /aowen monitor  → monitor
+        # /aowen help     → help
+        parts = text_stripped.split(None, 1)  # split into ["/aowen", "subcommand args"]
+        subcommand = parts[1].strip().lower() if len(parts) > 1 else "help"
+        # Take only the first word of subcommand (ignore extra args)
+        subcommand = subcommand.split()[0] if subcommand else "help"
+
+        _logger.info("HLS: /aowen %s command detected, chat=%s", subcommand, chat_id[:12])
+
+        # Route to subcommand handler
+        if subcommand == "monitor":
+            return _handle_monitor_command(chat_id)
+        elif subcommand == "help" or subcommand == "":
+            return _handle_help_command(chat_id)
+        else:
+            return _handle_unknown_command(chat_id, subcommand)
+
+    except Exception:
+        _logger.debug("HLS: /aowen handler error", exc_info=True)
+        return None
+
+
+def _handle_monitor_command(chat_id: str) -> dict:
+    """Handle /aowen monitor — send metrics card."""
+    import asyncio
+    from ..controller import get_controller
+
+    ctrl = get_controller()
+    if not ctrl.enabled or not ctrl._client_ok():
+        _logger.warning("HLS: /aowen monitor but controller not ready")
+        return {"action": "skip", "reason": "monitor: controller not ready"}
+
+    card = build_monitor_card()
+
+    async def _send_card():
         try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            await runner.cleanup()
+            await ctrl._client.send_card_to_chat(chat_id, card)
+            _logger.info("HLS: monitor card sent to chat=%s", chat_id[:12])
+        except Exception:
+            _logger.error("HLS: failed to send monitor card", exc_info=True)
 
-    _server_task = asyncio.get_event_loop().create_task(_run())
+    loop = asyncio.get_event_loop()
+    loop.create_task(_send_card())
+
+    return {"action": "skip", "reason": "/aowen monitor handled"}
 
 
-async def stop_monitor_server() -> None:
-    """Stop the monitor server."""
-    global _server_task
-    if _server_task is not None:
-        _server_task.cancel()
+def _handle_help_command(chat_id: str) -> dict:
+    """Handle /aowen help — send help card listing available commands."""
+    import asyncio
+    from ..controller import get_controller
+
+    ctrl = get_controller()
+    if not ctrl.enabled or not ctrl._client_ok():
+        _logger.warning("HLS: /aowen help but controller not ready")
+        return {"action": "skip", "reason": "help: controller not ready"}
+
+    card = _build_help_card()
+
+    async def _send_card():
         try:
-            await _server_task
-        except asyncio.CancelledError:
-            pass
-        _server_task = None
-        _logger.info("HLS: monitor server stopped")
+            await ctrl._client.send_card_to_chat(chat_id, card)
+            _logger.info("HLS: help card sent to chat=%s", chat_id[:12])
+        except Exception:
+            _logger.error("HLS: failed to send help card", exc_info=True)
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(_send_card())
+
+    return {"action": "skip", "reason": "/aowen help handled"}
+
+
+def _handle_unknown_command(chat_id: str, subcommand: str) -> dict:
+    """Handle unknown /aowen subcommand."""
+    import asyncio
+    from ..controller import get_controller
+
+    ctrl = get_controller()
+    if not ctrl.enabled or not ctrl._client_ok():
+        return {"action": "skip", "reason": "unknown: controller not ready"}
+
+    card = {
+        "schema": "2.0",
+        "config": {"update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "❓ 未知命令"},
+            "template": "orange",
+        },
+        "body": {
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"未知命令: `/aowen {subcommand}`\n\n发送 `/aowen help` 查看可用命令列表",
+                    },
+                },
+            ],
+        },
+    }
+
+    async def _send_card():
+        try:
+            await ctrl._client.send_card_to_chat(chat_id, card)
+        except Exception:
+            _logger.error("HLS: failed to send unknown command card", exc_info=True)
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(_send_card())
+
+    return {"action": "skip", "reason": f"/aowen {subcommand} unknown"}
+
+
+def _build_help_card() -> dict:
+    """Build a help card listing all /aowen commands."""
+    command_lines = []
+    for cmd, desc in _AOWEN_COMMANDS.items():
+        command_lines.append(f"  • `/aowen {cmd}` — {desc}")
+
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "📖 插件命令帮助"},
+            "template": "blue",
+        },
+        "body": {
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**hermes-lark-streaming** v{_get_version()}\n\n所有命令以 `/aowen` 开头，不经过 Hermes AI，直接由插件处理：\n\n" + "\n".join(command_lines),
+                    },
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "note",
+                    "elements": [
+                        {
+                            "tag": "plain_text",
+                            "content": "发送 /aowen <命令名> 使用对应功能",
+                        }
+                    ],
+                },
+            ],
+        },
+    }
 
 
 __all__ = [
@@ -273,6 +459,6 @@ __all__ = [
     "record_full_rebuild",
     "set_active_sessions",
     "get_metrics",
-    "start_monitor_server",
-    "stop_monitor_server",
+    "build_monitor_card",
+    "handle_pre_gateway_dispatch",
 ]

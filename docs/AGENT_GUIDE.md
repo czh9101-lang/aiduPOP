@@ -132,10 +132,6 @@ feishu:
 | `streaming_panel_expanded` | `false` | bool | 流式态卡片面板是否展开 |
 | `footer.show_label` | `false` | bool | 是否显示页脚字段标签 |
 | `footer.fields` | `[[status, elapsed, model, cost, compression_exhausted]]` | array | 页脚字段配置 |
-| `monitor.enabled` | `false` | bool | 启用监控面板 HTTP 服务器 |
-| `monitor.port` | `9191` | int | 监控面板端口 |
-| `monitor.host` | `127.0.0.1` | str | 监控面板绑定地址（`0.0.0.0` 允许外部访问） |
-| `monitor.refresh_interval` | `10` | int | 仪表盘自动刷新间隔（秒，范围 5~300） |
 | `theme.name` | `default` | str | 卡片主题预设（`default`/`dark`/`compact`） |
 | `theme.*` | — | str | 覆盖主题的单个值（如 `theme.panel_icon`） |
 
@@ -162,11 +158,6 @@ hermes_lark_streaming:
     show_label: false
     fields:
       - [status, elapsed, model, cost, compression_exhausted]
-  # v1.1.0 新增：监控面板（可选）
-  monitor:
-    enabled: false
-    port: 9191
-    host: "127.0.0.1"
   # v1.1.0 新增：卡片主题（可选）
   theme:
     name: default
@@ -179,6 +170,16 @@ display:
   #   feishu:
   #     show_reasoning: true
 ```
+
+### 插件命令（/aowen 前缀）
+
+所有 `/aowen` 开头的命令由插件处理，不经过 Hermes AI：
+
+| 命令 | 说明 |
+|------|------|
+| `/aowen monitor` | 显示插件监控面板（卡片创建数、API 调用数、错误码分布等） |
+| `/aowen help` | 显示所有 `/aowen` 命令列表 |
+| `/aowen` | 同 `/aowen help` |
 
 ## 提供的钩子（Hooks）
 

@@ -203,21 +203,14 @@ The panel title always shows the **actual total** (e.g. "3 rounds · 44 tools");
 
 ### Monitor Dashboard
 
-Built-in lightweight HTTP server providing real-time plugin health metrics (cards created/completed/failed, API call count, error code distribution, active sessions, uptime, etc.).
+Send `/aowen monitor` command in Feishu, the plugin replies with a metrics card directly (bypassing Hermes AI), showing: cards created/completed/failed, API call count, error code distribution, active sessions, uptime, etc.
 
-```yaml
-hermes_lark_streaming:
-  monitor:
-    enabled: false                # Enable monitor dashboard (default off)
-    port: 9191                    # Monitor dashboard port
-    host: "127.0.0.1"             # Bind address (0.0.0.0 for external access)
-    refresh_interval: 10          # Dashboard auto-refresh interval in seconds (default 10, range 5~300)
+```
+User sends: /aowen monitor
+Plugin replies: 📊 Monitor dashboard card (real-time data)
 ```
 
-Endpoints:
-- `http://<host>:<port>/` — HTML dashboard (auto-refresh)
-- `http://<host>:<port>/metrics` — JSON metrics (scrape-friendly)
-- `http://<host>:<port>/health` — Health check
+> The monitor card is generated on-demand when the command is sent — zero background memory usage. `/aowen` is the plugin's command prefix; all `/aowen` commands are handled by the plugin, not Hermes. Send `/aowen help` to see all available commands.
 
 ### Card Theme System
 

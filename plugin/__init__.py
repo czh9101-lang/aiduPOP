@@ -255,20 +255,20 @@ def register(ctx: "PluginContext") -> None:
     except Exception:
         _logger.debug("hermes-lark-streaming v%s: FeishuClient pre-warm skipped", __version__, exc_info=True)
 
-    # ── v1.1.0: Start monitor server (Task 3.7) ──
+    # ── v1.1.0: Register /aowen command hook (Task 3.7) ──
+    # /aowen is the plugin's command prefix. All /aowen commands are
+    # intercepted by the plugin (via pre_gateway_dispatch hook) and
+    # never reach the Hermes agent.
+    # Current commands:
+    #   /aowen monitor  — show metrics card
+    #   /aowen help     — show available commands
+    #   /aowen          — same as /aowen help
     try:
-        from ..monitor import start_monitor_server
-        from ..config import Config
-        import asyncio as _asyncio
-
-        _monitor_cfg = Config()
-        loop = _asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(start_monitor_server(_monitor_cfg))
-        else:
-            _logger.debug("hermes-lark-streaming v%s: monitor server deferred (no event loop)", __version__)
+        from ..monitor import handle_pre_gateway_dispatch
+        ctx.register_hook("pre_gateway_dispatch", handle_pre_gateway_dispatch)
+        _logger.info("hermes-lark-streaming v%s: /aowen commands registered (monitor, help)", __version__)
     except Exception:
-        _logger.debug("hermes-lark-streaming v%s: monitor server start skipped", __version__, exc_info=True)
+        _logger.debug("hermes-lark-streaming v%s: /aowen hook registration skipped", __version__, exc_info=True)
 
     # ── v1.1.0: Register theme cache invalidation on config reload (Task 3.5+3.6) ──
     try:

@@ -4,6 +4,7 @@ description: "Feishu/Lark CardKit v2.0 streaming cards for Hermes Agent — real
 author: Aowen-Nowor
 kind: standalone
 provides_hooks:
+  - pre_gateway_dispatch
   - on_feishu_normalize
   - on_message_started
   - on_message_completed

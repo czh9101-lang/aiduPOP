@@ -203,21 +203,14 @@ hermes_lark_streaming:
 
 ### 监控面板
 
-插件内置轻量监控 HTTP 服务器，提供实时插件健康指标（卡片创建数、完成数、失败数、API 调用数、错误码分布、活跃会话数、运行时间等）。
+在飞书中发送 `/aowen monitor` 命令，插件会直接回复一张监控卡片（不经过 Hermes AI），展示插件运行指标：卡片创建数、完成数、失败数、API 调用数、错误码分布、活跃会话数、运行时间等。
 
-```yaml
-hermes_lark_streaming:
-  monitor:
-    enabled: false                # 启用监控面板（默认关闭）
-    port: 9191                    # 监控面板端口
-    host: "127.0.0.1"             # 绑定地址（0.0.0.0 允许外部访问）
-    refresh_interval: 10          # 仪表盘自动刷新间隔（秒，默认 10，范围 5~300）
+```
+用户发送: /aowen monitor
+插件回复: 📊 插件监控面板卡片（实时数据）
 ```
 
-启用后访问：
-- `http://<host>:<port>/` — HTML 仪表盘（自动刷新）
-- `http://<host>:<port>/metrics` — JSON 格式指标（便于采集）
-- `http://<host>:<port>/health` — 健康检查
+> 监控卡片每次发送命令时实时生成，不占用后台内存。`/aowen` 是插件的命令前缀，所有 `/aowen` 开头的命令都由插件处理，不经过 Hermes。发送 `/aowen help` 查看所有可用命令。
 
 ### 卡片样式主题
 
