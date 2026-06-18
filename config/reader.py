@@ -269,13 +269,25 @@ class Config:
     def _platform_cfg(self) -> dict[str, Any]:
         """从环境变量或平台配置找飞书凭据."""
         if self.env_app_id and self.env_app_secret:
+            # base_url 优先级：
+            # 1. FEISHU_BASE_URL / LARK_BASE_URL 环境变量（显式指定，最高优先级）
+            # 2. FEISHU_DOMAIN 环境变量推断（feishu→国内, lark→国际）
+            # 3. 默认 https://open.feishu.cn/open-apis
+            base_url = (
+                os.environ.get("FEISHU_BASE_URL")
+                or os.environ.get("LARK_BASE_URL")
+                or None
+            )
+            if not base_url:
+                domain = os.environ.get("FEISHU_DOMAIN", "").lower()
+                if domain == "lark":
+                    base_url = "https://open.larksuite.com/open-apis"
+                else:
+                    base_url = "https://open.feishu.cn/open-apis"
             return {
                 "app_id": self.env_app_id,
                 "app_secret": self.env_app_secret,
-                "base_url": os.environ.get(
-                    "FEISHU_BASE_URL",
-                    os.environ.get("LARK_BASE_URL", "https://open.feishu.cn/open-apis"),
-                ),
+                "base_url": base_url,
             }
         raw = self._load()
         for key in ("feishu", "lark"):

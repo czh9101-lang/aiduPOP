@@ -204,8 +204,8 @@ class FeishuClient:
     def __init__(self, config: FeishuClientConfig) -> None:
         self.config = config
         builder = lark.Client.builder().app_id(config.app_id).app_secret(config.app_secret)
-        # .domain() 只接受域名（如 https://open.feishu.cn），不带路径后缀
-        # 如果 base_url 包含 /open-apis 后缀，去掉它
+        # .domain() 只接受域名（如 https://open.feishu.cn），不带 /open-apis 后缀
+        # 默认域名 https://open.feishu.cn 不需要调 .domain()（SDK 默认就是它）
         domain = config.base_url
         if domain and "/open-apis" in domain:
             domain = domain.split("/open-apis")[0]
