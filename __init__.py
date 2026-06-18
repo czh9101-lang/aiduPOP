@@ -67,7 +67,7 @@ Runtime Patching:
 
 Monitoring:
   monitor/                    Sub-package
-    __init__.py               HTTP server (metrics dashboard + JSON endpoint)
+    __init__.py               /aowen command system (pre_gateway_dispatch hook + metrics + cards)
 
 Plugin Entry:
   plugin/                     Sub-package

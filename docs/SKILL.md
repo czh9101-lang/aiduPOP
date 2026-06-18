@@ -78,9 +78,9 @@ Background: _run_background_task ── [Hook 1/2]
 | `└ controller.py` | 节流调度器 | CardKit 80ms / IM PATCH 1.5s，互斥锁 + re-flush |
 | **config/** | **配置读取子包** | |
 | `├ __init__.py` | 重导出门面 | `Config`, `_get_hermes_config_path` |
-| `└ reader.py` | 配置读取 | `_plugin_sec()` 惰性加载 + 5秒 TTL 缓存 + mtime 热更新 (v1.1.0) |
-| **monitor/** | **监控面板子包 (v1.1.0)** | |
-| `└ __init__.py` | HTTP 服务器 | aiohttp + HTML 仪表盘 + JSON metrics + 健康检查 |
+| `└ reader.py` | 配置读取 | `_plugin_sec()` 惰性加载 + 60秒 TTL 缓存 + mtime 热更新 (v1.1.0) |
+| **monitor/** | **监控命令子包 (v1.1.0)** | |
+| `└ __init__.py` | /aowen 命令体系 | pre_gateway_dispatch hook + metrics 收集 + 卡片构建 |
 | **plugin/** | **插件注册子包 (v1.1.0)** | |
 | `└ __init__.py` | 注册入口 | `register()`/`unregister()` + 自动备份 config + FeishuClient 预热 + monitor 启动 |
 | `__main__.py` | CLI 入口 | status/verify/doctor/cleanup/python |
@@ -113,11 +113,11 @@ Background: _run_background_task ── [Hook 1/2]
 
 **4.12 并发限流 (v1.1.0)**: `on_message_started` 时 seal 同 chat_id 的旧活跃卡片为"被新消息取代"，防止多张活跃卡片竞争 API 调用。
 
-**4.13 配置热更新 (v1.1.0)**: `Config.reload()` 清缓存 + mtime 自动检测 + `on_reload` 回调注册。修改 config.yaml 后最多 5 秒自动生效，无需重启网关。
+**4.13 配置热更新 (v1.1.0)**: `Config.reload()` 清缓存 + mtime 自动检测 + `on_reload` 回调注册。修改 config.yaml 后最多 60 秒自动生效，无需重启网关。
 
 **4.14 卡片主题 (v1.1.0)**: `cardkit/theme.py` 提供 3 个预设主题（default/dark/compact）+ 用户自定义覆盖。颜色、图标等不再硬编码。
 
-**4.15 监控面板 (v1.1.0)**: `monitor/` 子包提供轻量 HTTP 服务器，HTML 仪表盘（可配置刷新间隔）+ JSON metrics + 健康检查。默认关闭，通过 `monitor.enabled` 开启。
+**4.15 /aowen 命令体系 (v1.1.0)**: `monitor/` 子包通过 `pre_gateway_dispatch` hook 拦截 `/aowen` 命令，直接回复飞书卡片，不经过 Hermes AI。命令：`/aowen help`、`/aowen status`（含配置折叠面板）、`/aowen monitor`、`/aowen monitor reset`。零后台内存占用。
 
 **4.16 状态机标志位收敛 (v1.1.0)**: 8 个布尔标志位合并为 `_creation_stages: set[str]`（含 `"panel"`/`"answer"`/`"hint_removed"`）+ 4 个正交布尔（`_streaming_closed`/`_was_aborted`/`_pending_flush`/`_first_flush_done`）。
 
@@ -255,11 +255,6 @@ hermes_lark_streaming:
     show_label: false
     fields: [[status, elapsed, model, cost, compression_exhausted]]
   # v1.1.0 新增：
-  monitor:
-    enabled: false
-    port: 9191
-    host: "127.0.0.1"
-    refresh_interval: 10           # 秒，范围 5~300
   theme:
     name: default                  # default / dark / compact
 

@@ -393,7 +393,7 @@ class TestReloadCached:
         raw_new = {"hermes_lark_streaming": {"inject_time": True}}
 
         cfg._reload_cache = raw_old
-        cfg._reload_cache_at = time.monotonic() - 5.01  # Just over TTL
+        cfg._reload_cache_at = time.monotonic() - 60.01  # Just over TTL
 
         # Need to mock the actual file reading part
         # Now uses _get_hermes_config_path() for multi-Profile support

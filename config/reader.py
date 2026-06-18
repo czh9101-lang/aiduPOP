@@ -28,7 +28,7 @@ def _get_hermes_config_path() -> Path:
     return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
 
 
-_RELOAD_CACHE_TTL = 5.0  # 运行时可变配置的缓存 TTL（秒）
+_RELOAD_CACHE_TTL = 60.0  # 运行时可变配置的缓存 TTL（秒）— 60 秒平衡实时性与磁盘 IO
 
 
 class Config:

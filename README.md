@@ -203,14 +203,17 @@ The panel title always shows the **actual total** (e.g. "3 rounds · 44 tools");
 
 ### Monitor Dashboard
 
-Send `/aowen monitor` command in Feishu, the plugin replies with a metrics card directly (bypassing Hermes AI), showing: cards created/completed/failed, API call count, error code distribution, active sessions, uptime, etc.
+Send `/aowen` commands in Feishu, the plugin replies with cards directly (bypassing Hermes AI):
 
-```
-User sends: /aowen monitor
-Plugin replies: 📊 Monitor dashboard card (real-time data)
-```
+| Command | Description |
+|---------|-------------|
+| `/aowen help` | Show all available commands |
+| `/aowen status` | Show plugin status + current config (collapsible panel) |
+| `/aowen monitor` | Show metrics dashboard (cards created, API calls, error codes, etc.) |
+| `/aowen monitor reset` | Reset metrics counters |
+| `/aowen` | Same as `/aowen help` |
 
-> The monitor card is generated on-demand when the command is sent — zero background memory usage. `/aowen` is the plugin's command prefix; all `/aowen` commands are handled by the plugin, not Hermes. Send `/aowen help` to see all available commands.
+> `/aowen` is the plugin's command prefix; all `/aowen` commands are handled by the plugin, not Hermes. Data is generated on-demand — zero background memory usage.
 
 ### Card Theme System
 
@@ -228,7 +231,7 @@ hermes_lark_streaming:
 
 ### Hot Config Reload
 
-After modifying `~/.hermes/config.yaml`, the plugin auto-detects file changes and reloads config (up to 5s delay). No gateway restart needed.
+After modifying `~/.hermes/config.yaml`, the plugin auto-detects file changes and reloads config (up to 60s delay). No gateway restart needed.
 
 ### Feishu Credentials
 
