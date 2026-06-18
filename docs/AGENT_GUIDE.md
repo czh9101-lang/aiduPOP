@@ -176,7 +176,7 @@ display:
 | `/aowen status` | 查看插件状态 + 当前配置（折叠面板展示） |
 | `/aowen monitor` | 查看监控面板（卡片创建数、API 调用数、错误码分布等） |
 | `/aowen monitor reset` | 重置监控统计计数器 |
-| `/aowen config reload` | 立即重新加载 config.yaml（不等自动 mtime 检测） |
+| `/aowen config reload` | 修改 config.yaml 后重新加载配置立即生效 |
 | `/aowen` | 同 `/aowen help` |
 
 ## 提供的钩子（Hooks）

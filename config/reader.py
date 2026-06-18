@@ -173,8 +173,8 @@ class Config:
         if isinstance(platforms, dict):
             feishu = platforms.get("feishu")
             if isinstance(feishu, dict) and "show_reasoning" in feishu:
-                return bool(feishu["show_reasoning"])
-        return bool(display.get("show_reasoning", False))
+                return _to_bool(feishu["show_reasoning"])
+        return _to_bool(display.get("show_reasoning", False))
 
     @property
     def feishu_app_id(self) -> str:
@@ -231,7 +231,7 @@ class Config:
         """Footer 是否显示字段标签."""
         sec = self._plugin_sec()
         footer = sec.get("footer", {})
-        return bool(footer.get("show_label", False))
+        return _to_bool(footer.get("show_label", False))
 
     @property
     def header_enabled(self) -> bool:
