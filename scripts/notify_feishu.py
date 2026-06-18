@@ -54,6 +54,7 @@ sign = base64.b64encode(hmac_code).decode("utf-8")
 # ── 解析 JUnit XML，按文件聚合 ──
 
 failed_summary = []  # 只收集失败的文件
+skipped_details = []  # 收集跳过的测试名和原因
 total_tests = 0
 total_failures = 0
 total_errors = 0
@@ -81,6 +82,13 @@ try:
             file_map[fname]["error"] += 1
         if tc.find("skipped") is not None:
             file_map[fname]["skip"] += 1
+            # 收集跳过原因
+            skip_el = tc.find("skipped")
+            skip_msg = skip_el.get("message", "") if skip_el is not None else ""
+            tc_name = tc.get("name", "unknown")
+            # 类名取最后一段做简短显示
+            short_cn = cn.split(".")[-1] if "." in cn else cn
+            skipped_details.append(f"  • `{short_cn}::{tc_name}` — {skip_msg[:80]}")
 
     for fname, counts in sorted(file_map.items()):
         total_tests += counts["total"]
@@ -232,6 +240,21 @@ if failed_summary:
         "text": {
             "tag": "lark_md",
             "content": "**❌ 失败脚本**:\n" + "\n".join(failed_summary),
+        },
+    })
+
+# 跳过的测试展示原因
+if skipped_details:
+    elements.append({"tag": "hr"})
+    # 最多展示 10 条，避免卡片过长
+    display_skips = skipped_details[:10]
+    if len(skipped_details) > 10:
+        display_skips.append(f"  • ... 共 {len(skipped_details)} 条跳过")
+    elements.append({
+        "tag": "div",
+        "text": {
+            "tag": "lark_md",
+            "content": f"**⏭️ 跳过的测试** ({total_skipped}):\n" + "\n".join(display_skips),
         },
     })
 
