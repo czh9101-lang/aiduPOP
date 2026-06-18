@@ -42,17 +42,27 @@ jobs:
           git fetch gitee
 
           BRANCH=$(git branch --show-current)
+          FORCE_PUSH=false
 
           # v1.1.0: 从 Gitee github_sync 分支同步（稳定发布分支）
+          # Gitee 是主仓库，GitHub 是备份；冲突时以 Gitee 为准完全覆盖
           if git merge gitee/github_sync --no-edit --strategy-option theirs 2>/dev/null; then
             echo "✅ Merge succeeded (gitee/github_sync → $BRANCH)"
           else
-            echo "⚠️ Merge conflict, resetting to gitee/github_sync"
+            echo "⚠️ Merge conflict, resetting to gitee/github_sync (Gitee is source of truth)"
             git merge --abort 2>/dev/null || true
             git reset --hard gitee/github_sync
+            # reset 后本地 HEAD 可能落后于 GitHub 远程（GitHub 有 Gitee 没有的提交），
+            # 需要 force push 让 GitHub master 完全对齐 Gitee github_sync
+            FORCE_PUSH=true
           fi
 
-          git push origin "$BRANCH"
+          if [ "$FORCE_PUSH" = "true" ]; then
+            echo "🔧 Force pushing (覆盖 GitHub 远程以对齐 Gitee)"
+            git push --force origin "$BRANCH"
+          else
+            git push origin "$BRANCH"
+          fi
 
       - name: Detect changes
         id: detect
