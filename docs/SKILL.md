@@ -265,22 +265,22 @@ display:
 
 ---
 
-## 9. Hook 索引 (11 个注入点)
+## 9. Hook 索引 (12 个注入点)
 
 | # | Hook | 签名 | 说明 |
 |---|------|------|------|
-| 0 | `on_feishu_normalize` | sync | 修正飞书引用消息虚假 thread_id |
-| 1 | `on_message_started` | sync | 创建 CardSession |
-| 2 | `on_message_completed` | sync→bool | 完成态卡片，返回是否已发卡片 |
-| 3 | `on_tool_updated` | sync | 工具调用状态更新 |
-| 4 | `on_answer_delta` | sync | AI 回复增量文本 |
-| 5 | `on_thinking_delta` | sync | 思考内容（被跳过防重复） |
-| 6 | `on_reasoning_delta` | sync | 原生推理增量 |
-| 7 | `on_background_review_message` | sync | 后台审查通知 |
-| 8 | `on_message_aborted` | sync | 消息异常终止 |
-| 9 | `on_message_interrupted` | sync | 新消息打断旧消息 |
-| 10 | `on_cron_deliver` | **async** | Cron 推送卡片 |
-| 11 | `on_message_completed`(bg) | sync | 后台任务卡片（复用 Hook 2） |
+| 0 | `pre_gateway_dispatch` | sync→dict | 消息分发前拦截（v1.1.0 新增）。返回 `{"action":"skip"}` 阻止消息进入 agent，用于 /aowen 命令 |
+| 1 | `on_feishu_normalize` | sync | 修正飞书引用消息虚假 thread_id |
+| 2 | `on_message_started` | sync | 创建 CardSession |
+| 3 | `on_message_completed` | sync→bool | 完成态卡片，返回是否已发卡片 |
+| 4 | `on_tool_updated` | sync | 工具调用状态更新 |
+| 5 | `on_answer_delta` | sync | AI 回复增量文本 |
+| 6 | `on_thinking_delta` | sync | 思考内容（被跳过防重复） |
+| 7 | `on_reasoning_delta` | sync | 原生推理增量 |
+| 8 | `on_background_review_message` | sync | 后台审查通知 |
+| 9 | `on_message_aborted` | sync | 消息异常终止 |
+| 10 | `on_message_interrupted` | sync | 新消息打断旧消息 |
+| 11 | `on_cron_deliver` | **async** | Cron 推送卡片 |
 
 ---
 
