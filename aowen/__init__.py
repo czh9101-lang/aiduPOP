@@ -241,7 +241,7 @@ def build_status_card() -> dict[str, Any]:
         has_creds = bool(cfg.feishu_app_id or cfg.env_app_id)
         config_lines.append(f"  • **feishu_credentials**: `{'已配置' if has_creds else '未配置'}`")
 
-        config_text = "当前生效配置（修改 config.yaml 后最多 60 秒自动生效）：\n\n" + "\n".join(config_lines)
+        config_text = "当前生效配置（修改 config.yaml 后发送 /aowen config reload 生效）：\n\n" + "\n".join(config_lines)
 
         # ── Build card with collapsible panel for config ──
         return {

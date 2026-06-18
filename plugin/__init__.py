@@ -31,15 +31,9 @@ _logger = logging.getLogger("hermes_lark_streaming")
 
 
 def _get_hermes_config_path() -> Path:
-    """动态获取 Hermes 配置文件路径.
-    
-    在多 Profile 场景下，HERMES_HOME 环境变量会在 Gateway 启动时
-    通过 _apply_profile_override() 设置。如果在模块导入时就读取
-    该变量，可能会读到错误的路径。
-    
-    此函数每次调用时都重新读取环境变量，确保始终使用正确的路径。
-    """
-    return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
+    """动态获取 Hermes 配置文件路径（从 config/reader.py 复用）."""
+    from ..config.reader import _get_hermes_config_path as _get_path
+    return _get_path()
 
 
 _PLUGIN_NAME = "hermes-lark-streaming"

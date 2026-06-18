@@ -92,6 +92,22 @@ _logger = logging.getLogger("hermes_lark_streaming")
 _TTL_EXTEND_THRESHOLD_SEC = 540.0  # Extend TTL when card has lived > 540s
 _TTL_EXTEND_DELTA_SEC = 600        # Extend by 600s
 
+
+def _build_seal_summary(state: UnifiedLinearState | None) -> str:
+    """Build seal summary from state — answer text or fallback to reasoning.
+
+    Used in 4 places in preservative seal / full rebuild paths.
+    """
+    if state is None:
+        return ""
+    summary_text = state.answer_text
+    if not summary_text and state.reasoning_rounds:
+        summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
+    if summary_text:
+        return summary_text[:120].replace("\n", " ").replace("```", "").strip()
+    return ""
+
+
 # Fast-stream throttle for answer-only updates.
 # When only answer text is dirty (no panel changes), use a shorter
 # throttle interval so Feishu's typewriter renders characters
@@ -1110,13 +1126,7 @@ class UnifiedControllerMixin:
             # included in the close_streaming request itself — a separate
             # cardkit_update_summary call after streaming is closed does
             # NOT reliably update the conversation list preview.
-            seal_summary = ""
-            if state is not None:
-                summary_text = state.answer_text
-                if not summary_text and state.reasoning_rounds:
-                    summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
-                if summary_text:
-                    seal_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
+            seal_summary = _build_seal_summary(state)
 
             if not session._streaming_closed:
                 session.sequence += 1
@@ -1253,13 +1263,7 @@ class UnifiedControllerMixin:
                         # Close streaming AFTER batch_update
                         if not session._streaming_closed:
                             # Recompute seal_summary for retry (state may have changed)
-                            retry_summary = ""
-                            if state is not None:
-                                summary_text = state.answer_text
-                                if not summary_text and state.reasoning_rounds:
-                                    summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
-                                if summary_text:
-                                    retry_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
+                            retry_summary = _build_seal_summary(state)
                             session.sequence += 1
                             await self._client.cardkit_close_streaming(
                                 card_id, sequence=session.sequence, summary=retry_summary,
@@ -1550,13 +1554,7 @@ class UnifiedControllerMixin:
                 # Use _streaming_closed guard to prevent duplicate close_streaming
                 # calls which cause 300317 sequence conflicts.
                 if not session._streaming_closed:
-                    fallback_summary = ""
-                    if state is not None:
-                        summary_text = state.answer_text
-                        if not summary_text and state.reasoning_rounds:
-                            summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
-                        if summary_text:
-                            fallback_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
+                    fallback_summary = _build_seal_summary(state)
                     session.sequence += 1
                     try:
                         # ── Bug fix (v1.0.3): Pass summary IN close_streaming ──
@@ -1583,13 +1581,7 @@ class UnifiedControllerMixin:
                     # Belt-and-suspenders for the edge case where Feishu
                     # auto-closed streaming (TTL timeout) before we could
                     # pass the summary in close_streaming.
-                    fallback_summary = ""
-                    if state is not None:
-                        summary_text = state.answer_text
-                        if not summary_text and state.reasoning_rounds:
-                            summary_text = state.reasoning_rounds[-1].text if state.reasoning_rounds else ""
-                        if summary_text:
-                            fallback_summary = summary_text[:120].replace("\n", " ").replace("```", "").strip()
+                    fallback_summary = _build_seal_summary(state)
                     if fallback_summary:
                         try:
                             session.sequence += 1

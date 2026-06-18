@@ -17,6 +17,7 @@ import time
 from typing import Any, Callable
 
 from .. import __version__
+from ..state.phase import TERMINAL_PHASES
 from . import (
     _msg_ctx,
     _started_msg_ids,
@@ -163,10 +164,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                         if _ctrl and _ctrl.enabled:
                             for _other_mid in others:
                                 _other_sess = _ctrl._sessions.get(_other_mid)
-                                if _other_sess and _other_sess.state not in (
-                                    "completing", "completed", "creation_failed",
-                                    "aborted", "terminated",
-                                ):
+                                if _other_sess and _other_sess.state not in TERMINAL_PHASES and _other_sess.state != "completing":
                                     _real_interrupt = True
                                     _interrupt_new_mid = _other_mid
                                     break
@@ -213,7 +211,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                     _eid = ctx.get("event_message_id", "")
                     if _eid:
                         _sess = _ctrl._sessions.get(_eid)
-                        if _sess and _sess.state not in ("completing", "completed", "creation_failed", "aborted", "terminated"):
+                        if _sess and _sess.state not in TERMINAL_PHASES and _sess.state != "completing":
                             _logger.info(
                                 "card session stuck in non-terminal state for msg=%s "
                                 "(state=%s, card_sent=%s), firing abort",
