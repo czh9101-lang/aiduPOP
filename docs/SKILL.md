@@ -265,7 +265,7 @@ display:
 
 ---
 
-## 9. Hook 索引 (12 个注入点)
+## 9. Hook 索引 (13 个注入点)
 
 | # | Hook | 签名 | 说明 |
 |---|------|------|------|
@@ -281,6 +281,7 @@ display:
 | 9 | `on_message_aborted` | sync | 消息异常终止 |
 | 10 | `on_message_interrupted` | sync | 新消息打断旧消息 |
 | 11 | `on_cron_deliver` | **async** | Cron 推送卡片 |
+| 12 | `on_message_completed`(bg) | sync | 后台任务卡片（复用 Hook 3，但用 task_id 作为 message_id，调用场景不同） |
 
 ---
 

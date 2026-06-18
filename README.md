@@ -265,4 +265,4 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ## Acknowledgments
 
-[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222) [![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998)
+[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222) [![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998) [joshchengjoshcheng](https://gitee.com/joshchengjoshcheng)
