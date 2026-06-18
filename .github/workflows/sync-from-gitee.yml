@@ -122,12 +122,15 @@ jobs:
         id: check_tag
         run: |
           TAG="v${{ steps.version.outputs.version }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
+          # 检查 GitHub 远程是否有该 tag（不是本地对象库）
+          # git fetch gitee 会把 Gitee 上的 tag 拉到本地，git rev-parse 会误判为存在
+          # 用 git ls-remote --tags origin 检查 GitHub 远程才准确
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
             echo "tag_exists=true" >> $GITHUB_OUTPUT
-            echo "📌 Tag $TAG already exists, skipping Release creation"
+            echo "📌 Tag $TAG already exists on GitHub, skipping Release creation"
           else
             echo "tag_exists=false" >> $GITHUB_OUTPUT
-            echo "🆕 Tag $TAG does not exist, will create Release"
+            echo "🆕 Tag $TAG does not exist on GitHub, will create Release"
           fi
 
       - name: Extract release notes from CHANGELOG
