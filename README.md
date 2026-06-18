@@ -201,7 +201,7 @@ When the limit is exceeded, early items are collapsed into a single summary line
 
 The panel title always shows the **actual total** (e.g. "3 rounds · 44 tools"); the fold hint only affects what is displayed inside the panel.
 
-### Monitor Dashboard
+### /aowen Commands
 
 Send `/aowen` commands in Feishu, the plugin replies with cards directly (bypassing Hermes AI):
 
@@ -211,14 +211,10 @@ Send `/aowen` commands in Feishu, the plugin replies with cards directly (bypass
 | `/aowen status` | Show plugin status + current config (collapsible panel) |
 | `/aowen monitor` | Show metrics dashboard (cards created, API calls, error codes, etc.) |
 | `/aowen monitor reset` | Reset metrics counters |
-| `/aowen config reload` | Reload config.yaml (run after modifying config) |
+| `/aowen config reload` | After modifying `~/.hermes/config.yaml`, send this command in Feishu to apply immediately, or restart the gateway |
 | `/aowen` | Same as `/aowen help` |
 
-> `/aowen` is the plugin's command prefix; all `/aowen` commands are handled by the plugin, not Hermes. Data is generated on-demand — zero background memory usage.
-
-### Hot Config Reload
-
-After modifying `~/.hermes/config.yaml`, send `/aowen config reload` in Feishu to apply immediately, or restart the gateway.
+> `/aowen` is the plugin's command prefix; all `/aowen` commands are handled by the plugin, not Hermes.
 
 ### Feishu Credentials
 
