@@ -46,7 +46,7 @@ def _wrap_handle_message(orig: Callable) -> Callable:
                 reply_anchor_id=self._reply_anchor_for_event(event),
             )
         except Exception:
-            _logger.debug("HLS: suppressed exception", exc_info=True)
+            _logger.warning("HLS: suppressed exception", exc_info=True)
         return await orig(self, event, *args, **kwargs)
 
     return wrapper
@@ -75,7 +75,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                 anchor_id=anchor_id,
             )
         except Exception:
-            _logger.debug("HLS: suppressed exception", exc_info=True)
+            _logger.warning("HLS: suppressed exception", exc_info=True)
         # Seed message context for downstream hooks
         # Use a dedicated dict per message to prevent context leakage
         # between concurrent/overlapping messages.
@@ -131,7 +131,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                                 _started_msg_ids.discard(mid)
                             return None
             except Exception:
-                _logger.debug("HLS: suppressed exception", exc_info=True)
+                _logger.warning("HLS: suppressed exception", exc_info=True)
         # ── ABORT / INTERRUPT detection ──
         # When card was already sent, _handle_message_with_agent returns
         # None (the "Discarding stale agent result" path or the
@@ -188,7 +188,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                             anchor_id=anchor_id,
                         )
                     except Exception:
-                        _logger.debug("HLS: suppressed exception", exc_info=True)
+                        _logger.warning("HLS: suppressed exception", exc_info=True)
                 # else: card completed normally, Hermes returned None
                 #       to suppress text reply — NOT an abort.
             else:
@@ -198,7 +198,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
 
                     on_message_aborted(message_id=mid)
                 except Exception:
-                    _logger.debug("HLS: suppressed exception", exc_info=True)
+                    _logger.warning("HLS: suppressed exception", exc_info=True)
         elif ctx and ctx.get("card_sent"):
             # result is not None and card_sent=True — card was completed
             # by _wrap_run_agent's COMPLETE hook. Check if the card session
@@ -223,9 +223,9 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                                 from .hooks import on_message_aborted
                                 on_message_aborted(message_id=mid)
                             except Exception:
-                                _logger.debug("HLS: suppressed exception", exc_info=True)
+                                _logger.warning("HLS: suppressed exception", exc_info=True)
             except Exception:
-                _logger.debug("HLS: suppressed exception", exc_info=True)
+                _logger.warning("HLS: suppressed exception", exc_info=True)
         # Cleanup tracking
         with _started_msg_ids_lock:
             _started_msg_ids.discard(mid)
@@ -342,7 +342,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         anchor_id=event_message_id,
                     )
                 except Exception:
-                    _logger.debug("HLS: suppressed exception", exc_info=True)
+                    _logger.warning("HLS: suppressed exception", exc_info=True)
             else:
                 ctx["event_message_id"] = event_message_id
             # Copy to thread-local for thread-pool workers
@@ -562,7 +562,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     result["already_sent"] = True
                     ctx["card_sent"] = True
             except Exception:
-                _logger.debug("HLS: suppressed exception", exc_info=True)
+                _logger.warning("HLS: suppressed exception", exc_info=True)
         # ── Restore parent context after recursive interrupt follow-up ──
         # When we created a new context for the recursive call (above),
         # _msg_ctx now points to the child message's context. We must
@@ -753,7 +753,7 @@ def _wrap_run_background_task(orig: Callable) -> Callable:
             if hasattr(self, "adapters") and source.platform:
                 adapter = self.adapters.get(source.platform)
         except Exception:
-            _logger.debug("HLS: suppressed exception", exc_info=True)
+            _logger.warning("HLS: suppressed exception", exc_info=True)
         if adapter:
             original_send = adapter.send
 
