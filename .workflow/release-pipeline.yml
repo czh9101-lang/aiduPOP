@@ -10,6 +10,7 @@ triggers:
 variables:
   global:
     - OWNER
+    - TOKEN
 stages:
   - name: release-stage
     displayName: 创建 Gitee 发行版
