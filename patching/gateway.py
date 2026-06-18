@@ -677,17 +677,20 @@ def _wrap_run_conversation(orig: Callable) -> Callable:
 
         _maybe_wrap_callbacks(self)
         try:
-            return orig(
-                self,
-                user_message,
-                system_message,
-                conversation_history,
-                task_id,
-                stream_callback,
-                persist_user_message,
-                persist_user_timestamp,
-                **kwargs,
-            )
+            # 用关键字参数传递，兼容有/无 persist_user_timestamp 的 Hermes 版本
+            import inspect
+            call_kwargs = {
+                "system_message": system_message,
+                "conversation_history": conversation_history,
+                "task_id": task_id,
+                "stream_callback": stream_callback,
+                "persist_user_message": persist_user_message,
+            }
+            orig_params = inspect.signature(orig).parameters
+            if "persist_user_timestamp" in orig_params:
+                call_kwargs["persist_user_timestamp"] = persist_user_timestamp
+            call_kwargs.update(kwargs)
+            return orig(self, user_message, **call_kwargs)
         finally:
             # Always reset the re-entrancy guard so the next message
             # in the same thread can be injected again.

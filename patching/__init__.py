@@ -684,17 +684,22 @@ def _apply_direct_agent_patch() -> None:
 
             _maybe_wrap_callbacks(self)
             try:
-                return _orig_method(
-                    self,
-                    user_message,
-                    system_message,
-                    conversation_history,
-                    task_id,
-                    stream_callback,
-                    persist_user_message,
-                    persist_user_timestamp,
-                    **kwargs,
-                )
+                # 用关键字参数传递，兼容有/无 persist_user_timestamp 的 Hermes 版本
+                # 如果原方法不支持 persist_user_timestamp，它会被 **kwargs 吞掉
+                call_kwargs = {
+                    "system_message": system_message,
+                    "conversation_history": conversation_history,
+                    "task_id": task_id,
+                    "stream_callback": stream_callback,
+                    "persist_user_message": persist_user_message,
+                }
+                # 只在原方法支持时才传 persist_user_timestamp
+                import inspect
+                orig_params = inspect.signature(_orig_method).parameters
+                if "persist_user_timestamp" in orig_params:
+                    call_kwargs["persist_user_timestamp"] = persist_user_timestamp
+                call_kwargs.update(kwargs)
+                return _orig_method(self, user_message, **call_kwargs)
             finally:
                 # Always reset the re-entrancy guard so the next message
                 # in the same thread can be injected again.
