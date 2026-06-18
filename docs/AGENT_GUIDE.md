@@ -179,6 +179,8 @@ display:
 | `/aowen config reload` | 修改 config.yaml 后重新加载配置立即生效 |
 | `/aowen` | 同 `/aowen help` |
 
+> **中断场景**：当 AI 正在回复中（agent 运行中）发送 `/aowen` 命令时，插件会回复一张橙色提示卡"AI 正在回复中"（借鉴 Hermes 原生 `/model` 命令的 "Agent is running — wait or /stop first" UX），提示用户等待完成或 `/stop` 后再使用。命令本身不会被发给 AI。
+
 ## 提供的钩子（Hooks）
 
 - `pre_gateway_dispatch` - 消息分发前拦截（/aowen 命令）

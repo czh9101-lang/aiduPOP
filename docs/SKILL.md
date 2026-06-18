@@ -114,7 +114,9 @@ Background: _run_background_task ── [Hook 1/2]
 
 **4.13 配置刷新 (v1.1.0)**: 不做自动 mtime 检测（避免每 token 一次 stat()）。配置刷新方式：`/aowen config reload` 命令立即生效，或重启网关生效。`Config.reload()` 清缓存，`on_reload` 回调注册。
 
-**4.14 /aowen 命令体系 (v1.1.0)**: `aowen/` 子包通过 `pre_gateway_dispatch` hook 拦截 `/aowen` 命令，直接回复飞书卡片，不经过 Hermes AI。命令：`/aowen help`、`/aowen status`（含配置折叠面板）、`/aowen monitor`、`/aowen monitor reset`、`/aowen config reload`。零后台内存占用。
+**4.14 /aowen 命令体系 (v1.1.0)**: `aowen/` 子包通过 `pre_gateway_dispatch` hook 拦截 `/aowen` 命令，直接回复飞书卡片，不经过 Hermes AI。命令：`/aowen help`、`/aowen status`（含配置折叠面板）、`/aowen monitor`、`/aowen monitor reset`、`/aowen config reload`。零后台内存占用。卡片视觉重构采用统一设计语言（banner→指标列→详情图标行→折叠→footer），颜色语义化（green=success/orange=warning/red=error/blue=info/grey=neutral），全部 column_set 用 flex_mode=stretch 实现响应式，只用 v2 安全标签，不引入 button/form_container/interactive_container。
+
+**4.14.1 /aowen 中断场景提示卡 (v1.1.0)**: AI 回复中（agent 运行中）发送 /aowen 命令时，Hermes 网关走"agent 运行中"快速路径，未知 slash 命令（/aowen 不在白名单）会 fall through 到默认中断路径发给 LLM。借鉴 Hermes 原生 /model 命令的 "Agent is running — wait or /stop first" UX，在 `patching/gateway.py` 的 `_wrap_handle_message` 中检测此场景，发送 `build_interrupt_hint_card()`（橙色 header "AI 正在回复中"）并 return "" 阻止消息进入 agent。
 
 **4.15 状态机标志位收敛 (v1.1.0)**: 8 个布尔标志位合并为 `_creation_stages: set[str]`（含 `"panel"`/`"answer"`/`"hint_removed"`）+ 4 个正交布尔（`_streaming_closed`/`_was_aborted`/`_pending_flush`/`_first_flush_done`）。
 

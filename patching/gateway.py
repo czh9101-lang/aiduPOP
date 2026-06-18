@@ -32,7 +32,17 @@ from . import (
 
 
 def _wrap_handle_message(orig: Callable) -> Callable:
-    """Inject NORMALIZE hook at the top of GatewayRunner._handle_message."""
+    """Inject NORMALIZE hook at the top of GatewayRunner._handle_message.
+
+    v1.1.0: Also intercept /aowen commands when an agent is running.
+    When ``self._running_agents`` has an entry for this session, Hermes
+    would normally take the "agent running" fast path — known slash
+    commands return a hint text, but unknown commands (like /aowen) fall
+    through to the default interrupt path and get sent to the LLM as
+    plain text. We detect /aowen in that fast path and reply with
+    build_interrupt_hint_card() instead, borrowing Hermes native
+    "Agent is running — wait or /stop first" UX.
+    """
 
     @functools.wraps(orig)
     async def wrapper(self, event, *args, **kwargs):
@@ -48,6 +58,41 @@ def _wrap_handle_message(orig: Callable) -> Callable:
             )
         except Exception:
             _logger.warning("HLS: suppressed exception", exc_info=True)
+
+        # ── v1.1.0: /aowen interrupt hint ──
+        # When an agent is running for this session, /aowen commands
+        # would fall through to the LLM (pre_gateway_dispatch hook is
+        # not fired on the "agent running" fast path). Intercept here
+        # and reply with an orange hint card instead.
+        try:
+            _text = (getattr(event, "text", "") or "").strip()
+            if _text.lower().startswith("/aowen"):
+                _source = getattr(event, "source", None)
+                _platform = getattr(getattr(_source, "platform", None), "value", "")
+                if _platform == "feishu" and hasattr(self, "_running_agents"):
+                    _quick_key = None
+                    try:
+                        _quick_key = self._session_key_for_source(_source)
+                    except Exception:
+                        _logger.debug("HLS: _session_key_for_source failed", exc_info=True)
+                    if _quick_key and _quick_key in self._running_agents:
+                        # Agent is running — send interrupt hint card
+                        from ..aowen import build_interrupt_hint_card, _send_card_async
+                        _chat_id = getattr(_source, "chat_id", "") if _source else ""
+                        if _chat_id:
+                            _logger.info(
+                                "HLS: /aowen during active agent (session=%s), "
+                                "sending interrupt hint card",
+                                str(_quick_key)[:12],
+                            )
+                            _send_card_async(_chat_id, build_interrupt_hint_card(), "interrupt_hint")
+                            # Return empty string to signal "handled, no further dispatch"
+                            # — mirrors Hermes native slash-command hint path
+                            # which returns a string reply and stops processing.
+                            return ""
+        except Exception:
+            _logger.debug("HLS: /aowen interrupt hint check failed", exc_info=True)
+
         return await orig(self, event, *args, **kwargs)
 
     return wrapper

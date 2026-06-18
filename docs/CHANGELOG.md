@@ -32,6 +32,8 @@
 | ✨ Feature | 监控面板 | 无实时插件健康指标 | `aowen/` 子包通过 pre_gateway_dispatch hook 拦截 /aowen 命令，直接回复飞书卡片，不经过 Hermes AI |
 | 🏗️ Architecture | 根目录文件模块化 | hermes_adapter.py/monitor.py/plugin.py/conftest.py 散落在根目录，不便维护 | hermes_adapter.py → patching/hermes_adapter.py；monitor.py → monitor/__init__.py；plugin.py → plugin/__init__.py；conftest.py 合并到 tests/conftest.py |
 | 📝 Docs | README/AGENT_GUIDE/SKILL 文档同步 | v1.1.0 架构改动后文档未更新 | SKILL.md 删除"常见陷阱"章节（迁移到 CHANGELOG 附录），重写架构/文件地图；README 监控面板归入配置说明；验证安装加 doctor 命令 |
+| ✨ Feature | /aowen 卡片视觉重构 | 6 张 /aowen 卡片（help/status/monitor/reset/config reload/unknown）用纯 markdown 列表+1:2 column_set，视觉层次单薄，PC+移动端观感一般 | 引入统一设计语言：banner(图标+标题) → 关键指标列 → 详情图标行 → 折叠次要信息 → 灰色 footer；新增 7 个辅助函数（_icon_div/_metric_block/_two_col/_three_col/_section_title/_fold/_footer_note）；颜色语义化（green=success/orange=warning/red=error/blue=info/grey=neutral）；全部 column_set 用 flex_mode=stretch 实现响应式；只用 v2 安全标签（div/lark_md/plain_text/hr/column_set/column/collapsible_panel/standard_icon/markdown），不引入 button/form_container/interactive_container |
+| ✨ Feature | /aowen 中断场景提示卡 | AI 回复中（agent 运行中）发送 /aowen 命令时，Hermes 网关走"agent 运行中"快速路径，未知 slash 命令（/aowen 不在白名单）fall through 到默认中断路径，命令文本被当普通消息发给 LLM；pre_gateway_dispatch hook 不在该路径上触发 | 借鉴 Hermes 原生 /model 命令的 "Agent is running — wait or /stop first" UX；新增 `build_interrupt_hint_card()`（橙色 header "AI 正在回复中" + 警告图标 banner + 蓝色 info 图标提示"等待完成或 /stop"+ 灰色 footer"命令已忽略"）；在 `patching/gateway.py` 的 `_wrap_handle_message` 中检测 agent 运行中 + /aowen 命令时发送提示卡并 return ""，阻止消息进入 agent |
 
 ---
 
