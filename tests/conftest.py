@@ -70,6 +70,31 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _ensure_event_loop_for_sync_tests():
+    """Ensure an event loop exists for sync tests (Python 3.11+ compatibility).
+
+    pytest-asyncio's ``auto`` mode only injects event loops into ``async def``
+    tests.  Sync tests that call code relying on ``asyncio.get_event_loop()``
+    (e.g. ``controller._get_loop()``) need this fixture to ensure a loop is
+    available — otherwise Python 3.11+ raises ``RuntimeError: There is no
+    current event loop``.
+
+    This fixture runs before every test and creates a new event loop if one
+    doesn't exist.  It does NOT close the loop after the test (the loop may
+    be cached by ``StreamCardController._loop`` for fire-and-forget tasks).
+    Loop cleanup is handled by ``_cleanup_event_loops`` below.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("loop closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _cleanup_event_loops():
     """Close any event loops that test helpers created but did not clean up."""
     yield
