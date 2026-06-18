@@ -1,30 +1,15 @@
 version: '1.0'
 name: release-pipeline
 displayName: 自动发版流水线
-
-# 当代码推送到 github_sync 分支时触发
 triggers:
+  trigger: auto
   push:
     branches:
-      precise: [github_sync]
-
-# 变量配置（两种方式，任选其一）：
-#
-# 方式 A：流水线「参数设置」（推荐）
-#   在 Gitee Go 流水线编辑页 → 参数设置 中添加：
-#     OWNER = Aowen-Nowor
-#     TOKEN = <个人访问令牌>（需 projects、releases 权限）
-#   这些变量会写入 GITEE_PARAMS 文件，本工作流有兜底逻辑从该文件读取。
-#
-# 方式 B：「通用变量」+ 关联流水线
-#   在项目设置 → 通用变量 中添加 OWNER/TOKEN，
-#   然后在流水线设置中「关联」该通用变量组。
-#   关联后变量会作为环境变量注入。
-#
-# ⚠️ 变量名不能以 GITEE_ 或 GO_ 开头（Gitee 系统保留前缀）。
-#
-# 本工作流先尝试读环境变量，读不到则从 GITEE_PARAMS 文件兜底读取。
-
+      precise:
+        - github_sync
+variables:
+  global:
+    - OWNER
 stages:
   - name: release-stage
     displayName: 创建 Gitee 发行版
@@ -32,19 +17,6 @@ stages:
     trigger: auto
     executor: []
     steps:
-      # ─────────────────────────────────────────────────────────────
-      # 单步骤完成：计算版本号 + 打 tag + 创建 Release
-      # ─────────────────────────────────────────────────────────────
-      # 为什么不用 release@gitee 插件？
-      #   release@gitee 的参数字段（releaseName/tagName/description）只解析
-      #   「配置时已知的变量」（系统变量如 ${GITEE_PIPELINE_BUILD_NUMBER}），
-      #   不解析运行时通过 GITEE_PARAMS 写入的自定义变量。实测
-      #   ${RELEASE_VERSION} 在插件参数里为空，导致 tag/releaseName 都变成 "v"。
-      #   彻底绕开的方法：所有变量都在同一个 shell 进程里展开，
-      #   用 git tag + curl Gitee API 手动创建 Release。
-      #
-      # 实际逻辑放在 scripts/create_release.py（避免在 YAML 块标量里
-      # 嵌入复杂多行 Python 字符串导致 YAML 解析失败）。
       - step: build@python
         name: create_release
         displayName: 计算版本号并创建 Release
