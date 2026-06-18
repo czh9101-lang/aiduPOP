@@ -51,7 +51,7 @@
 > 
 > ```
 > 帮我安装飞书敖式卡片：
-> - Gitee：https://gitee.com/Aowen-Nowor/hermes-lark-streaming/raw/master/docs/AGENT_GUIDE.md
+> - Gitee：https://gitee.com/Aowen-Nowor/hermes-lark-streaming/raw/github_sync/docs/AGENT_GUIDE.md
 > - GitHub：https://raw.githubusercontent.com/Aowen-Nowor/hermes-lark-streaming/master/docs/AGENT_GUIDE.md
 > ```
 

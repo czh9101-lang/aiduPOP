@@ -18,6 +18,8 @@ stages:
       # 步骤 1: 读取 plugin.yaml 版本号，写入流水线变量
       # GITEE_PARAMS 是 Gitee Go 专用参数文件，写入后后续步骤可用 ${变量名} 引用
       # 注意：多条 commands 之间 shell 变量不共享，所以用 | 合并为一条块命令
+      # 不依赖 PyYAML（Gitee Go python-build 插件环境默认未安装 yaml 模块），
+      # 用 grep + sed 从 plugin.yaml 提取 version 字段，兼容单引号/双引号/无引号三种写法
       - step: build@python
         name: read_version
         displayName: 读取版本号
@@ -25,7 +27,11 @@ stages:
         commands:
           - |
             set -e
-            VERSION=$(python3 -c "import yaml;print(yaml.safe_load(open('plugin.yaml'))['version'])")
+            VERSION=$(grep '^version:' plugin.yaml | sed 's/^version:[[:space:]]*//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')
+            if [ -z "$VERSION" ]; then
+              echo "ERROR: 无法从 plugin.yaml 提取版本号"
+              exit 1
+            fi
             echo "检测到版本号: $VERSION"
             echo "RELEASE_VERSION=$VERSION" >> GITEE_PARAMS
         notify: []
