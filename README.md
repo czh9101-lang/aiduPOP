@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.7-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.1.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -29,10 +29,10 @@ Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time A
 
 <table align="center">
   <tr>
-    <td><img src="assets/img1.png" width="200px" /></td>
-    <td><img src="assets/img2.png" width="200px" /></td>
-    <td><img src="assets/img3.png" width="200px" /></td>
-    <td><img src="assets/img4.png" width="200px" /></td>
+    <td><img src="assets/screenshots/img1.png" width="200px" /></td>
+    <td><img src="assets/screenshots/img2.png" width="200px" /></td>
+    <td><img src="assets/screenshots/img3.png" width="200px" /></td>
+    <td><img src="assets/screenshots/img4.png" width="200px" /></td>
   </tr>
 </table>
 
@@ -111,9 +111,10 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
+$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
 ```
 
-> **Troubleshooting**: If no card effect appears, check: (1) `hermes plugins list` shows enabled; (2) no `*.bak` directories under `~/.hermes/plugins/`; (3) Feishu credentials are configured.
+> **Troubleshooting**: If no card effect appears, check: (1) `hermes plugins list` shows enabled; (2) no `*.bak` directories under `~/.hermes/plugins/`; (3) Feishu credentials are configured. The `doctor` command provides a one-stop diagnostic covering plugin version, Python environment, config, Feishu credentials, patch status, and log paths.
 
 ---
 
@@ -200,26 +201,39 @@ When the limit is exceeded, early items are collapsed into a single summary line
 
 The panel title always shows the **actual total** (e.g. "3 rounds · 44 tools"); the fold hint only affects what is displayed inside the panel.
 
+### /aowen Commands
+
+Send `/aowen` commands in Feishu, the plugin replies with cards directly (bypassing Hermes AI):
+
+| Command | Description |
+|---------|-------------|
+| `/aowen help` | Show all available commands |
+| `/aowen status` | Show plugin status + current config (collapsible panel) |
+| `/aowen monitor` | Show metrics dashboard (cards created, API calls, error codes, etc.) |
+| `/aowen monitor reset` | Reset metrics counters |
+| `/aowen config reload` | After modifying `~/.hermes/config.yaml`, send this command in Feishu to apply immediately, or restart the gateway |
+| `/aowen` | Same as `/aowen help` |
+
+> `/aowen` is the plugin's command prefix; all `/aowen` commands are handled by the plugin, not Hermes.
+
 ### Feishu Credentials
 
-| Priority | Source | Example |
-|----------|--------|---------|
-| 1 | Environment Variables | `FEISHU_APP_ID`, `FEISHU_APP_SECRET` |
-| 2 | File | `~/.hermes/.env` |
-| 3 | Config File | `hermes_lark_streaming.feishu.app_id` |
+The plugin reuses Hermes's existing Feishu credentials — no separate configuration needed. Hermes already configures these in `~/.hermes/.env` during installation:
 
 ```bash
-# ~/.hermes/.env example
+# ~/.hermes/.env (configured by Hermes, reused by plugin)
 FEISHU_APP_ID=cli_xxxxxx
 FEISHU_APP_SECRET=xxxxxx
-FEISHU_BASE_URL=https://open.feishu.cn/open-apis
+FEISHU_DOMAIN=feishu          # feishu=China, lark=International
 ```
+
+> The plugin automatically reads Hermes's Feishu credentials and domain settings. If the Hermes Feishu channel works, the plugin works too.
 
 ---
 
 ## Developer Guide & Changelog
 
-> 📖 **[SKILL.md](docs/SKILL.md)** — LLM quick-start guide. Architecture, key design decisions, common pitfalls, efficient code modification guide.
+> 📖 **[SKILL.md](docs/SKILL.md)** — LLM quick-start guide. Architecture, key design decisions, efficient code modification guide.
 
 > For the full version history, see [CHANGELOG.md](docs/CHANGELOG.md)
 
@@ -232,4 +246,4 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ## Acknowledgments
 
-[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222) [![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998)
+[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222) [![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998) [![joshchengjoshcheng](assets/avatars/joshchengjoshcheng.png)](https://gitee.com/joshchengjoshcheng)

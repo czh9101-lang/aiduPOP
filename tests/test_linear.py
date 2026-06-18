@@ -57,12 +57,19 @@ class TestOnReasoningDelta:
         state.on_reasoning_delta("hello")
         assert state.total_reasoning_count == 1
 
-    def test_native_reasoning_active_flag(self) -> None:
-        """_native_reasoning_active is False by default and settable."""
+    def test_has_current_reasoning_reflects_state(self) -> None:
+        """has_current_reasoning replaces the removed _native_reasoning_active flag.
+
+        v1.1.0: ``_native_reasoning_active`` was removed. Native reasoning
+        dedup now keys off ``bool(state._current_reasoning)`` via the
+        ``has_current_reasoning`` property.
+        """
         state = UnifiedLinearState()
-        assert state._native_reasoning_active is False
-        state._native_reasoning_active = True
-        assert state._native_reasoning_active is True
+        assert state.has_current_reasoning is False
+        assert bool(state._current_reasoning) is False
+        state.on_reasoning_delta("thinking")
+        assert state.has_current_reasoning is True
+        assert bool(state._current_reasoning) is True
 
 
 # ── 答案文本追加（on_answer_delta） ──
@@ -236,14 +243,6 @@ class TestBackgroundReview:
         state.on_background_review("checking quality")
         assert state.bg_review_messages == ["checking quality"]
 
-    def test_bg_review_panel_id(self) -> None:
-        state = UnifiedLinearState()
-        assert state.bg_review_panel_id == "bg_review_panel"
-
-    def test_bg_review_panel_added_initially_false(self) -> None:
-        state = UnifiedLinearState()
-        assert state.bg_review_panel_added is False
-
     def test_has_dirty_with_bg_review(self) -> None:
         state = UnifiedLinearState()
         state.panel_dirty = False
@@ -253,16 +252,7 @@ class TestBackgroundReview:
 
 
 # ── Deprecated backward compat aliases ──
-
-
-class TestDeprecatedAliases:
-    def test_segment_alias_warns(self) -> None:
-        from hermes_lark_streaming.state.linear import Segment
-        with pytest.warns(DeprecationWarning, match="Segment is deprecated"):
-            s = Segment("reasoning", "r_0")
-            assert s.type == "reasoning"
-            assert s.el_id == "r_0"
-
-    def test_linear_state_alias_is_unified(self) -> None:
-        from hermes_lark_streaming.state.linear import LinearState
-        assert LinearState is UnifiedLinearState
+# v1.1.0: The deprecated ``Segment`` and ``LinearState`` aliases were
+# removed (Task 1.1+1.2). The unified panel architecture replaces the
+# segment-based model entirely. Tests for those aliases lived here
+# previously and have been deleted along with the symbols they covered.

@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from . import __version__
+from .. import __version__
 
 if TYPE_CHECKING:
     from hermes_cli.plugins import PluginContext
@@ -31,15 +31,9 @@ _logger = logging.getLogger("hermes_lark_streaming")
 
 
 def _get_hermes_config_path() -> Path:
-    """动态获取 Hermes 配置文件路径.
-    
-    在多 Profile 场景下，HERMES_HOME 环境变量会在 Gateway 启动时
-    通过 _apply_profile_override() 设置。如果在模块导入时就读取
-    该变量，可能会读到错误的路径。
-    
-    此函数每次调用时都重新读取环境变量，确保始终使用正确的路径。
-    """
-    return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
+    """动态获取 Hermes 配置文件路径（从 config/reader.py 复用）."""
+    from ..config.reader import _get_hermes_config_path as _get_path
+    return _get_path()
 
 
 _PLUGIN_NAME = "hermes-lark-streaming"
@@ -53,6 +47,8 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "print_strategy": "delay",
     "flush_interval_ms": 100,
     "card_ttl_sec": 600,
+    "max_tool_steps": 20,
+    "max_reasoning_rounds": 20,
     "inject_time": False,
     "footer": {
         "fields": [
@@ -204,7 +200,7 @@ def register(ctx: "PluginContext") -> None:
 
     # ── Diagnostic: log key config for troubleshooting ──
     try:
-        from .config import Config
+        from ..config import Config
         _diag_cfg = Config()
         _logger.info(
             "hermes-lark-streaming v%s: config diagnostic — "
@@ -229,7 +225,7 @@ def register(ctx: "PluginContext") -> None:
 
     _logger.info("hermes-lark-streaming v%s: applying runtime patches...", __version__)
     try:
-        from .patching import apply_patches
+        from ..patching import apply_patches
 
         apply_patches()
         _logger.info("hermes-lark-streaming v%s: patches applied (check logs for per-module status)", __version__)
@@ -241,7 +237,7 @@ def register(ctx: "PluginContext") -> None:
     # lazily on the first message.  This eliminates ~50-100ms latency on the
     # first card creation, improving the time-to-first-paint for users.
     try:
-        from .controller import get_controller
+        from ..controller import get_controller
         import asyncio
 
         ctrl = get_controller()
@@ -255,6 +251,14 @@ def register(ctx: "PluginContext") -> None:
     except Exception:
         _logger.debug("hermes-lark-streaming v%s: FeishuClient pre-warm skipped", __version__, exc_info=True)
 
+    # ── v1.1.0: Register /aowen command hook (Task 3.7) ──
+    try:
+        from ..aowen import handle_pre_gateway_dispatch
+        ctx.register_hook("pre_gateway_dispatch", handle_pre_gateway_dispatch)
+        _logger.info("hermes-lark-streaming v%s: /aowen commands registered (help, status, monitor)", __version__)
+    except Exception:
+        _logger.debug("hermes-lark-streaming v%s: /aowen hook registration skipped", __version__, exc_info=True)
+
 
 def unregister(ctx: "PluginContext") -> None:
     """Unregister hermes-lark-streaming.
@@ -262,4 +266,11 @@ def unregister(ctx: "PluginContext") -> None:
     Cleans up the injected hermes_lark_streaming config from config.yaml.
     """
     _cleanup_config()
+    # Clear controller sessions
+    try:
+        from ..controller import get_controller
+        ctrl = get_controller()
+        ctrl._sessions.clear()
+    except Exception:
+        pass
     _logger.info("hermes-lark-streaming: unregistered")

@@ -1,7 +1,7 @@
 # hermes-lark-streaming 安装指南
 
 > 高信息密度参考文档，专为 Agent 自动解析设计
-> 最后更新: 2026-06-16
+> 最后更新: 2026-06-17
 
 ## 快速概览
 
@@ -116,33 +116,74 @@ feishu:
 
 ## 可选配置项 (config.yaml)
 
+### hermes_lark_streaming 节
+
 | 配置键 | 默认值 | 范围 | 说明 |
 |--------|---------|------|------|
-| `streaming_mode` | `true` | bool | 启用/禁用流式卡片输出 |
-| `show_reasoning` | `true` | bool | 显示推理/思考面板 |
+| `enabled` | `true` | bool | 启用/禁用流式卡片输出 |
+| `linear` | `true` | bool | 线性模式：单卡片原地更新（统一面板架构） |
 | `max_tool_steps` | `20` | 1–100 | 统一面板中工具步骤最大数量（超限折叠） |
 | `max_reasoning_rounds` | `20` | 1–100 | 统一面板中推理轮次最大数量（超限折叠） |
-| `card_duration_sec` | `600` | >0 | 会话 TTL（秒），超时卡片失效 |
-| `refresh_interval_ms` | `100` | 70–2000 | 卡片刷新间隔（毫秒） |
-| `footer_fields` | `[]` | array | 自定义页脚字段列表 |
-| `inject_time` | `true` | bool | 时间感知模式，自动注入当前时间 |
+| `card_ttl_sec` | `600` | >0 | 会话 TTL（秒），超时卡片失效 |
+| `flush_interval_ms` | `100` | 70–2000 | 卡片刷新间隔（毫秒） |
+| `inject_time` | `false` | bool | 时间感知模式，自动注入当前时间 |
+| `print_strategy` | `delay` | `fast`/`delay` | 打字机效果策略 |
+| `panel_expanded` | `false` | bool | 完成态卡片面板是否展开 |
+| `streaming_panel_expanded` | `false` | bool | 流式态卡片面板是否展开 |
+| `footer.show_label` | `false` | bool | 是否显示页脚字段标签 |
+| `footer.fields` | `[[status, elapsed, model, cost, compression_exhausted]]` | array | 页脚字段配置 |
+
+### display 节（Hermes 全局配置，非 hermes_lark_streaming 节）
+
+| 配置键 | 默认值 | 说明 |
+|--------|---------|------|
+| `display.show_reasoning` | `false` | 是否展示推理/思考面板（全局，影响所有平台） |
+| `display.platforms.feishu.show_reasoning` | — | 飞书平台专属推理显示开关（优先于全局） |
 
 示例配置：
 
 ```yaml
 hermes_lark_streaming:
-  streaming_mode: true
-  show_reasoning: true
+  enabled: true
+  linear: true
   max_tool_steps: 20
   max_reasoning_rounds: 20
-  card_duration_sec: 600
-  refresh_interval_ms: 100
-  footer_fields: []
-  inject_time: true
+  card_ttl_sec: 600
+  flush_interval_ms: 100
+  inject_time: false
+  print_strategy: delay
+  footer:
+    show_label: false
+    fields:
+      - [status, elapsed, model, cost, compression_exhausted]
+
+# display 节是 Hermes 全局配置，不在 hermes_lark_streaming 下
+display:
+  show_reasoning: true
+  # 或按平台配置：
+  # platforms:
+  #   feishu:
+  #     show_reasoning: true
 ```
+
+### 插件命令（/aowen 前缀）
+
+所有 `/aowen` 开头的命令由插件处理，不经过 Hermes AI：
+
+| 命令 | 说明 |
+|------|------|
+| `/aowen help` | 显示所有命令列表 |
+| `/aowen status` | 查看插件状态 + 当前配置（折叠面板展示） |
+| `/aowen monitor` | 查看监控面板（卡片创建数、API 调用数、错误码分布等） |
+| `/aowen monitor reset` | 重置监控统计计数器 |
+| `/aowen config reload` | 修改 config.yaml 后重新加载配置立即生效 |
+| `/aowen` | 同 `/aowen help` |
+
+> **中断场景**：当 AI 正在回复中（agent 运行中）发送 `/aowen` 命令时，插件会回复一张橙色提示卡"AI 正在回复中"（借鉴 Hermes 原生 `/model` 命令的 "Agent is running — wait or /stop first" UX），提示用户等待完成或 `/stop` 后再使用。命令本身不会被发给 AI。
 
 ## 提供的钩子（Hooks）
 
+- `pre_gateway_dispatch` - 消息分发前拦截（/aowen 命令）
 - `on_feishu_normalize` - 飞书消息标准化
 - `on_message_started` - 消息开始
 - `on_message_completed` - 消息完成
@@ -163,7 +204,7 @@ hermes_lark_streaming:
 | 错误码 300305 | 元素超限（硬限制 200） | 减小 `max_tool_steps` / `max_reasoning_rounds` |
 | 错误码 300315 | Schema 校验失败 | 检查飞书 Card 2.0 规范，确认卡片属性合法 |
 | 内容被截断 | 静态卡片表格超限 | 静态卡片（cron/gateway）表格行数 >5 时自动降级 |
-| 流式卡住 | TTL 过期 | 增加 `card_duration_sec` 值 |
+| 流式卡住 | TTL 过期 | 增加 `card_ttl_sec` 值 |
 | 封口失败 | 元素总数超标 | 安全网已自动裁剪早期面板，检查日志确认 |
 | 文本兜底 | 极端超限场景 | 核心内容保留，完整内容降级为纯文本 |
 

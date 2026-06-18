@@ -94,18 +94,21 @@ class FeishuAPIError(RuntimeError):
         return msg[:200]
 
 
-CARDKIT_RATE_LIMITED = 230020  # 频控
 CARDKIT_CONTENT_FAILED = 230099  # 卡片内容创建失败（通用码，需检查子错误）
 CARDKIT_ELEMENT_LIMIT = 11310  # 子码: 卡片元素数量超限
 CARDKIT_ELEMENT_LIMIT_DIRECT = 300305  # 直报码: 卡片元素数量超限（cardkit_update 返回此码）
 CARDKIT_SCHEMA_ERROR = 300315  # 卡片 Schema 非法属性 (unknown property)
 CARDKIT_STREAMING_CLOSED = 300309  # 卡片流式模式已关闭
 CARDKIT_SEQUENCE_CONFLICT = 300317  # sequence 冲突
+CARDKIT_ELEMENT_NOT_FOUND = 300313  # 元素不存在（add_elements 后服务端尚未持久化时的竞态）
 MSG_NOT_FOUND = 1000023  # 消息不存在/已删除
 
 # ── CardKit 瞬态错误码 — 可自动重试 ──
 # 参考 Cheerwhy / openclaw-lark: 这三个错误码是飞书 CardKit 的瞬态错误，
 # 通常由服务端内部超时或并发冲突引起，重试后大概率成功。
+# 注意：300313 (元素不存在) 不在此列 — 它需要"等待传播后重试"的特殊处理，
+# 而非指数退避重试，因此在 is_transient 判断中返回 False，
+# 由调用方（drain/seal 逻辑）决定重试策略。
 CARDKIT_TRANSIENT_CODES = {
     2200,   # CardKit 内部超时
     1663,   # CardKit 服务端瞬态错误
@@ -115,6 +118,12 @@ CARDKIT_TRANSIENT_CODES = {
 # 瞬态错误重试策略 — 指数退避
 _TRANSIENT_RETRY_DELAYS = (0.1, 0.3, 0.6)  # 3 次重试，递增延迟
 _TRANSIENT_MAX_RETRIES = len(_TRANSIENT_RETRY_DELAYS)
+
+# 300313 元素不存在错误的专用重试策略 — 短间隔均匀重试
+# 生产日志确认：add_elements 成功后 ~1s 内 stream_element 可能返回 300313，
+# 这是飞书服务端元素持久化的传播延迟。200ms 间隔 × 3 次足以覆盖大多数场景。
+_ELEMENT_NOT_FOUND_RETRY_DELAYS = (0.2, 0.2, 0.2)
+_ELEMENT_NOT_FOUND_MAX_RETRIES = len(_ELEMENT_NOT_FOUND_RETRY_DELAYS)
 
 
 def is_element_limit_error(e: "FeishuAPIError") -> bool:
@@ -138,6 +147,21 @@ def is_schema_error(e: "FeishuAPIError") -> bool:
     这类错误是永久性的——重试不会成功，需要修正卡片结构。
     """
     return e.code == CARDKIT_SCHEMA_ERROR
+
+
+def is_element_not_found_error(e: "FeishuAPIError") -> bool:
+    """判断 FeishuAPIError 是否为"元素不存在"错误（300313）。
+
+    生产日志（2026-06-17）发现：Phase 2 的 add_elements 成功后，
+    如果 on_completed 在 ~1s 内触发 drain，cardkit_stream_element
+    可能返回 300313 "not find elementID : answer_content"。
+    这是飞书服务端元素持久化的传播延迟，等待 200ms 后重试通常成功。
+
+    此错误不应在 drain 阶段直接放弃并触发 full rebuild（会导致卡片闪烁），
+    而应短暂等待后重试；若重试仍失败，调用方应改用 batch_update
+    的 partial_update_element 写入 answer 文本（绕过 stream_element）。
+    """
+    return e.code == CARDKIT_ELEMENT_NOT_FOUND
 
 
 @dataclass(frozen=True)
@@ -179,6 +203,13 @@ class FeishuClient:
     def __init__(self, config: FeishuClientConfig) -> None:
         self.config = config
         builder = lark.Client.builder().app_id(config.app_id).app_secret(config.app_secret)
+        # .domain() 只接受域名（如 https://open.feishu.cn），不带 /open-apis 后缀
+        # 默认域名 https://open.feishu.cn 不需要调 .domain()（SDK 默认就是它）
+        domain = config.base_url
+        if domain and "/open-apis" in domain:
+            domain = domain.split("/open-apis")[0]
+        if domain and domain != "https://open.feishu.cn":
+            builder = builder.domain(domain)
         self._client = builder.build()
         # Probe for async stream_element method (lark-oapi >= 1.x)
         self._use_async_stream_element = hasattr(
@@ -200,7 +231,14 @@ class FeishuClient:
         last_error: FeishuAPIError | None = None
         for attempt in range(max_retries + 1):
             try:
-                return await coro_factory()
+                result = await coro_factory()
+                # v1.1.0: Record successful API call
+                try:
+                    from ..aowen import record_api_call
+                    record_api_call(operation)
+                except Exception:
+                    pass
+                return result
             except FeishuAPIError as e:
                 last_error = e
                 if not _is_transient_error(e):
@@ -222,6 +260,12 @@ class FeishuClient:
         if not response.success():
             code = response.code or 0
             msg = response.msg or ""
+            # v1.1.0: Record API error metrics
+            try:
+                from ..aowen import record_api_error
+                record_api_error(code, operation)
+            except Exception:
+                pass
             raise FeishuAPIError(
                 _sanitize_message(f"{operation}: code={code}, msg={msg}"),
                 code,
@@ -341,7 +385,13 @@ class FeishuClient:
         *,
         sequence: int = 0,
     ) -> None:
-        """流式更新卡片内指定 element 的内容（打字机效果）."""
+        """流式更新卡片内指定 element 的内容（打字机效果）.
+
+        对 300313 (元素不存在) 错误做专用重试：add_elements 成功后
+        飞书服务端可能有传播延迟，短间隔重试 3 次通常能成功。
+        若重试仍失败，抛出 FeishuAPIError(code=300313)，调用方可
+        改用 batch_update 的 partial_update_element 绕过此问题。
+        """
         async def _do():
             body_builder = ContentCardElementRequestBody.builder().content(content)
             body_builder = body_builder.sequence(sequence)
@@ -362,10 +412,41 @@ class FeishuClient:
                 )
             elapsed_ms = (_time.monotonic() - t0) * 1000
             if elapsed_ms > 200:
-                _logger.debug("perf: feishu_stream_element card=%s el=%s elapsed=%.0fms", card_id[:12], element_id[:12], elapsed_ms)
+                _logger.debug(
+                    "HLS: perf stream_element card=%s el=%s elapsed=%.0fms",
+                    card_id[:12], element_id[:12], elapsed_ms,
+                )
             self._check(resp, "cardkit_stream_element")
 
-        await self._retry_transient("cardkit_stream_element", _do)
+        # ── 300313 专用重试：短间隔均匀重试 ──
+        # 生产日志确认 add_elements 后 ~1s 内 stream_element 可能返回 300313，
+        # 这是飞书服务端元素持久化的传播延迟。
+        last_error: FeishuAPIError | None = None
+        for attempt in range(_ELEMENT_NOT_FOUND_MAX_RETRIES + 1):
+            try:
+                await self._retry_transient("cardkit_stream_element", _do)
+                # 成功时打 INFO 日志（阶段 0.8：验证 stream_element 是否真的工作）
+                _logger.info(
+                    "HLS: stream_element OK card=%s el=%s len=%d seq=%d",
+                    card_id[:12], element_id[:16], len(content), sequence,
+                )
+                return
+            except FeishuAPIError as e:
+                if not is_element_not_found_error(e):
+                    raise
+                last_error = e
+                if attempt < _ELEMENT_NOT_FOUND_MAX_RETRIES:
+                    delay = _ELEMENT_NOT_FOUND_RETRY_DELAYS[attempt]
+                    _logger.info(
+                        "HLS: stream_element 300313 retry card=%s el=%s attempt=%d/%d delay=%.1fs",
+                        card_id[:12], element_id[:16],
+                        attempt + 1, _ELEMENT_NOT_FOUND_MAX_RETRIES, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+        if last_error:
+            raise last_error  # unreachable
 
     async def cardkit_update(
         self,

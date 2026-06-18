@@ -1,3 +1,42 @@
+## v1.1.0 (2026-06-17)
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| 🐛 Bug Fix (P0-1) | 并发限流调用 `on_message_interrupted` 方法不存在 | `controller/core.py` 在 `on_message_started` 并发限流分支中调用 `self.on_message_interrupted(...)`，但实际方法名为 `on_interrupted`，导致同一 chat_id 多消息场景抛 AttributeError，新消息也无法创建卡片 | 改为 `self.on_interrupted(...)`；并发限流正常触发旧卡 seal |
+| 🐛 Bug Fix (P0-2) | FeishuClient 自定义 `base_url` 不生效 | `feishu/client.py` `__init__` 只用 `app_id`/`app_secret` 构建 client，未调用 `.domain(config.base_url)`，导致自建飞书/Lark 海外域名用户无法访问 API（永远走默认 open.feishu.cn） | `__init__` 中追加 `builder = builder.domain(config.base_url)`，`feishu.base_url` 配置项真正生效 |
+| 🐛 Bug Fix (P0-3) | 部分配置属性 mtime 热更新失效 | `_check_mtime_and_invalidate()` 只在 `enabled` 属性中调用，其他属性（`linear`/`flush_interval_ms`/`max_tool_steps` 等）走 `_plugin_sec()` 不检测 mtime，改完配置文件后这些属性最多延迟 60s（TTL）才生效 | 将 mtime 检测从 `enabled` 属性移到 `_plugin_sec()`，所有走该方法的属性都检测文件变化 |
+| ✨ Feature (P0-3) | `/aowen config reload` 命令 | 改完 config.yaml 后必须等最多 60 秒 mtime 检测才生效，调试不便 | `aowen/__init__.py` 新增 `/aowen config reload` 命令，立即清缓存并触发 `on_reload` 回调，配置秒级生效 |
+| 🐛 Bug Fix (P0-4) | pyproject.toml packages 列表遗漏 5 个子包 | `[tool.setuptools.packages.find].include` 只列了 controller/cardkit/patching/state，缺 feishu/config/monitor/plugin/flush，pip install 时这 5 个子包不会被打包，运行时 ImportError | packages 列表补全 9 个子包（含 `feishu*`/`config*`/`aowen*`/`plugin*`/`flush*`） |
+| 🐛 Bug Fix (P0-5) | `unregister()` 未清理活跃会话 | `plugin/__init__.py` `unregister()` 只清理 config，未清空 `ctrl._sessions`，卸载/重装后旧会话残留导致内存泄漏与潜在竞态 | `unregister()` 新增 `ctrl._sessions.clear()` 清空活跃会话 |
+| 🏗️ Architecture (P0-6) | 删除 `cardkit/theme.py` | v1.1.0 引入的主题系统实际未被任何业务代码引用，颜色/图标仍硬编码在 `elements.py` 中，主题配置项无效 | 删除 `cardkit/theme.py` + `cardkit/__init__.py` 中的 `from .theme import *`；README/AGENT_GUIDE/SKILL 同步移除 `theme.*` 配置项说明 |
+| 🏗️ Architecture (P0-7) | 删除 `assets/card_templates/` | v1.0.5 导出的 13 个卡片模板 JSON 文件未被任何代码引用，卡片逻辑全在 Python 源码中 | 删除 `assets/card_templates/` 目录（13 个 JSON 文件） |
+| 🐛 Bug Fix | 300313 "not find elementID" 短回复卡片闪烁 | add_elements 后 1s 内 stream_element 返回 300313（飞书服务端元素持久化传播延迟），源码无此错误码处理，drain 8 轮全失败后 full rebuild 导致卡片闪烁 | 新增 `CARDKIT_ELEMENT_NOT_FOUND = 300313` 常量 + `is_element_not_found_error()` 判断；stream_element 内置 200ms×3 次专用重试；drain/seal 阶段 300313 时 fallback 到 `partial_update_element` 写入 answer |
+| ✨ Feature | stream_element 成功日志 | 生产日志 22h 内 0 次成功的 stream_element 日志，无法判断是否工作 | 新增 INFO 级 `HLS: stream_element OK` 日志，记录 card/element/len/seq |
+| 🔧 Fix | 日志前缀混乱 | HLS_DIAG/HLS_WRAP/HLS_CALLED/HLS_FIX 四个前缀无规范，22 处散落 | 统一为 `HLS:` 前缀；诊断日志全部降为 DEBUG；WARNING 只留给功能受损 |
+| ✨ Feature | card_trace_id | 同一张卡片的日志散落不同时间点，靠 msg_id 人工串联 | CardSession 新增 `card_trace_id`（msg_id 后 6 位），关键生命周期日志统一带 trace |
+| ✨ Feature | 启动补丁应用报告 | Hermes 升级后补丁静默失效，无结构化状态 | `apply_patches()` 结束时记录 `_patch_status` 字典（6 个补丁目标 + Hermes layout） |
+| ✨ Feature | `doctor` 命令 | 用户排障需要手动跑多个命令 | `__main__.py doctor`：6 步检查（版本/Python/配置/凭据/补丁状态/日志路径） |
+| 🔧 Fix | 文档错误 | ISSUES_TEMPLATE 让用户 grep `gateway.log`（实际在 `agent.log`）；AGENT_GUIDE 配置项名写错 | 修正日志路径；配置项名对齐代码；show_reasoning 从 hermes_lark_streaming 节移到 display 节 |
+| 🔧 Fix | 19 处 `except Exception: pass` | 异常被静默吞掉，排查时看不到 | 替换为 `_logger.debug("HLS: suppressed exception", exc_info=True)` |
+| 🏗️ Architecture | 删除非线性 ControllerMixin 主路径 | 631 行代码几乎不用（CardKit 创建失败时直接降级到 IM 卡片） | 删除 `_do_create_card`/`_do_update_card`/`_do_tool_use_status_update`/`_do_reasoning_update`/`_do_complete`/`_do_complete_inner`（−407 行）；core.py 始终走线性路径 |
+| 🔧 Fix | 去重机制 5 层叠加 | `_hls_wrapper` + `already_streamed` + `_stream_consumed_len` + `_native_reasoning_active` + `_force_rewrap`，逻辑难追踪 | 移除 `_native_reasoning_active`（用 `bool(state._current_reasoning)` 代替）和 `_force_rewrap`（用 `_resolve_eid()` ContextVar 重解析代替）；简化 late_reasoning_wrapper（58→17 行） |
+| 🔧 Fix | 状态机 8 个布尔标志位 | `_panel_element_created`/`_answer_element_created`/`_loading_hint_removed` 等标志位组合爆炸 | 合并为 `_creation_stages: set[str]`（含 `"panel"`/`"answer"`/`"hint_removed"`），24 处机械替换 |
+| 🏗️ Architecture | 删除 backward-compat 别名 | `LinearState`/`Segment`/`linear_state`/`FAILED`/`LinearControllerMixin` 占据维护成本 | 全部删除，源码引用改为 `UnifiedLinearState`/`ReasoningRound`/`unified_state`/`CREATION_FAILED`/`UnifiedControllerMixin` |
+| ✨ Feature | 拆分 build_unified_panel | 每次 flush 重建整个 panel JSON | 拆为 `build_panel_header()` + `build_panel_children()`，支持只重建 children |
+| ✨ Feature | 错误卡片友好化 | 错误卡片直接显示技术细节（如 `300315 unknown property 'icon'`） | 改为"AI 回复出错，请重试"+ 调试 ID + 可折叠技术详情 |
+| ✨ Feature | 并发限流 | 同一 chat_id 多张活跃卡片竞争 API 调用 | `on_message_started` 时 seal 同 chat_id 的旧活跃卡片为"被新消息取代" |
+| 🏗️ Architecture | Hermes 适配层 | Hermes 内部接口散落在 patching/__init__.py，升级时改多处 | 新建 `patching/hermes_adapter.py`，`HermesCompat` 类封装所有 Hermes 内部模块访问 |
+| ✨ Feature | 版本探测 + 适配 | Hermes 升级后无法自动选择正确的适配实现 | `HermesCompat._detect_version()` 探测 Hermes 版本，`_resolve_modules()` 3 层策略解析 conversation_loop |
+| ✨ Feature | 完整端到端测试框架 | 无"发消息→看卡片 JSON"全链路测试 | `tests/e2e/` 新增 MockFeishuServer + E2ETestRunner + 14 个测试用例；mock/真飞书自动切换（有 FEISHU_E2E_* 环境变量→真飞书，无→mock） |
+| ✨ Feature | 配置项运行时热更新 | 改配置要重启网关 | `Config.reload()` 清缓存 + mtime 自动检测 + `on_reload` 回调注册；`/aowen config reload` 命令秒级生效 |
+| ✨ Feature | 监控面板 | 无实时插件健康指标 | `aowen/` 子包通过 pre_gateway_dispatch hook 拦截 /aowen 命令，直接回复飞书卡片，不经过 Hermes AI |
+| 🏗️ Architecture | 根目录文件模块化 | hermes_adapter.py/monitor.py/plugin.py/conftest.py 散落在根目录，不便维护 | hermes_adapter.py → patching/hermes_adapter.py；monitor.py → monitor/__init__.py；plugin.py → plugin/__init__.py；conftest.py 合并到 tests/conftest.py |
+| 📝 Docs | README/AGENT_GUIDE/SKILL 文档同步 | v1.1.0 架构改动后文档未更新 | SKILL.md 删除"常见陷阱"章节（迁移到 CHANGELOG 附录），重写架构/文件地图；README 监控面板归入配置说明；验证安装加 doctor 命令 |
+| ✨ Feature | /aowen 卡片视觉重构 | 6 张 /aowen 卡片（help/status/monitor/reset/config reload/unknown）用纯 markdown 列表+1:2 column_set，视觉层次单薄，PC+移动端观感一般 | 引入统一设计语言：banner(图标+标题) → 关键指标列 → 详情图标行 → 折叠次要信息 → 灰色 footer；新增 7 个辅助函数（_icon_div/_metric_block/_two_col/_three_col/_section_title/_fold/_footer_note）；颜色语义化（green=success/orange=warning/red=error/blue=info/grey=neutral）；全部 column_set 用 flex_mode=stretch 实现响应式；只用 v2 安全标签（div/lark_md/plain_text/hr/column_set/column/collapsible_panel/standard_icon/markdown），不引入 button/form_container/interactive_container |
+| ✨ Feature | /aowen 中断场景提示卡 | AI 回复中（agent 运行中）发送 /aowen 命令时，Hermes 网关走"agent 运行中"快速路径，未知 slash 命令（/aowen 不在白名单）fall through 到默认中断路径，命令文本被当普通消息发给 LLM；pre_gateway_dispatch hook 不在该路径上触发 | 借鉴 Hermes 原生 /model 命令的 "Agent is running — wait or /stop first" UX；新增 `build_interrupt_hint_card()`（橙色 header "AI 正在回复中" + 警告图标 banner + 蓝色 info 图标提示"等待完成或 /stop"+ 灰色 footer"命令已忽略"）；在 `patching/gateway.py` 的 `_wrap_handle_message` 中检测 agent 运行中 + /aowen 命令时发送提示卡并 return ""，阻止消息进入 agent |
+
+---
+
 ## v1.0.7 (2026-06-16)
 
 | 类型 | 问题/功能 | 原因 | 修复/说明 |
@@ -57,3 +96,73 @@
 | ✨ Feature | 打字机效果 | 流式卡片输出按字符渲染，匹配飞书 CardKit v2.0 文档行为 | `print_frequency_ms=70`、`print_step=1`、默认 `flush_interval_ms=100ms`、仅回答快流 70ms |
 | 🚀 Performance | 延迟 Markdown 优化 | 流式期间每次 flush 都执行 `optimize_markdown_style` 开销大 | 流式期间发送原始文本，仅在封卡时执行完整 Markdown 优化 |
 | 🚀 Performance | 间隔计时器优化 | `LONG_GAP_MS` 和 `BATCH_AFTER_GAP_MS` 过长 | `LONG_GAP_MS` 2.0s → 1.0s，`BATCH_AFTER_GAP_MS` 300ms → 100ms；瞬态重试延迟缩减 |
+
+---
+
+## 附录：历史陷阱与经验教训
+
+> 以下内容记录了插件开发过程中遇到的关键陷阱和修复经验，按主题分类。这些经验已融入代码设计，记录于此供后续维护参考。
+
+### A. 异步与线程安全
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| A1 | 事件循环死锁 | 在 async 函数中绝不用 `run_coroutine_threadsafe().result()`，直接 `await` |
+| A2 | contextvars 不跨线程 | 用 `_thread_local_ctx` 手动传递；`_run_agent` 中设置 thread-local |
+| A3 | FlushController 线程安全 | worker 线程必须用 `call_soon_threadsafe()`，`call_soon()` 不唤醒事件循环→flush 永不执行 |
+
+### B. 内容去重
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| B1 | `already_streamed` 忽略导致双重投递 | Hermes 调用 `interim_assistant_callback(text, already_streamed=True)` 时，必须跳过 `on_thinking_delta`，直接透传给原始回调 |
+| B2 | 精确字符串去重失败 | `interim_assistant_callback` 投递累积文本，与增量块长度不同，精确匹配永远失败。改用 `_stream_consumed_len` 按 eid 追踪已消费总长度 |
+| B3 | `_maybe_wrap_callbacks` 双重包装 | 当 `stream_delta_callback` 为 None 时，守卫必须同时检查 `stream_delta_callback` AND `interim_assistant_callback` 的 `_hls_wrapper` 标记 |
+| B4 | 推理内容重复（DeepSeek 模型） | 当原生 `reasoning_callback` 已激活时，`_linear_on_thinking` 必须跳过 `on_reasoning_delta`，避免累积文本再次追加 |
+
+### C. 状态机与竞态
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| C1 | `on_interrupted` 误触发于 COMPLETING | 旧 session 处于 COMPLETING 时，只跳过 abort 逻辑，但新 session 创建和 `_interrupt_map` 更新仍照常执行 |
+| C2 | `card_sent` 区分完成与中断 | 返回 None 两种含义：`card_sent=True`→正常完成抑制文本；`card_sent=False`→真正 abort/error |
+| C3 | Epoch 机制防止过期创建回调 | 创建前快照 `epoch = session.create_epoch`，创建后检查 `is_stale_create(epoch)`——epoch 已变则跳过转换 |
+| C4 | 幂等守卫 | COMPLETING 状态同步转移 + 300317 容错，适用于异步回调竞态 |
+
+### D. 封卡与流式关闭
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| D1 | `close_streaming` 重复调用 | 对同一张卡片只能调用一次。重复调用导致 300317 sequence conflict。`CardSession` 新增 `_streaming_closed` 布尔标志 |
+| D2 | 重试路径引用 try 块局部变量 | `_preservative_seal` 的 300317 重试路径引用了 `panel["header"]`，但 `panel` 仅在 try 块中赋值。重试路径必须从当前状态重建变量 |
+| D3 | 封卡只删除实际存在的元素 | v1.0.2 之前盲目删除所有已知元素 ID，导致 300314 失败。现在只删除 `existing_elements` 中的元素 |
+| D4 | 状态标志必须在 API 成功后设置 | `_loading_hint_removed` 等标志在 `batch_update` 成功后才设置，否则 API 失败时标志已设但实际未生效 |
+| D5 | 完成前排空剩余脏数据 | `on_completed` 触发时可能还有脏数据未 flush。drain 步骤显式 flush 剩余内容，再 `mark_completed()` → close streaming → add footer |
+| D6 | 关闭流式时必须更新摘要（含 i18n_content） | `close_streaming` 时同时更新 `summary.content` 和 `summary.i18n_content`（zh_cn + en_us），否则中文用户会话列表永久显示"处理中..." |
+
+### E. Monkey Patching
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| E1 | 签名确认 | 必须确认目标是类方法还是模块级函数；签名不匹配 = 静默失败 |
+| E2 | `add_reaction` 改名 | Hermes 新版本将 `add_reaction`/`delete_reaction` 改为 `_add_reaction`/`_remove_reaction`，补丁需 fallback 尝试两种命名 |
+
+### F. 性能与参数
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| F1 | 性能参数应可配置 | 性能敏感参数不应硬编码。默认 100ms 刷新间隔（可配置 70~2000ms，最低 70ms 对齐飞书官方 `print_frequency_ms`） |
+| F2 | 流式参数不低于官方推荐值 | `print_frequency_ms` 官方默认 70ms，`print_step` 官方默认 1，不可低于此值 |
+| F3 | 主动 TTL 延长 | 卡片生存时间接近 540s 时自动延长 600s，防止 300309 流式关闭 |
+| F4 | 延迟 Markdown 优化 | 流式期间发送原始文本，仅在封卡时执行完整 Markdown 优化 |
+| F5 | 卡片未就绪时的延迟 flush | `card_message_ready=False` 时标记 `_pending_flush`，卡片创建完成后立即执行 |
+
+### G. 架构设计
+
+| # | 陷阱 | 教训 |
+|---|------|------|
+| G1 | 统一面板消除元素爆炸 | v1.0.2 之前每个 reasoning round 创建独立面板（4 元素/面板），元素数线性增长。统一面板架构集中在 1 个面板 + 1 个回答元素 = 3–4 元素恒定 |
+| G2 | 按时间线交错渲染 | `panel_events` 时间线记录事件顺序，面板内容按时间线交错渲染（reasoning→tool→reasoning→tool） |
+| G3 | 卡片生命周期 4 阶段渐进构建 | Phase 1 占位卡片（2 元素）→ Phase 2 首 token 添加面板/回答 → Phase 3 流式更新 → Phase 4 添加页脚 |
+| G4 | `CREATION_FAILED` 替代 `FAILED` | 旧的 `FAILED` 是 catch-all，拆分为 `CREATION_FAILED`（创建失败）和 `TERMINATED`（消息删除） |
+| G5 | 外部参数 NoneType 防护 | 外部字符串做切片/下标时必须防御 None：`(message_id or "?")[:12]` |

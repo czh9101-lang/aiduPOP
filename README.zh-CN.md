@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.0.7-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.1.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -29,10 +29,10 @@
 
 <table align="center">
   <tr>
-    <td><img src="assets/img1.png" width="200px" /></td>
-    <td><img src="assets/img2.png" width="200px" /></td>
-    <td><img src="assets/img3.png" width="200px" /></td>
-    <td><img src="assets/img4.png" width="200px" /></td>
+    <td><img src="assets/screenshots/img1.png" width="200px" /></td>
+    <td><img src="assets/screenshots/img2.png" width="200px" /></td>
+    <td><img src="assets/screenshots/img3.png" width="200px" /></td>
+    <td><img src="assets/screenshots/img4.png" width="200px" /></td>
   </tr>
 </table>
 
@@ -111,9 +111,10 @@ grep hermes_lark_streaming ~/.hermes/logs/agent.log
 HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
+$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
 ```
 
-> **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无 `*.bak` 目录干扰；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。
+> **排障提示**：安装后若无卡片效果，请检查：(1) `hermes plugins list` 显示插件已启用；(2) `~/.hermes/plugins/` 下无 `*.bak` 目录干扰；(3) 飞书凭据已配置（见[飞书凭据](#飞书凭据)）。`doctor` 命令可一键诊断插件版本、Python 环境、配置项、飞书凭据、补丁应用状态、日志路径。
 
 ---
 
@@ -200,26 +201,39 @@ hermes_lark_streaming:
 
 面板标题始终显示**实际总数**（如"3轮 · 44个工具"），折叠提示仅影响面板内展示的内容。
 
+### /aowen 命令
+
+在飞书中发送 `/aowen` 系列命令，插件直接回复卡片（不经过 Hermes AI）：
+
+| 命令 | 说明 |
+|------|------|
+| `/aowen help` | 显示所有命令列表 |
+| `/aowen status` | 查看插件状态 + 当前配置（折叠面板展示） |
+| `/aowen monitor` | 查看监控面板（卡片创建数、API 调用数、错误码分布等） |
+| `/aowen monitor reset` | 重置监控统计计数器 |
+| `/aowen config reload` | 修改 `~/.hermes/config.yaml` 后，在飞书中发送此命令立即生效，或重启网关生效 |
+| `/aowen` | 同 `/aowen help` |
+
+> `/aowen` 是插件的命令前缀，所有 `/aowen` 开头的命令都由插件处理，不经过 Hermes。
+
 ### 飞书凭据
 
-| 优先级 | 来源 | 示例 |
-|--------|------|------|
-| 1 | 环境变量 | `FEISHU_APP_ID`、`FEISHU_APP_SECRET` |
-| 2 | 文件 | `~/.hermes/.env` |
-| 3 | 配置文件 | `hermes_lark_streaming.feishu.app_id` |
+插件复用 Hermes 已配置的飞书凭据，无需单独配置。Hermes 安装时已在 `~/.hermes/.env` 中配置：
 
 ```bash
-# ~/.hermes/.env 示例
+# ~/.hermes/.env（Hermes 安装时已配置，插件直接复用）
 FEISHU_APP_ID=cli_xxxxxx
 FEISHU_APP_SECRET=xxxxxx
-FEISHU_BASE_URL=https://open.feishu.cn/open-apis
+FEISHU_DOMAIN=feishu          # feishu=国内版, lark=国际版
 ```
+
+> 插件自动读取 Hermes 的飞书凭据和域名配置。如果 Hermes 飞书渠道能正常工作，插件也能正常工作。
 
 ---
 
 ## 开发者指南与更新日志
 
-> 📖 **[SKILL.md](docs/SKILL.md)** — LLM 快速上手指南。项目架构、关键设计决策、常见陷阱，高效代码修改指南。
+> 📖 **[SKILL.md](docs/SKILL.md)** — LLM 快速上手指南。项目架构、关键设计决策、高效代码修改指南。
 
 > 完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
 
@@ -233,4 +247,4 @@ FEISHU_BASE_URL=https://open.feishu.cn/open-apis
 
 ## 致谢
 
-[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222) [![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998)
+[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222) [![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998) [![joshchengjoshcheng](assets/avatars/joshchengjoshcheng.png)](https://gitee.com/joshchengjoshcheng)

@@ -50,6 +50,8 @@ __all__ = [
     # Unified panel builders
     '_build_unified_panel_placeholder',
     'build_unified_panel',
+    'build_panel_header',
+    'build_panel_children',
     # Element counting
     '_count_tag_objects',
 ]
@@ -118,9 +120,6 @@ if TYPE_CHECKING:
 STREAMING_ELEMENT_ID = "streaming_content"
 ANSWER_ELEMENT_ID = "answer_content"
 UNIFIED_PANEL_ELEMENT_ID = "agent_process_panel"
-REASONING_ELEMENT_ID = "reasoning_content"
-REASONING_TEXT_ELEMENT_ID = "reasoning_text"
-TOOL_PANEL_ELEMENT_ID = "tool_panel"
 _LOADING_ELEMENT_ID = "loading_icon"
 _LOADING_HINT_ELEMENT_ID = "context_loading_hint"
 _LOADING_IMG_KEY = "img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg"
@@ -254,24 +253,26 @@ def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
     return panel
 
 
-def build_unified_panel(
+def build_panel_header(
     *,
     reasoning_rounds: list,  # list of ReasoningRound objects
     current_reasoning_text: str = "",  # in-progress reasoning
     tool_steps: list[dict],
     tool_elapsed_ms: float = 0,
     show_reasoning: bool = True,
-    expanded: bool = False,
-    element_id: str | None = None,
-    panel_events: list[tuple[str, int]] | None = None,
-    max_tool_steps: int = 20,
-    max_reasoning_rounds: int = 20,
 ) -> dict:
-    """Build the full unified panel content for streaming updates and complete cards.
+    """Build the header dict for the unified panel.
 
-    Combines reasoning rounds and tool steps into a single collapsible panel.
-    The panel title dynamically reflects the current state (round count, tool
-    count, elapsed time).
+    Computes the panel title from the current state (round count, tool
+    count, elapsed time) and wraps it in the full header structure
+    expected by Feishu's ``collapsible_panel`` schema:
+
+        {"title": <plain_text>, "vertical_align": "center",
+         "icon": <standard_icon>, "icon_position": "right",
+         "icon_expanded_angle": -180}
+
+    The returned dict can be passed directly to Feishu's
+    ``partial_update_element`` API as ``partial_element.header``.
 
     Parameters
     ----------
@@ -280,29 +281,18 @@ def build_unified_panel(
     current_reasoning_text : str
         In-progress reasoning text that has not yet been finalised into a round.
     tool_steps : list[dict]
-        Tool step dicts consumed by :func:`_build_tool_step_elements`.
+        Tool step dicts (length is used for the title count).
     tool_elapsed_ms : float
         Total elapsed time for tool execution in milliseconds.
     show_reasoning : bool
         Whether to render reasoning content.  When ``False`` the title omits
-        the rounds count and reasoning blocks are hidden.
-    expanded : bool
-        Whether the panel starts expanded.
-    element_id : str | None
-        Override for the panel element_id.  Defaults to
-        :data:`UNIFIED_PANEL_ELEMENT_ID`.
-    panel_events : list[tuple[str, int]] | None
-        Chronological timeline from :attr:`UnifiedLinearState.panel_events`.
-        When provided, reasoning and tool elements are interleaved in the
-        order they actually occurred, instead of grouping all reasoning
-        before all tools.
+        the rounds count.
     """
-    # ── Title computation ──
+    # ── Title computation (uses ORIGINAL, untrimmed counts) ──
     en_title, zh_title = _T["agent_process"]
     en_parts: list[str] = [en_title]
     zh_parts: list[str] = [zh_title]
 
-    # Count reasoning rounds (finalised + in-progress)
     has_reasoning = show_reasoning and (
         reasoning_rounds or current_reasoning_text
     )
@@ -329,6 +319,73 @@ def build_unified_panel(
     en_full = " · ".join(en_parts)
     zh_full = " · ".join(zh_parts)
 
+    title_el = {
+        "tag": "plain_text",
+        "content": en_full,
+        "i18n_content": _i18n(en_full, zh_full),
+        "text_color": "grey",
+        "text_size": "notation",
+    }
+
+    # Full header structure (matches what _collapsible_panel puts under
+    # the "header" key, with icon_position="right" → icon gets color="grey").
+    icon_el = {
+        "tag": "standard_icon",
+        "token": "down-small-ccm_outlined",
+        "size": "16px 16px",
+        "color": "grey",
+    }
+    return {
+        "title": title_el,
+        "vertical_align": "center",
+        "icon": icon_el,
+        "icon_position": "right",
+        "icon_expanded_angle": -180,
+    }
+
+
+def build_panel_children(
+    *,
+    reasoning_rounds: list,  # list of ReasoningRound objects
+    current_reasoning_text: str = "",  # in-progress reasoning
+    tool_steps: list[dict],
+    show_reasoning: bool = True,
+    panel_events: list[tuple[str, int]] | None = None,
+    max_tool_steps: int = 20,
+    max_reasoning_rounds: int = 20,
+) -> list[dict]:
+    """Build the list of child elements for the unified panel body.
+
+    Renders reasoning rounds and tool steps in chronological order (when
+    ``panel_events`` is provided) or sequentially (fallback).  Applies
+    element-limit trimming when there are too many rounds/tools.
+
+    The returned list can be passed directly to Feishu's
+    ``partial_update_element`` API as ``partial_element.elements``.
+
+    Parameters
+    ----------
+    reasoning_rounds : list[ReasoningRound]
+        Finalised reasoning rounds.  Will be trimmed to the last
+        ``max_reasoning_rounds`` items if longer.
+    current_reasoning_text : str
+        In-progress reasoning text that has not yet been finalised into a round.
+    tool_steps : list[dict]
+        Tool step dicts consumed by :func:`_build_tool_step_elements`.
+        Will be trimmed to the last ``max_tool_steps`` items if longer.
+    show_reasoning : bool
+        Whether to render reasoning content.  When ``False`` reasoning
+        blocks are hidden (but tools are still rendered).
+    panel_events : list[tuple[str, int]] | None
+        Chronological timeline from :attr:`UnifiedLinearState.panel_events`.
+        When provided, reasoning and tool elements are interleaved in the
+        order they actually occurred, instead of grouping all reasoning
+        before all tools.
+    max_tool_steps : int
+        Maximum number of tool steps to render (older steps are trimmed).
+    max_reasoning_rounds : int
+        Maximum number of reasoning rounds to render (older rounds are trimmed).
+    """
     # ── Element limit trimming ──
     # Feishu Card 2.0 has a hard limit of 200 elements/components.
     # When the card has too many tool steps or reasoning rounds,
@@ -352,12 +409,8 @@ def build_unified_panel(
 
     # Filter panel_events to match trimmed items
     if panel_events and (trimmed_rounds > 0 or trimmed_tools > 0):
-        max_round_idx = len(reasoning_rounds) - 1  # after trimming, valid indices are 0..max_round_idx
-        max_tool_idx = len(tool_steps) - 1
         # panel_events reference original indices; after trimming, we keep only
         # the last N items, so original index i maps to trimmed index i - offset.
-        # For simplicity, if we trimmed anything, recalculate panel_events
-        # using the trimmed lists' indices.
         round_offset = trimmed_rounds
         tool_offset = trimmed_tools
         filtered_events: list[tuple[str, int]] = []
@@ -418,12 +471,16 @@ def build_unified_panel(
                 in_progress_idx, 0, finalized=False,
             ))
             if current_reasoning_text.strip():
+                # 截断过长推理文本，防止飞书渲染卡顿
+                display_text = current_reasoning_text
+                if len(display_text) > 2000:
+                    display_text = display_text[:2000] + "\n\n... (已截断，共 {} 字)".format(len(current_reasoning_text))
                 children.append({
                     "tag": "div",
                     "margin": "0px 0px 0px 22px",
                     "text": {
                         "tag": "lark_md",
-                        "content": current_reasoning_text,
+                        "content": display_text,
                         "text_size": "notation",
                     },
                 })
@@ -435,8 +492,11 @@ def build_unified_panel(
 
     else:
         # ── Fallback: no timeline available, render sequentially ──
-        # Reasoning rounds
+        has_reasoning = show_reasoning and (
+            reasoning_rounds or current_reasoning_text
+        )
         if has_reasoning:
+            # Reasoning rounds
             for round_ in reasoning_rounds:
                 children.append(_build_reasoning_round_title(
                     round_.index, round_.elapsed_ms, finalized=True,
@@ -477,60 +537,83 @@ def build_unified_panel(
     if not children:
         children.append({"tag": "markdown", "content": " "})
 
-    # ── Build panel ──
-    panel = _collapsible_panel(
-        expanded=expanded,
-        title_el={
-            "tag": "plain_text",
-            "content": en_full,
-            "i18n_content": _i18n(en_full, zh_full),
-            "text_color": "grey",
-            "text_size": "notation",
-        },
-        elements=children,
-    )
-    panel["element_id"] = element_id or UNIFIED_PANEL_ELEMENT_ID
-    return panel
+    return children
 
 
-# ---------------------------------------------------------------------------
-# Tool panel builders (existing — kept for backward compatibility)
-# ---------------------------------------------------------------------------
-
-def _build_tool_panel(
-    steps: list[dict],
-    elapsed_ms: float = 0,
+def build_unified_panel(
     *,
-    expanded: bool = True,
-    element_id: str | None = TOOL_PANEL_ELEMENT_ID,
+    reasoning_rounds: list,  # list of ReasoningRound objects
+    current_reasoning_text: str = "",  # in-progress reasoning
+    tool_steps: list[dict],
+    tool_elapsed_ms: float = 0,
+    show_reasoning: bool = True,
+    expanded: bool = False,
+    element_id: str | None = None,
+    panel_events: list[tuple[str, int]] | None = None,
+    max_tool_steps: int = 20,
+    max_reasoning_rounds: int = 20,
 ) -> dict:
-    en_t, zh_t = _T["tool_use"]
-    en_parts, zh_parts = [en_t], [zh_t]
-    if steps:
-        tpl_en, tpl_zh = _T["steps"]
-        en_parts.append(tpl_en.format(len(steps), "s" if len(steps) > 1 else ""))
-        zh_parts.append(tpl_zh.format(len(steps), ""))
-    if elapsed_ms > 0:
-        en_parts.append(f"({_format_elapsed(elapsed_ms)})")
-        zh_parts.append(f"({_format_elapsed(elapsed_ms)})")
+    """Build the full unified panel content for streaming updates and complete cards.
 
-    children: list[dict] = []
-    for s in steps:
-        children.extend(_build_tool_step_elements(s))
+    Combines reasoning rounds and tool steps into a single collapsible panel.
+    The panel title dynamically reflects the current state (round count, tool
+    count, elapsed time).
 
-    panel = _collapsible_panel(
-        expanded=expanded,
-        title_el={
-            "tag": "plain_text",
-            "content": ' · '.join(en_parts),
-            "i18n_content": _i18n(' · '.join(en_parts), ' · '.join(zh_parts)),
-            "text_color": "grey",
-            "text_size": "notation",
-        },
-        elements=children,
+    This is a thin assembler over :func:`build_panel_header` and
+    :func:`build_panel_children`; callers that only need to update the
+    panel's children (e.g. during streaming partial_update_element) can
+    call :func:`build_panel_children` directly to skip header rebuild.
+
+    Parameters
+    ----------
+    reasoning_rounds : list[ReasoningRound]
+        Finalised reasoning rounds (each has ``.index``, ``.text``, ``.elapsed_ms``).
+    current_reasoning_text : str
+        In-progress reasoning text that has not yet been finalised into a round.
+    tool_steps : list[dict]
+        Tool step dicts consumed by :func:`_build_tool_step_elements`.
+    tool_elapsed_ms : float
+        Total elapsed time for tool execution in milliseconds.
+    show_reasoning : bool
+        Whether to render reasoning content.  When ``False`` the title omits
+        the rounds count and reasoning blocks are hidden.
+    expanded : bool
+        Whether the panel starts expanded.
+    element_id : str | None
+        Override for the panel element_id.  Defaults to
+        :data:`UNIFIED_PANEL_ELEMENT_ID`.
+    panel_events : list[tuple[str, int]] | None
+        Chronological timeline from :attr:`UnifiedLinearState.panel_events`.
+        When provided, reasoning and tool elements are interleaved in the
+        order they actually occurred, instead of grouping all reasoning
+        before all tools.
+    """
+    header = build_panel_header(
+        reasoning_rounds=reasoning_rounds,
+        current_reasoning_text=current_reasoning_text,
+        tool_steps=tool_steps,
+        tool_elapsed_ms=tool_elapsed_ms,
+        show_reasoning=show_reasoning,
     )
-    if element_id:
-        panel["element_id"] = element_id
+    children = build_panel_children(
+        reasoning_rounds=reasoning_rounds,
+        current_reasoning_text=current_reasoning_text,
+        tool_steps=tool_steps,
+        show_reasoning=show_reasoning,
+        panel_events=panel_events,
+        max_tool_steps=max_tool_steps,
+        max_reasoning_rounds=max_reasoning_rounds,
+    )
+    panel = {
+        "tag": "collapsible_panel",
+        "expanded": expanded,
+        "header": header,
+        "border": {"color": "grey", "corner_radius": "5px"},
+        "vertical_spacing": "4px",
+        "padding": "8px 8px 8px 8px",
+        "elements": children,
+    }
+    panel["element_id"] = element_id or UNIFIED_PANEL_ELEMENT_ID
     return panel
 
 
@@ -681,47 +764,20 @@ def _escape_md(value: str) -> str:
     return re.sub(r"([`*_{}\[\]<>])", r"\\\1", value.replace("\\", "\\\\"))
 
 
-def _build_reasoning_panel(
-    text: str, elapsed_ms: float = 0, *, expanded: bool = False, element_id: str | None = None,
-    text_element_id: str | None = REASONING_TEXT_ELEMENT_ID,
-) -> dict:
-    if elapsed_ms > 0:
-        d = _format_elapsed(elapsed_ms)
-        en_label, zh_label = _T["thought_for"][0].format(d), _T["thought_for"][1].format(d)
-    elif not text.strip():
-        en_label, zh_label = _T["thinking_panel"]
-    else:
-        en_label, zh_label = _T["thought"]
-    panel = _collapsible_panel(
-        expanded=expanded,
-        title_el={
-            "tag": "plain_text",
-            "content": en_label,
-            "i18n_content": _i18n(en_label, zh_label),
-            "text_color": "grey",
-            "text_size": "notation",
-        },
-        elements=[{
-            "tag": "markdown",
-            "content": text,
-            "text_size": "notation",
-            **({"element_id": text_element_id} if text_element_id else {}),
-        }],
-        vertical_spacing="8px",
-    )
-    if element_id:
-        panel["element_id"] = element_id
-    return panel
-
-
 def _build_error_panel(
     error_message: str,
     *,
     is_aborted: bool = False,
     expanded: bool = True,
+    card_trace_id: str = "",
 ) -> dict:
     """Build a collapsible error/interrupt panel — visually consistent with
     reasoning and tool panels.
+
+    v1.1.0: Error messages are now user-friendly. Technical details are
+    placed in the collapsible panel body, while the panel title shows
+    a concise friendly message. If card_trace_id is provided, it's
+    included for log correlation.
 
     - Error (API failure, tool crash): red border, expanded by default
     - Interrupt (/stop or new message): orange border, expanded by default
@@ -729,9 +785,24 @@ def _build_error_panel(
     if is_aborted:
         en_label, zh_label = _T["interrupt_panel"]
         border_color = "orange"
+        # Interrupt is already user-friendly (e.g. "⚡ 已停止")
+        body_content = error_message
     else:
         en_label, zh_label = _T["error_panel"]
         border_color = "red"
+        # v1.1.0: Build user-friendly error body
+        # Friendly hint + technical details in collapsible section
+        friendly_en = "AI encountered an error while replying. Please try again."
+        friendly_zh = "AI 回复时出现错误，请重试。"
+        if card_trace_id:
+            friendly_en += f"\n\nDebug ID: `{card_trace_id}`"
+            friendly_zh += f"\n\n调试 ID: `{card_trace_id}`"
+
+        tech_detail = error_message.strip() if error_message else ""
+        if tech_detail:
+            body_content = f"{friendly_zh}\n\n<details><summary>技术详情</summary>\n\n```\n{tech_detail}\n```\n\n</details>"
+        else:
+            body_content = friendly_zh
 
     panel = _collapsible_panel(
         expanded=expanded,
@@ -744,7 +815,7 @@ def _build_error_panel(
         },
         elements=[{
             "tag": "markdown",
-            "content": error_message,
+            "content": body_content,
             "text_size": "notation",
         }],
         vertical_spacing="8px",

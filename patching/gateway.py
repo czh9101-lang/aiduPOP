@@ -13,12 +13,11 @@ Split from monkey_patch.py — contains:
 from __future__ import annotations
 
 import functools
-import logging
-import threading
 import time
 from typing import Any, Callable
 
 from .. import __version__
+from ..state.phase import TERMINAL_PHASES
 from . import (
     _msg_ctx,
     _started_msg_ids,
@@ -33,7 +32,17 @@ from . import (
 
 
 def _wrap_handle_message(orig: Callable) -> Callable:
-    """Inject NORMALIZE hook at the top of GatewayRunner._handle_message."""
+    """Inject NORMALIZE hook at the top of GatewayRunner._handle_message.
+
+    v1.1.0: Also intercept /aowen commands when an agent is running.
+    When ``self._running_agents`` has an entry for this session, Hermes
+    would normally take the "agent running" fast path — known slash
+    commands return a hint text, but unknown commands (like /aowen) fall
+    through to the default interrupt path and get sent to the LLM as
+    plain text. We detect /aowen in that fast path and reply with
+    build_interrupt_hint_card() instead, borrowing Hermes native
+    "Agent is running — wait or /stop first" UX.
+    """
 
     @functools.wraps(orig)
     async def wrapper(self, event, *args, **kwargs):
@@ -48,7 +57,42 @@ def _wrap_handle_message(orig: Callable) -> Callable:
                 reply_anchor_id=self._reply_anchor_for_event(event),
             )
         except Exception:
-            pass
+            _logger.warning("HLS: suppressed exception", exc_info=True)
+
+        # ── v1.1.0: /aowen interrupt hint ──
+        # When an agent is running for this session, /aowen commands
+        # would fall through to the LLM (pre_gateway_dispatch hook is
+        # not fired on the "agent running" fast path). Intercept here
+        # and reply with an orange hint card instead.
+        try:
+            _text = (getattr(event, "text", "") or "").strip()
+            if _text.lower().startswith("/aowen"):
+                _source = getattr(event, "source", None)
+                _platform = getattr(getattr(_source, "platform", None), "value", "")
+                if _platform == "feishu" and hasattr(self, "_running_agents"):
+                    _quick_key = None
+                    try:
+                        _quick_key = self._session_key_for_source(_source)
+                    except Exception:
+                        _logger.debug("HLS: _session_key_for_source failed", exc_info=True)
+                    if _quick_key and _quick_key in self._running_agents:
+                        # Agent is running — send interrupt hint card
+                        from ..aowen import build_interrupt_hint_card, _send_card_async
+                        _chat_id = getattr(_source, "chat_id", "") if _source else ""
+                        if _chat_id:
+                            _logger.info(
+                                "HLS: /aowen during active agent (session=%s), "
+                                "sending interrupt hint card",
+                                str(_quick_key)[:12],
+                            )
+                            _send_card_async(_chat_id, build_interrupt_hint_card(), "interrupt_hint")
+                            # Return empty string to signal "handled, no further dispatch"
+                            # — mirrors Hermes native slash-command hint path
+                            # which returns a string reply and stops processing.
+                            return ""
+        except Exception:
+            _logger.debug("HLS: /aowen interrupt hint check failed", exc_info=True)
+
         return await orig(self, event, *args, **kwargs)
 
     return wrapper
@@ -77,8 +121,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                 anchor_id=anchor_id,
             )
         except Exception:
-            pass
-
+            _logger.warning("HLS: suppressed exception", exc_info=True)
         # Seed message context for downstream hooks
         # Use a dedicated dict per message to prevent context leakage
         # between concurrent/overlapping messages.
@@ -134,8 +177,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                                 _started_msg_ids.discard(mid)
                             return None
             except Exception:
-                pass
-
+                _logger.warning("HLS: suppressed exception", exc_info=True)
         # ── ABORT / INTERRUPT detection ──
         # When card was already sent, _handle_message_with_agent returns
         # None (the "Discarding stale agent result" path or the
@@ -167,10 +209,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                         if _ctrl and _ctrl.enabled:
                             for _other_mid in others:
                                 _other_sess = _ctrl._sessions.get(_other_mid)
-                                if _other_sess and _other_sess.state not in (
-                                    "completing", "completed", "creation_failed",
-                                    "aborted", "terminated",
-                                ):
+                                if _other_sess and _other_sess.state not in TERMINAL_PHASES and _other_sess.state != "completing":
                                     _real_interrupt = True
                                     _interrupt_new_mid = _other_mid
                                     break
@@ -192,7 +231,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                             anchor_id=anchor_id,
                         )
                     except Exception:
-                        pass
+                        _logger.warning("HLS: suppressed exception", exc_info=True)
                 # else: card completed normally, Hermes returned None
                 #       to suppress text reply — NOT an abort.
             else:
@@ -202,7 +241,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
 
                     on_message_aborted(message_id=mid)
                 except Exception:
-                    pass
+                    _logger.warning("HLS: suppressed exception", exc_info=True)
         elif ctx and ctx.get("card_sent"):
             # result is not None and card_sent=True — card was completed
             # by _wrap_run_agent's COMPLETE hook. Check if the card session
@@ -217,7 +256,7 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                     _eid = ctx.get("event_message_id", "")
                     if _eid:
                         _sess = _ctrl._sessions.get(_eid)
-                        if _sess and _sess.state not in ("completing", "completed", "creation_failed", "aborted", "terminated"):
+                        if _sess and _sess.state not in TERMINAL_PHASES and _sess.state != "completing":
                             _logger.info(
                                 "card session stuck in non-terminal state for msg=%s "
                                 "(state=%s, card_sent=%s), firing abort",
@@ -227,10 +266,9 @@ def _wrap_handle_message_with_agent(orig: Callable) -> Callable:
                                 from .hooks import on_message_aborted
                                 on_message_aborted(message_id=mid)
                             except Exception:
-                                pass
+                                _logger.warning("HLS: suppressed exception", exc_info=True)
             except Exception:
-                pass
-
+                _logger.warning("HLS: suppressed exception", exc_info=True)
         # Cleanup tracking
         with _started_msg_ids_lock:
             _started_msg_ids.discard(mid)
@@ -312,7 +350,6 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     "_agent_ref": None,
                     "_interrupt_depth": _interrupt_depth,
                     "_parent_message_id": ctx.get("message_id"),  # Track parent for cleanup
-                    "_force_rewrap": True,  # Signal _maybe_wrap_callbacks to re-wrap
                     "_original_msg_context_ref": _original_msg_context_ref,  # Propagate ref to original
                 }
                 _msg_ctx.set(ctx)
@@ -348,7 +385,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         anchor_id=event_message_id,
                     )
                 except Exception:
-                    pass
+                    _logger.warning("HLS: suppressed exception", exc_info=True)
             else:
                 ctx["event_message_id"] = event_message_id
             # Copy to thread-local for thread-pool workers
@@ -568,8 +605,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     result["already_sent"] = True
                     ctx["card_sent"] = True
             except Exception:
-                pass
-
+                _logger.warning("HLS: suppressed exception", exc_info=True)
         # ── Restore parent context after recursive interrupt follow-up ──
         # When we created a new context for the recursive call (above),
         # _msg_ctx now points to the child message's context. We must
@@ -672,6 +708,7 @@ def _wrap_run_conversation(orig: Callable) -> Callable:
         task_id=None,
         stream_callback=None,
         persist_user_message=None,
+        persist_user_timestamp=None,
         **kwargs,
     ):
         # ── inject_time: prepend current time to user_message ──
@@ -681,16 +718,20 @@ def _wrap_run_conversation(orig: Callable) -> Callable:
 
         _maybe_wrap_callbacks(self)
         try:
-            return orig(
-                self,
-                user_message,
-                system_message,
-                conversation_history,
-                task_id,
-                stream_callback,
-                persist_user_message,
-                **kwargs,
-            )
+            # 用关键字参数传递，兼容有/无 persist_user_timestamp 的 Hermes 版本
+            import inspect
+            call_kwargs = {
+                "system_message": system_message,
+                "conversation_history": conversation_history,
+                "task_id": task_id,
+                "stream_callback": stream_callback,
+                "persist_user_message": persist_user_message,
+            }
+            orig_params = inspect.signature(orig).parameters
+            if "persist_user_timestamp" in orig_params:
+                call_kwargs["persist_user_timestamp"] = persist_user_timestamp
+            call_kwargs.update(kwargs)
+            return orig(self, user_message, **call_kwargs)
         finally:
             # Always reset the re-entrancy guard so the next message
             # in the same thread can be injected again.
@@ -755,8 +796,7 @@ def _wrap_run_background_task(orig: Callable) -> Callable:
             if hasattr(self, "adapters") and source.platform:
                 adapter = self.adapters.get(source.platform)
         except Exception:
-            pass
-
+            _logger.warning("HLS: suppressed exception", exc_info=True)
         if adapter:
             original_send = adapter.send
 

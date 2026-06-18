@@ -1,0 +1,51 @@
+version: '1.0'
+name: release-pipeline
+displayName: 自动发版流水线
+
+# 当代码推送到 github_sync 分支时触发
+triggers:
+  push:
+    branches:
+      precise: [github_sync]
+
+stages:
+  - name: release-stage
+    displayName: 创建 Gitee 发行版
+    strategy: naturally
+    trigger: auto
+    executor: []
+    steps:
+      # 步骤 1: 读取 plugin.yaml 版本号，写入流水线变量
+      # GITEE_PARAMS 是 Gitee Go 专用参数文件，写入后后续步骤可用 ${变量名} 引用
+      # 注意：多条 commands 之间 shell 变量不共享，所以用 | 合并为一条块命令
+      - step: build@python
+        name: read_version
+        displayName: 读取版本号
+        pythonVersion: '3.11'
+        commands:
+          - |
+            set -e
+            VERSION=$(python3 -c "import yaml;print(yaml.safe_load(open('plugin.yaml'))['version'])")
+            echo "检测到版本号: $VERSION"
+            echo "RELEASE_VERSION=$VERSION" >> GITEE_PARAMS
+        notify: []
+        strategy:
+          retry: '0'
+
+      # 步骤 2: 创建 Gitee Release
+      # release@gitee 插件会自动:
+      #   - 创建 tag（如果不存在）
+      #   - 创建 Release 页面
+      #   - 自动生成 Source code (zip) 和 (tar.gz)
+      # description 用 "| 文件路径" 语法从 CHANGELOG.md 读取内容
+      - step: release@gitee
+        name: create_release
+        displayName: 创建 Gitee Release
+        releaseName: v${RELEASE_VERSION}
+        tagName: v${RELEASE_VERSION}
+        description: "v${RELEASE_VERSION} 发行版 | docs/CHANGELOG.md"
+        prerelease: false
+        allowUpdate: false
+        notify: []
+        strategy:
+          retry: '0'

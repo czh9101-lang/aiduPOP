@@ -6,23 +6,23 @@ This plugin intercepts Hermes's message pipeline and renders real-time
 streaming cards with typewriter effect, unified agent process panels,
 and proactive TTL extension.
 
-The unified panel architecture (v1.1.0+) replaces the old segment-based
+The unified panel architecture (v1.0.2+) replaces the old segment-based
 approach with a single collapsible panel element that holds all reasoning
 rounds and tool steps.  This reduces card elements from potentially 50+
 to just 3-4, eliminating the need for element counting, card splitting,
 and progressive degradation.
 
-Module Organization
-──────────────────
+Module Organization (v1.1.0)
+────────────────────────────
 Configuration:
   config/                     Sub-package
     __init__.py               Re-exports: Config
-    reader.py                 Config reader (Hermes config.yaml)
+    reader.py                 Config reader (Hermes config.yaml, hot reload)
 
 Feishu API:
   feishu/                     Sub-package
     __init__.py               Re-exports: FeishuClient, FeishuAPIError, UnavailableGuard, etc.
-    client.py                 FeishuClient (Lark SDK wrapper, transient retry, TTL extension)
+    client.py                 FeishuClient (Lark SDK wrapper, transient retry, 300313 retry)
     guard.py                  UnavailableGuard (message-deleted protection)
 
 Flush Throttle:
@@ -34,8 +34,8 @@ Core Controller:
   controller/                 Sub-package
     __init__.py               Re-exports: StreamCardController, CardSession, states
     core.py                   StreamCardController (singleton, manages sessions)
-    mixin.py                  ControllerMixin (non-linear card API orchestration)
-    linear_mixin.py           UnifiedControllerMixin (unified panel flush/seal)
+    mixin.py                  ControllerMixin (cron/gateway deliver, shared utilities)
+    linear_mixin.py           UnifiedControllerMixin (unified panel flush/seal — main path)
 
 Card Building:
   cardkit/                    Sub-package
@@ -49,28 +49,38 @@ Card Building:
 State & Data:
   state/                      Sub-package
     __init__.py               Re-exports: CardSession, TextState, UnifiedLinearState, etc.
-    session.py                CardSession (per-message state with element tracking)
+    session.py                CardSession (per-message state, _creation_stages set)
     linear.py                 UnifiedLinearState + ReasoningRound
+    phase.py                  CardPhase / TerminalReason / CardVisualState state machine
     text.py                   TextState (incremental text tracking)
     tooluse.py                ToolUseTracker (tool call visualization + redaction)
 
 Runtime Patching:
   patching/                   Sub-package
     __init__.py               Entry point + shared state (apply_patches) + re-exports
+    hermes_adapter.py         HermesCompat (isolates all Hermes internal module access)
     gateway.py                GatewayRunner wrappers, inject_time, cron
     callbacks.py              Callback wrapping (answer, thinking, tool, reasoning)
     adapter.py                FeishuAdapter interception (send, edit, reactions, clarify)
     hooks.py                  Hook functions (on_message_started, on_answer_delta, etc.)
 
-Entry Points:
-  plugin.py                   Plugin register/unregister (Hermes entry point + client pre-warm)
-  __main__.py                 CLI entry (status, verify, cleanup)
+Monitoring:
+  aowen/                      Sub-package
+    __init__.py               /aowen command system (pre_gateway_dispatch hook + metrics + cards)
+
+Plugin Entry:
+  plugin/                     Sub-package
+    __init__.py               register()/unregister() + config backup + FeishuClient pre-warm
+
+CLI Entry:
+  __main__.py                 CLI (status, verify, doctor, cleanup, python)
 
 Logging
 ───────
 Plugin logger name: ``hermes_lark_streaming``
   - Inherits level from Hermes root logger (set by config.yaml ``logging.level``)
   - Logs to ``agent.log`` (catch-all), NOT routed to ``gateway.log``
+  - v1.1.0: unified log prefix ``HLS:`` (replaced HLS_DIAG/HLS_WRAP/HLS_CALLED/HLS_FIX)
   - No explicit ``setLevel()`` — level follows Hermes config automatically
 
 Unified Panel Architecture
@@ -99,9 +109,9 @@ This eliminates:
   - Progressive degradation (compact/minimal seal)
 
 Performance improvements:
-  - Initial card pre-allocates all slots (2 API calls instead of 3)
+  - Phase 1 placeholder card has only 2 elements (loading hint + icon)
   - Client pre-warming eliminates first-message latency
-  - Default flush interval reduced from 500ms to 200ms
+  - Default flush interval 100ms (configurable 70~2000ms)
   - Proactive TTL extension prevents 300309 stream closure
   - Element existence tracking eliminates 300314 seal failures
 """

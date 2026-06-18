@@ -1,55 +1,94 @@
-"""读取 Hermes 配置，提供本插件所需的配置项."""
+"""读取 Hermes 配置，提供本插件所需的配置项.
+
+配置刷新方式：
+- /aowen config reload 命令：用户在飞书发送命令，立即重新加载
+- 重启网关：下次启动时自动加载新配置
+- 不做自动 mtime 检测（避免每 token 一次 stat() 系统调用）
+"""
 
 from __future__ import annotations
 
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
 
 def _get_hermes_config_path() -> Path:
-    """动态获取 Hermes 配置文件路径.
-
-    在多 Profile 场景下，HERMES_HOME 环境变量会在 Gateway 启动时
-    通过 _apply_profile_override() 设置。如果在模块导入时就读取
-    该变量，可能会读到错误的路径。
-
-    此函数每次调用时都重新读取环境变量，确保始终使用正确的路径。
-    """
+    """动态获取 Hermes 配置文件路径."""
     return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
 
 
-_RELOAD_CACHE_TTL = 5.0  # 运行时可变配置的缓存 TTL（秒）
+_RELOAD_CACHE_TTL = 60.0  # 运行时可变配置的缓存 TTL（秒）— 仅用于 _reload_cached 路径
+
+
+def _to_bool(val: Any, default: bool = False) -> bool:
+    """严格 bool 转换，防止字符串 'false' 被当作 True."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes", "on")
+    if isinstance(val, (int, float)):
+        return val != 0
+    return default
 
 
 class Config:
-    """插件配置，惰性读取 Hermes 主配置."""
+    """插件配置，惰性读取 Hermes 主配置.
+
+    配置刷新方式：
+    1. /aowen config reload — 立即清缓存重新读取
+    2. 重启网关 — 下次启动自动加载
+    不做自动 mtime 检测。
+    """
 
     def __init__(self) -> None:
         self._raw: dict[str, Any] | None = None
         self._reload_cache: dict[str, Any] | None = None
         self._reload_cache_at: float = 0.0
+        self._on_reload_callbacks: list[Callable[[], None]] = []
+
+    # ── 配置刷新 ──
+
+    def reload(self) -> None:
+        """Force reload configuration from disk.
+
+        Clears all caches. Called by /aowen config reload command.
+        """
+        self._raw = None
+        self._reload_cache = None
+        self._reload_cache_at = 0.0
+        _logger = __import__("logging").getLogger("hermes_lark_streaming")
+        _logger.info("HLS: config reload triggered — caches cleared")
+        for cb in self._on_reload_callbacks:
+            try:
+                cb()
+            except Exception:
+                _logger.debug("HLS: on_reload callback failed", exc_info=True)
+
+    def on_reload(self, callback: Callable[[], None]) -> None:
+        """Register a callback to be called when config is reloaded."""
+        self._on_reload_callbacks.append(callback)
 
     @property
     def enabled(self) -> bool:
         """是否启用流式卡片."""
         sec = self._plugin_sec()
-        return bool(sec.get("enabled", False))
+        return _to_bool(sec.get("enabled", False))
 
     @property
     def linear(self) -> bool:
         """是否启用线性单卡模式，按事件顺序动态更新卡片元素."""
         sec = self._plugin_sec()
-        return bool(sec.get("linear", True))
+        return _to_bool(sec.get("linear", True), default=True)
 
     @property
     def panel_expanded(self) -> bool:
         """完成态卡片中面板（工具、推理）是否保持展开."""
         sec = self._plugin_sec()
-        return bool(sec.get("panel_expanded", False))
+        return _to_bool(sec.get("panel_expanded", False))
 
     @property
     def streaming_panel_expanded(self) -> bool:
@@ -59,7 +98,7 @@ class Config:
         与 panel_expanded（完成态面板）独立配置。
         """
         sec = self._plugin_sec()
-        return bool(sec.get("streaming_panel_expanded", False))
+        return _to_bool(sec.get("streaming_panel_expanded", False))
 
     @property
     def max_tool_steps(self) -> int:
@@ -134,8 +173,8 @@ class Config:
         if isinstance(platforms, dict):
             feishu = platforms.get("feishu")
             if isinstance(feishu, dict) and "show_reasoning" in feishu:
-                return bool(feishu["show_reasoning"])
-        return bool(display.get("show_reasoning", False))
+                return _to_bool(feishu["show_reasoning"])
+        return _to_bool(display.get("show_reasoning", False))
 
     @property
     def feishu_app_id(self) -> str:
@@ -185,14 +224,14 @@ class Config:
         sec = self._reload_cached().get("hermes_lark_streaming")
         if not isinstance(sec, dict):
             return False
-        return bool(sec.get("inject_time", False))
+        return _to_bool(sec.get("inject_time", False))
 
     @property
     def footer_show_label(self) -> bool:
         """Footer 是否显示字段标签."""
         sec = self._plugin_sec()
         footer = sec.get("footer", {})
-        return bool(footer.get("show_label", False))
+        return _to_bool(footer.get("show_label", False))
 
     @property
     def header_enabled(self) -> bool:
@@ -216,7 +255,7 @@ class Config:
         sec = self._reload_cached().get("hermes_lark_streaming")
         if not isinstance(sec, dict):
             return True  # 默认开启
-        return bool(sec.get("gateway_cards", True))
+        return _to_bool(sec.get("gateway_cards", True), default=True)
 
     @staticmethod
     def _default_footer_fields() -> list[list[str]]:
@@ -241,13 +280,25 @@ class Config:
     def _platform_cfg(self) -> dict[str, Any]:
         """从环境变量或平台配置找飞书凭据."""
         if self.env_app_id and self.env_app_secret:
+            # base_url 优先级：
+            # 1. FEISHU_BASE_URL / LARK_BASE_URL 环境变量（显式指定，最高优先级）
+            # 2. FEISHU_DOMAIN 环境变量推断（feishu→国内, lark→国际）
+            # 3. 默认 https://open.feishu.cn/open-apis
+            base_url = (
+                os.environ.get("FEISHU_BASE_URL")
+                or os.environ.get("LARK_BASE_URL")
+                or None
+            )
+            if not base_url:
+                domain = os.environ.get("FEISHU_DOMAIN", "").lower()
+                if domain == "lark":
+                    base_url = "https://open.larksuite.com/open-apis"
+                else:
+                    base_url = "https://open.feishu.cn/open-apis"
             return {
                 "app_id": self.env_app_id,
                 "app_secret": self.env_app_secret,
-                "base_url": os.environ.get(
-                    "FEISHU_BASE_URL",
-                    os.environ.get("LARK_BASE_URL", "https://open.feishu.cn/open-apis"),
-                ),
+                "base_url": base_url,
             }
         raw = self._load()
         for key in ("feishu", "lark"):

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import warnings
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -21,9 +20,8 @@ from .phase import (
     PHASE_TO_VISUAL,
 )
 
-# Backward-compatible aliases — old code imports IDLE / FAILED from this module
+# Backward-compatible alias — old code imports IDLE from this module
 IDLE = CardPhase.IDLE
-FAILED = CardPhase.FAILED  # DEPRECATED: "creation_failed" — use CardPhase.CREATION_FAILED
 
 from ..flush import PATCH_MS, FlushController
 from .linear import UnifiedLinearState
@@ -43,12 +41,10 @@ class CardSession:
     __slots__ = (
         "_card_ready",
         "_create_epoch_snap",
+        "_creation_stages",
         "_first_answer_time",
         "_first_flush_done",
-        "_loading_hint_removed",
         "_loop",
-        "_panel_element_created",
-        "_answer_element_created",
         "_pending_flush",
         "_streaming_closed",
         "_was_aborted",
@@ -56,6 +52,7 @@ class CardSession:
         "card_created_at",
         "card_id",
         "card_msg_id",
+        "card_trace_id",
         "chat_id",
         "create_epoch",
         "created_at",
@@ -67,12 +64,8 @@ class CardSession:
         "flush",
         "footer",
         "guard",
-        "last_tool_use_update",
         "linear",
         "message_id",
-        "reasoning_dirty",
-        "reasoning_start",
-        "reasoning_text",
         "sequence",
         "state",
         "terminal_reason",
@@ -95,17 +88,16 @@ class CardSession:
         self.state: str = IDLE
         self.card_msg_id: str | None = None
         self.card_id: str | None = None
+        # v1.1.0: card_trace_id — short unique ID for correlating all logs
+        # belonging to one card's lifecycle. Format: last 6 chars of msg_id.
+        self.card_trace_id: str = (message_id or "??????")[-6:]
         self.use_cardkit: bool = False
         self.text = TextState()
         self.tool_use = ToolUseTracker()
         self.flush = FlushController(throttle_ms=PATCH_MS)
-        self.reasoning_text = ""
-        self.reasoning_start: float = 0.0
-        self.reasoning_dirty = False
         self.footer: dict[str, Any] = {}
         self.sequence = 1
         self._loop = loop
-        self.last_tool_use_update = 0.0
         self.created_at = time.time()
         self.deferred_background_review_closed = False
         self.deferred_background_reviews: list[tuple[str, Any]] = []
@@ -126,14 +118,22 @@ class CardSession:
         self.linear = False
         self.unified_state: UnifiedLinearState | None = None
         self.existing_elements: set[str] = set()
-        self._panel_element_created: bool = False
-        self._answer_element_created: bool = False
+        # ── State machine: creation stages ──
+        # Replaces the previous _panel_element_created / _answer_element_created /
+        # _loading_hint_removed booleans.  Each stage is added to the set when
+        # the corresponding card lifecycle event happens:
+        #   "panel"        — unified panel element added to card (add_elements)
+        #   "answer"       — answer streaming element added to card (add_elements)
+        #   "hint_removed" — loading hint element deleted from card
+        # The set is checked via ``"panel" in session._creation_stages`` etc.
+        # Other orthogonal flags (_streaming_closed, _was_aborted, _pending_flush,
+        # _first_flush_done) remain as booleans.
+        self._creation_stages: set[str] = set()
         self.card_created_at: float = 0.0
         self._was_aborted: bool = False
         self.error_message: str = ""
         self._first_flush_done: bool = False
         self._first_answer_time: float = 0.0
-        self._loading_hint_removed: bool = False
         self._pending_flush: bool = False
         self._streaming_closed: bool = False
         self._card_ready: asyncio.Event = asyncio.Event()
@@ -247,26 +247,3 @@ class CardSession:
         )
         # Signal readiness so awaiters don't deadlock
         self._card_ready.set()
-
-    # ------------------------------------------------------------------
-    # Backward compatibility — linear_state → unified_state
-    # ------------------------------------------------------------------
-
-    @property
-    def linear_state(self) -> UnifiedLinearState | None:
-        """DEPRECATED: Use unified_state instead."""
-        warnings.warn(
-            "linear_state is deprecated; use unified_state instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.unified_state
-
-    @linear_state.setter
-    def linear_state(self, value: UnifiedLinearState | None) -> None:
-        warnings.warn(
-            "linear_state is deprecated; use unified_state instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.unified_state = value
