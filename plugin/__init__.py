@@ -47,6 +47,8 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "print_strategy": "delay",
     "flush_interval_ms": 100,
     "card_ttl_sec": 600,
+    "max_tool_steps": 20,
+    "max_reasoning_rounds": 20,
     "inject_time": False,
     "footer": {
         "fields": [

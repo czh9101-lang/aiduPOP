@@ -181,6 +181,7 @@ display:
 
 ## 提供的钩子（Hooks）
 
+- `pre_gateway_dispatch` - 消息分发前拦截（/aowen 命令）
 - `on_feishu_normalize` - 飞书消息标准化
 - `on_message_started` - 消息开始
 - `on_message_completed` - 消息完成
@@ -201,7 +202,7 @@ display:
 | 错误码 300305 | 元素超限（硬限制 200） | 减小 `max_tool_steps` / `max_reasoning_rounds` |
 | 错误码 300315 | Schema 校验失败 | 检查飞书 Card 2.0 规范，确认卡片属性合法 |
 | 内容被截断 | 静态卡片表格超限 | 静态卡片（cron/gateway）表格行数 >5 时自动降级 |
-| 流式卡住 | TTL 过期 | 增加 `card_duration_sec` 值 |
+| 流式卡住 | TTL 过期 | 增加 `card_ttl_sec` 值 |
 | 封口失败 | 元素总数超标 | 安全网已自动裁剪早期面板，检查日志确认 |
 | 文本兜底 | 极端超限场景 | 核心内容保留，完整内容降级为纯文本 |
 

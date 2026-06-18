@@ -471,12 +471,16 @@ def build_panel_children(
                 in_progress_idx, 0, finalized=False,
             ))
             if current_reasoning_text.strip():
+                # 截断过长推理文本，防止飞书渲染卡顿
+                display_text = current_reasoning_text
+                if len(display_text) > 2000:
+                    display_text = display_text[:2000] + "\n\n... (已截断，共 {} 字)".format(len(current_reasoning_text))
                 children.append({
                     "tag": "div",
                     "margin": "0px 0px 0px 22px",
                     "text": {
                         "tag": "lark_md",
-                        "content": current_reasoning_text,
+                        "content": display_text,
                         "text_size": "notation",
                     },
                 })

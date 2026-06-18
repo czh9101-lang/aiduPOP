@@ -1113,7 +1113,6 @@ class TestEnforceCardElementLimit:
         elements = [panel, {"tag": "markdown", "content": "Test answer"}, {"tag": "hr"}, {"tag": "markdown", "content": "footer"}]
         card = {
             "schema": "2.0",
-            "config": {"wide_screen_mode": True, "update_multi": True, "streaming_mode": False, "locales": _LOCALES},
             "body": {"elements": elements},
         }
         pre_count = _count_tag_objects(card)

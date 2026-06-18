@@ -245,7 +245,6 @@ def build_streaming_card_v2(
 def build_im_fallback_card() -> dict[str, Any]:
     return {
         "config": {
-            "wide_screen_mode": True,
             "update_multi": True,
             "locales": _LOCALES,
         },
@@ -385,7 +384,6 @@ def build_unified_complete_card(
     card: dict[str, Any] = {
         "schema": "2.0",
         "config": {
-            "wide_screen_mode": True,
             "update_multi": True,
             "streaming_mode": False,
             "locales": _LOCALES,

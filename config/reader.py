@@ -24,6 +24,17 @@ def _get_hermes_config_path() -> Path:
 _RELOAD_CACHE_TTL = 60.0  # 运行时可变配置的缓存 TTL（秒）— 仅用于 _reload_cached 路径
 
 
+def _to_bool(val: Any, default: bool = False) -> bool:
+    """严格 bool 转换，防止字符串 'false' 被当作 True."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes", "on")
+    if isinstance(val, (int, float)):
+        return val != 0
+    return default
+
+
 class Config:
     """插件配置，惰性读取 Hermes 主配置.
 
@@ -65,19 +76,19 @@ class Config:
     def enabled(self) -> bool:
         """是否启用流式卡片."""
         sec = self._plugin_sec()
-        return bool(sec.get("enabled", False))
+        return _to_bool(sec.get("enabled", False))
 
     @property
     def linear(self) -> bool:
         """是否启用线性单卡模式，按事件顺序动态更新卡片元素."""
         sec = self._plugin_sec()
-        return bool(sec.get("linear", True))
+        return _to_bool(sec.get("linear", True), default=True)
 
     @property
     def panel_expanded(self) -> bool:
         """完成态卡片中面板（工具、推理）是否保持展开."""
         sec = self._plugin_sec()
-        return bool(sec.get("panel_expanded", False))
+        return _to_bool(sec.get("panel_expanded", False))
 
     @property
     def streaming_panel_expanded(self) -> bool:
@@ -87,7 +98,7 @@ class Config:
         与 panel_expanded（完成态面板）独立配置。
         """
         sec = self._plugin_sec()
-        return bool(sec.get("streaming_panel_expanded", False))
+        return _to_bool(sec.get("streaming_panel_expanded", False))
 
     @property
     def max_tool_steps(self) -> int:
@@ -213,7 +224,7 @@ class Config:
         sec = self._reload_cached().get("hermes_lark_streaming")
         if not isinstance(sec, dict):
             return False
-        return bool(sec.get("inject_time", False))
+        return _to_bool(sec.get("inject_time", False))
 
     @property
     def footer_show_label(self) -> bool:
@@ -244,7 +255,7 @@ class Config:
         sec = self._reload_cached().get("hermes_lark_streaming")
         if not isinstance(sec, dict):
             return True  # 默认开启
-        return bool(sec.get("gateway_cards", True))
+        return _to_bool(sec.get("gateway_cards", True), default=True)
 
     @staticmethod
     def _default_footer_fields() -> list[list[str]]:

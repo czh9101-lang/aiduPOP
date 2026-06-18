@@ -138,7 +138,7 @@ IDLE ──────► CREATING ──────► STREAMING ────
 
 **终端阶段** (吸收态，无出边): `{COMPLETED, CREATION_FAILED, ABORTED, TERMINATED}`
 
-> v1.1.0 变更：`FAILED` 别名已删除，统一使用 `CREATION_FAILED`。`CardPhase.FAILED` 类属性仍存在（值同 `CREATION_FAILED`）。
+> v1.1.0 变更：`FAILED` 作为 `CREATION_FAILED` 的别名保留（值均为 `"creation_failed"`），`CardPhase.FAILED` 类属性仍存在。新代码应使用 `CREATION_FAILED`。
 
 ### 5.2 TerminalReason — 终端原因追踪
 

@@ -28,7 +28,7 @@ def build_cron_card(content: str) -> dict[str, Any]:
     """Cron 推送用的极简静态卡片 — schema 2.0，仅 markdown 内容."""
     card: dict[str, Any] = {
         "schema": "2.0",
-        "config": {"wide_screen_mode": True, "locales": _LOCALES},
+        "config": {"locales": _LOCALES},
         "body": {"elements": []},
     }
     if not content.strip():
@@ -87,7 +87,7 @@ def build_gateway_card(
 
     card: dict[str, Any] = {
         "schema": "2.0",
-        "config": {"wide_screen_mode": True, "locales": _LOCALES},
+        "config": {"locales": _LOCALES},
         "body": {"elements": elements},
     }
 
@@ -201,7 +201,6 @@ def build_clarify_card(
     card: dict[str, Any] = {
         "schema": "2.0",
         "config": {
-            "wide_screen_mode": True,
             "streaming_mode": False,
             "locales": _LOCALES,
         },
@@ -296,7 +295,6 @@ def build_clarify_submitted_card(
     card: dict[str, Any] = {
         "schema": "2.0",
         "config": {
-            "wide_screen_mode": True,
             "streaming_mode": False,
             "locales": _LOCALES,
         },
@@ -369,7 +367,6 @@ def build_clarify_confirmed_card(
     card: dict[str, Any] = {
         "schema": "2.0",
         "config": {
-            "wide_screen_mode": True,
             "streaming_mode": False,
             "locales": _LOCALES,
         },

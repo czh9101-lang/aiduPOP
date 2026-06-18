@@ -233,7 +233,7 @@ FEISHU_DOMAIN=feishu          # feishu=国内版, lark=国际版
 
 ## 开发者指南与更新日志
 
-> 📖 **[SKILL.md](docs/SKILL.md)** — LLM 快速上手指南。项目架构、关键设计决策、常见陷阱，高效代码修改指南。
+> 📖 **[SKILL.md](docs/SKILL.md)** — LLM 快速上手指南。项目架构、关键设计决策、高效代码修改指南。
 
 > 完整版本历史请查看 [CHANGELOG.md](docs/CHANGELOG.md)
 

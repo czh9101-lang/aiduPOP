@@ -233,7 +233,7 @@ FEISHU_DOMAIN=feishu          # feishu=China, lark=International
 
 ## Developer Guide & Changelog
 
-> 📖 **[SKILL.md](docs/SKILL.md)** — LLM quick-start guide. Architecture, key design decisions, common pitfalls, efficient code modification guide.
+> 📖 **[SKILL.md](docs/SKILL.md)** — LLM quick-start guide. Architecture, key design decisions, efficient code modification guide.
 
 > For the full version history, see [CHANGELOG.md](docs/CHANGELOG.md)
 
