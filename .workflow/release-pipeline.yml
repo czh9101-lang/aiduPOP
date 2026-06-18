@@ -8,6 +8,12 @@ triggers:
     branches:
       precise: [github_sync]
 
+# 通用变量（在 Gitee Go 流水线设置 → 通用变量 中配置）：
+#   GITEE_OWNER = Aowen-Nowor
+#   GITEE_TOKEN = 个人访问令牌（需 projects、releases 权限）
+# 这两个变量在 shell commands 中以环境变量形式存在，由 shell 自己展开，
+# 不经过 release@gitee 插件的参数模板引擎，所以一定生效。
+
 stages:
   - name: release-stage
     displayName: 创建 Gitee 发行版
@@ -15,43 +21,25 @@ stages:
     trigger: auto
     executor: []
     steps:
-      # 步骤 1: 读取 plugin.yaml 版本号，写入流水线变量
-      # GITEE_PARAMS 是 Gitee Go 专用参数文件，写入后后续步骤可用 ${变量名} 引用
-      # 注意：多条 commands 之间 shell 变量不共享，所以用 | 合并为一条块命令
-      # 不依赖 PyYAML（Gitee Go python-build 插件环境默认未安装 yaml 模块），
-      # 用 grep + sed 从 plugin.yaml 提取 version 字段，兼容单引号/双引号/无引号三种写法
+      # ─────────────────────────────────────────────────────────────
+      # 单步骤完成：计算版本号 + 打 tag + 创建 Release
+      # ─────────────────────────────────────────────────────────────
+      # 为什么不用 release@gitee 插件？
+      #   release@gitee 的参数字段（releaseName/tagName/description）只解析
+      #   「配置时已知的变量」（系统变量如 ${GITEE_PIPELINE_BUILD_NUMBER}），
+      #   不解析运行时通过 GITEE_PARAMS 写入的自定义变量。实测
+      #   ${RELEASE_VERSION} 在插件参数里为空，导致 tag/releaseName 都变成 "v"。
+      #   彻底绕开的方法：所有变量都在同一个 shell 进程里展开，
+      #   用 git tag + curl Gitee API 手动创建 Release。
+      #
+      # 实际逻辑放在 scripts/create_release.py（避免在 YAML 块标量里
+      # 嵌入复杂多行 Python 字符串导致 YAML 解析失败）。
       - step: build@python
-        name: read_version
-        displayName: 读取版本号
+        name: create_release
+        displayName: 计算版本号并创建 Release
         pythonVersion: '3.11'
         commands:
-          - |
-            set -e
-            VERSION=$(grep '^version:' plugin.yaml | sed 's/^version:[[:space:]]*//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')
-            if [ -z "$VERSION" ]; then
-              echo "ERROR: 无法从 plugin.yaml 提取版本号"
-              exit 1
-            fi
-            echo "检测到版本号: $VERSION"
-            echo "RELEASE_VERSION=$VERSION" >> GITEE_PARAMS
-        notify: []
-        strategy:
-          retry: '0'
-
-      # 步骤 2: 创建 Gitee Release
-      # release@gitee 插件会自动:
-      #   - 创建 tag（如果不存在）
-      #   - 创建 Release 页面
-      #   - 自动生成 Source code (zip) 和 (tar.gz)
-      # description 用 "| 文件路径" 语法从 CHANGELOG.md 读取内容
-      - step: release@gitee
-        name: create_release
-        displayName: 创建 Gitee Release
-        releaseName: v${RELEASE_VERSION}
-        tagName: v${RELEASE_VERSION}
-        description: "v${RELEASE_VERSION} 发行版 | docs/CHANGELOG.md"
-        prerelease: false
-        allowUpdate: false
+          - python3 scripts/create_release.py
         notify: []
         strategy:
           retry: '0'
