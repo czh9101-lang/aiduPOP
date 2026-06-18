@@ -19,12 +19,10 @@ from typing import TYPE_CHECKING, Any
 from ..config import Config
 from .linear_mixin import UnifiedControllerMixin
 from .mixin import (
-    _TERMINAL,
     ABORTED,
     COMPLETED,
     COMPLETING,
     CREATION_FAILED,
-    IDLE,
     TERMINATED,
     ControllerMixin,
 )
@@ -214,18 +212,7 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
         if session is None or session.guard.should_skip("on_thinking"):
             return
 
-        if session.linear and session.unified_state:
-            self._linear_on_thinking(session, text)
-            return
-
-        # v1.1.0 (Task 1.1+1.2): non-linear thinking path was removed.
-        # All sessions are created via _do_create_linear_card, so this
-        # branch should never execute — log a safety-net warning and bail.
-        _logger.warning(
-            "on_thinking: non-linear session reached dead code (linear path "
-            "removed in v1.1.0), skipping msg=%s",
-            (message_id or "?")[:12],
-        )
+        self._linear_on_thinking(session, text)
 
     def on_reasoning(self, *, message_id: str, text: str) -> None:
         """Native model reasoning delta (incremental append)."""
@@ -244,32 +231,25 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
             _logger.debug("on_reasoning: stale epoch, skipping msg=%s", (message_id or "?")[:12])
             return
 
-        if session.linear and session.unified_state:
-            _logger.debug(
-                "HLS: on_reasoning msg=%s text=%r current_reasoning_len=%d",
-                (message_id or "?")[:12],
-                text[:50] if text else "",
-                len(session.unified_state._current_reasoning),
-            )
-            session.unified_state.on_reasoning_delta(text)
-            # v1.1.0 (Task 1.3): The _native_reasoning_active flag was
-            # removed.  _linear_on_thinking now uses
-            # ``len(state._current_reasoning) > 0`` as the dedup guard,
-            # which is updated automatically by on_reasoning_delta above.
-            _logger.debug(
-                "HLS: on_reasoning delta applied msg=%s current_reasoning_len=%d",
-                (message_id or "?")[:12],
-                len(session.unified_state._current_reasoning),
-            )
-            self._schedule_linear_flush(session)
-            return
-
-        # v1.1.0 (Task 1.1+1.2): non-linear reasoning path was removed.
-        _logger.warning(
-            "on_reasoning: non-linear session reached dead code (linear path "
-            "removed in v1.1.0), skipping msg=%s",
+        # v1.1.0 (Task 1.1+1.2): linear is the only path — session.linear
+        # and session.unified_state are always set after _do_create_linear_card.
+        _logger.debug(
+            "HLS: on_reasoning msg=%s text=%r current_reasoning_len=%d",
             (message_id or "?")[:12],
+            text[:50] if text else "",
+            len(session.unified_state._current_reasoning),
         )
+        session.unified_state.on_reasoning_delta(text)
+        # v1.1.0 (Task 1.3): The _native_reasoning_active flag was
+        # removed.  _linear_on_thinking now uses
+        # ``len(state._current_reasoning) > 0`` as the dedup guard,
+        # which is updated automatically by on_reasoning_delta above.
+        _logger.debug(
+            "HLS: on_reasoning delta applied msg=%s current_reasoning_len=%d",
+            (message_id or "?")[:12],
+            len(session.unified_state._current_reasoning),
+        )
+        self._schedule_linear_flush(session)
 
     def on_tool_update(
         self,
@@ -302,18 +282,11 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
                 output="" if is_error else detail,
             )
 
-        if session.linear and session.unified_state:
-            is_new_tool = status in ("running", "started", "tool.started")
-            session.unified_state.on_tool_event(is_new_tool=is_new_tool)
-            self._schedule_linear_flush(session)
-            return
-
-        # v1.1.0 (Task 1.1+1.2): non-linear tool-update path was removed.
-        _logger.warning(
-            "on_tool_update: non-linear session reached dead code (linear path "
-            "removed in v1.1.0), skipping msg=%s",
-            (message_id or "?")[:12],
-        )
+        # v1.1.0 (Task 1.1+1.2): linear is the only path — session.linear
+        # and session.unified_state are always set after _do_create_linear_card.
+        is_new_tool = status in ("running", "started", "tool.started")
+        session.unified_state.on_tool_event(is_new_tool=is_new_tool)
+        self._schedule_linear_flush(session)
 
     def on_answer(self, *, message_id: str, text: str) -> None:
         """答案文本增量（流式）."""
@@ -338,19 +311,12 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
                 (session._first_answer_time - session.created_at) * 1000,
             )
 
-        if session.linear and session.unified_state:
-            answer_text = strip_reasoning_tags(text)
-            if answer_text:
-                session.unified_state.on_answer_delta(answer_text)
-                self._schedule_linear_flush(session)
-            return
-
-        # v1.1.0 (Task 1.1+1.2): non-linear answer path was removed.
-        _logger.warning(
-            "on_answer: non-linear session reached dead code (linear path "
-            "removed in v1.1.0), skipping msg=%s",
-            (message_id or "?")[:12],
-        )
+        # v1.1.0 (Task 1.1+1.2): linear is the only path — session.linear
+        # and session.unified_state are always set after _do_create_linear_card.
+        answer_text = strip_reasoning_tags(text)
+        if answer_text:
+            session.unified_state.on_answer_delta(answer_text)
+            self._schedule_linear_flush(session)
 
     def on_aborted(self, *, message_id: str) -> None:
         """用户 /stop 导致消息被中断.
@@ -789,18 +755,13 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
         if session.text is not None:
             session.text = TextState()  # type: ignore[assignment]
         session.tool_use = ToolUseTracker()  # type: ignore[assignment]
-        session.reasoning_text = ""
-        session.reasoning_dirty = False
         session.footer = {}
 
     def _complete_session(self, session: CardSession) -> None:
         """根据 session 线性/非线性选择完成路径.
 
         v1.1.0 (Task 1.1+1.2): The non-linear ``_do_complete`` path was
-        removed. Linear is now the only completion path; the previous
-        ``else`` branch that dispatched to ``_do_complete_with_fallback``
-        is gone. ``_do_complete_with_fallback`` is retained as a thin
-        backward-compatibility shim that routes to the linear completer.
+        removed. Linear is now the only completion path.
 
         Note: We intentionally do NOT call session.flush.mark_completed() here.
         That call cancels any pending flush timer, which would drop the
@@ -830,26 +791,6 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
         except Exception:
             _logger.warning(
                 "linear complete with fallback failed: msg=%s",
-                (session.message_id or "?")[:12],
-                exc_info=True,
-            )
-            await self._send_text_fallback(session)
-
-    async def _do_complete_with_fallback(self, session: CardSession) -> None:
-        """DEPRECATED: 非线性模式完成入口 — v1.1.0 起统一走线性路径.
-
-        Kept as a backward-compatibility shim. The original non-linear
-        ``_do_complete`` was removed in Task 1.1+1.2; this method now
-        routes directly to ``_do_linear_complete`` so any remaining
-        callers (or tests) still get a working completion path.
-        """
-        try:
-            result = await self._do_linear_complete(session)
-            if not result:
-                await self._send_text_fallback(session)
-        except Exception:
-            _logger.warning(
-                "complete with fallback failed: msg=%s",
                 (session.message_id or "?")[:12],
                 exc_info=True,
             )

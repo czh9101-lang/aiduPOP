@@ -98,7 +98,6 @@ class UnifiedLinearState:
     """
 
     __slots__ = (
-        "_counter",
         "reasoning_rounds",
         "_current_reasoning",
         "_reasoning_start",
@@ -108,15 +107,11 @@ class UnifiedLinearState:
         "answer_dirty",
         "panel_visible",
         "bg_review_messages",
-        "bg_review_panel_added",
-        "bg_review_panel_id",
         "_panel_events",
         "_tool_count",
     )
 
     def __init__(self) -> None:
-        self._counter: int = 0
-
         # Reasoning tracking
         self.reasoning_rounds: list[ReasoningRound] = []
         self._current_reasoning: str = ""
@@ -138,8 +133,6 @@ class UnifiedLinearState:
 
         # Background review
         self.bg_review_messages: list[str] = []
-        self.bg_review_panel_id: str = "bg_review_panel"
-        self.bg_review_panel_added: bool = False
 
         # Chronological timeline: [("reasoning", idx), ("tool", idx), ...]
         # Records the order in which reasoning rounds and tool calls
@@ -181,7 +174,6 @@ class UnifiedLinearState:
             return
         if not self._current_reasoning:
             # First token of a new reasoning round
-            self._counter += 1
             self._reasoning_start = time.time()
         self._current_reasoning += text
         self.panel_dirty = True
@@ -295,7 +287,7 @@ class UnifiedLinearState:
         return (
             self.panel_dirty
             or self.answer_dirty
-            or bool(self.bg_review_messages and not self.bg_review_panel_added)
+            or bool(self.bg_review_messages)
         )
 
     def __repr__(self) -> str:  # pragma: no cover

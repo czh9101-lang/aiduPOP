@@ -132,7 +132,6 @@ class UnifiedControllerMixin:
     _schedule_card_update: Callable[[CardSession], None]
     _cleanup: Callable[[str], None]
     _flush_deferred_background_reviews: Callable[[CardSession], None]
-    _do_complete_inner: Callable[..., Coroutine[Any, Any, bool]]
 
     # ===================================================================
     # Card creation

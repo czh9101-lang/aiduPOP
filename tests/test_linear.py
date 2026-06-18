@@ -243,14 +243,6 @@ class TestBackgroundReview:
         state.on_background_review("checking quality")
         assert state.bg_review_messages == ["checking quality"]
 
-    def test_bg_review_panel_id(self) -> None:
-        state = UnifiedLinearState()
-        assert state.bg_review_panel_id == "bg_review_panel"
-
-    def test_bg_review_panel_added_initially_false(self) -> None:
-        state = UnifiedLinearState()
-        assert state.bg_review_panel_added is False
-
     def test_has_dirty_with_bg_review(self) -> None:
         state = UnifiedLinearState()
         state.panel_dirty = False

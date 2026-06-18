@@ -64,12 +64,8 @@ class CardSession:
         "flush",
         "footer",
         "guard",
-        "last_tool_use_update",
         "linear",
         "message_id",
-        "reasoning_dirty",
-        "reasoning_start",
-        "reasoning_text",
         "sequence",
         "state",
         "terminal_reason",
@@ -99,13 +95,9 @@ class CardSession:
         self.text = TextState()
         self.tool_use = ToolUseTracker()
         self.flush = FlushController(throttle_ms=PATCH_MS)
-        self.reasoning_text = ""
-        self.reasoning_start: float = 0.0
-        self.reasoning_dirty = False
         self.footer: dict[str, Any] = {}
         self.sequence = 1
         self._loop = loop
-        self.last_tool_use_update = 0.0
         self.created_at = time.time()
         self.deferred_background_review_closed = False
         self.deferred_background_reviews: list[tuple[str, Any]] = []

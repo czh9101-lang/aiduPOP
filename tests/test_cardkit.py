@@ -15,21 +15,11 @@ from hermes_lark_streaming.cardkit import (
     _loading_hint_element,
     _longest_backtick_run,
     _render_footer_field,
-    build_complete_card,
     build_im_fallback_card,
-    build_linear_complete_card,
     build_preservative_seal_actions,
-    build_streaming_card,
     build_streaming_card_v2,
     build_unified_complete_card,
     build_unified_panel,
-)
-from hermes_lark_streaming.cardkit.elements import (
-    REASONING_ELEMENT_ID,
-    REASONING_TEXT_ELEMENT_ID,
-    TOOL_PANEL_ELEMENT_ID,
-    _build_reasoning_panel,
-    _build_tool_panel,
 )
 from hermes_lark_streaming.cardkit.md import (
     _downgrade_tables,
@@ -176,22 +166,6 @@ _STEP_RUNNING = {
     "error_block": None,
 }
 _STEP_SUCCESS = {**_STEP_RUNNING, "status": "success", "output": "ok", "elapsed_ms": 100}
-
-
-class TestBuildToolPanel:
-    def test_empty_steps(self) -> None:
-        panel = _build_tool_panel([])
-        assert panel["element_id"] == TOOL_PANEL_ELEMENT_ID
-        assert "Tool use" in panel["header"]["title"]["content"]
-
-    def test_with_steps(self) -> None:
-        panel = _build_tool_panel([_STEP_SUCCESS], elapsed_ms=500)
-        assert panel["element_id"] == TOOL_PANEL_ELEMENT_ID
-
-    def test_with_elapsed(self) -> None:
-        panel = _build_tool_panel([_STEP_RUNNING], elapsed_ms=3000)
-        title = panel["header"]["title"]["content"]
-        assert "3.0s" in title
 
 
 # --- Footer ---
@@ -377,62 +351,6 @@ class TestBuildErrorPanel:
         assert panel["expanded"] is False
 
 
-# --- 推理面板 ---
-
-
-class TestBuildReasoningPanel:
-    def test_without_elapsed(self) -> None:
-        panel = _build_reasoning_panel("thinking content")
-        assert "Thought" in panel["header"]["title"]["content"]
-        assert not panel["expanded"]
-
-    def test_with_elapsed(self) -> None:
-        panel = _build_reasoning_panel("thoughts", elapsed_ms=5000)
-        title = panel["header"]["title"]["content"]
-        assert "5.0s" in title
-
-    def test_expanded_true(self) -> None:
-        panel = _build_reasoning_panel("text", expanded=True)
-        assert panel["expanded"] is True
-
-    def test_expanded_default_false(self) -> None:
-        panel = _build_reasoning_panel("text")
-        assert panel["expanded"] is False
-
-    def test_element_id_set(self) -> None:
-        panel = _build_reasoning_panel("text", element_id=REASONING_ELEMENT_ID)
-        assert panel["element_id"] == REASONING_ELEMENT_ID
-
-    def test_element_id_default_none(self) -> None:
-        panel = _build_reasoning_panel("text")
-        assert "element_id" not in panel
-
-    def test_inner_markdown_has_element_id(self) -> None:
-        panel = _build_reasoning_panel("text")
-        inner = panel["elements"][0]
-        assert inner["element_id"] == REASONING_TEXT_ELEMENT_ID
-
-    def test_title_is_plain_text_grey(self) -> None:
-        panel = _build_reasoning_panel("text")
-        title = panel["header"]["title"]
-        assert title["tag"] == "plain_text"
-        assert title["text_color"] == "grey"
-        assert title["text_size"] == "notation"
-
-    def test_empty_text_shows_thinking_title(self) -> None:
-        panel = _build_reasoning_panel(" ")
-        assert "Thinking" in panel["header"]["title"]["content"]
-
-    def test_empty_string_shows_thinking_title(self) -> None:
-        panel = _build_reasoning_panel("")
-        assert "Thinking" in panel["header"]["title"]["content"]
-
-    def test_with_content_shows_thought_title(self) -> None:
-        panel = _build_reasoning_panel("reasoning here")
-        assert "Thought" in panel["header"]["title"]["content"]
-        assert "Thinking" not in panel["header"]["title"]["content"]
-
-
 # --- 数字格式化 ---
 
 
@@ -540,244 +458,12 @@ class TestBuildStreamingCardV2:
         assert "en_us" in i18n
 
 
-class TestBuildStreamingCard:
-    def test_basic(self) -> None:
-        card = build_streaming_card(text="hello")
-        assert card["elements"][-1]["content"] == "hello"
-
-    def test_with_tool_steps(self) -> None:
-        card = build_streaming_card(tool_steps=[_STEP_RUNNING], text="hello")
-        assert len(card["elements"]) >= 2
-
-    def test_reasoning_shown_alongside_answer(self) -> None:
-        """旧版 'if reasoning_text and not text' 会在有 answer 时隐藏 reasoning，现已修复."""
-        card = build_streaming_card(reasoning_text="thoughts", text="answer")
-        assert any("thoughts" in str(e) for e in card["elements"])
-        assert any("answer" in str(e) for e in card["elements"])
-
-    def test_reasoning_before_tool_steps(self) -> None:
-        card = build_streaming_card(reasoning_text="thoughts", tool_steps=[_STEP_RUNNING], text="answer")
-        contents = [str(e) for e in card["elements"]]
-        reasoning_idx = next(i for i, c in enumerate(contents) if "thoughts" in c)
-        tool_idx = next(i for i, c in enumerate(contents) if TOOL_PANEL_ELEMENT_ID in c)
-        assert reasoning_idx < tool_idx
-
-
 class TestBuildImFallbackCard:
     def test_structure(self) -> None:
         card = build_im_fallback_card()
         assert "config" in card
         assert "elements" in card
         assert len(card["elements"]) >= 1
-
-
-class TestBuildCompleteCard:
-    def test_basic_v1(self) -> None:
-        card = build_complete_card(text="done", has_cardkit=False)
-        assert "elements" in card
-        assert "schema" not in card
-
-    def test_cardkit_v2(self) -> None:
-        card = build_complete_card(text="done", has_cardkit=True)
-        assert card["schema"] == "2.0"
-        assert "body" in card
-
-    def test_with_tool_steps(self) -> None:
-        card = build_complete_card(text="done", tool_steps=[_STEP_SUCCESS])
-        # v1 卡片使用 elements
-        assert len(card["elements"]) >= 1
-
-    def test_with_reasoning(self) -> None:
-        card = build_complete_card(text="answer", reasoning_text="thoughts")
-        elements = card.get("elements", card.get("body", {}).get("elements", []))
-        assert any("thoughts" in str(e) for e in elements)
-
-    def test_reasoning_before_tool_steps_in_complete(self) -> None:
-        card = build_complete_card(
-            text="answer", reasoning_text="thoughts", tool_steps=[_STEP_SUCCESS]
-        )
-        elements = card.get("elements", card.get("body", {}).get("elements", []))
-        contents = [str(e) for e in elements]
-        reasoning_idx = next(i for i, c in enumerate(contents) if "thoughts" in c)
-        tool_idx = next(i for i, c in enumerate(contents) if TOOL_PANEL_ELEMENT_ID in c)
-        assert reasoning_idx < tool_idx
-
-    def test_summary_truncated(self) -> None:
-        long_text = "x" * 200
-        card = build_complete_card(text=long_text, has_cardkit=True)
-        summary = card["config"].get("summary", {})
-        assert len(summary.get("content", "")) <= 120
-        # i18n_content must also be updated (Bug #3 fix)
-        i18n = summary.get("i18n_content", {})
-        assert "zh_cn" in i18n
-        assert "en_us" in i18n
-        assert i18n["zh_cn"] == summary["content"]
-
-    def test_footer_present(self) -> None:
-        card = build_complete_card(
-            text="done",
-            footer_data={"duration": 5, "model": "claude"},
-        )
-        elements = card.get("elements", card.get("body", {}).get("elements", []))
-        # 应包含 hr + footer markdown
-        assert any(e.get("tag") == "hr" for e in elements)
-
-    def test_default_done_text(self) -> None:
-        card = build_complete_card()
-        elements = card.get("elements", card.get("body", {}).get("elements", []))
-        assert any("完成" in str(e) or "Done" in str(e) for e in elements)
-
-    def test_error_message_adds_error_panel(self) -> None:
-        card = build_complete_card(error_message="test error")
-        elements = card.get("elements", card.get("body", {}).get("elements", []))
-        error_panels = [e for e in elements if e.get("tag") == "collapsible_panel"
-                        and "Error" in e.get("header", {}).get("title", {}).get("content", "")]
-        assert len(error_panels) == 1
-        assert "test error" in error_panels[0]["elements"][0]["content"]
-
-    def test_error_message_with_aborted(self) -> None:
-        card = build_complete_card(error_message="stopped", is_aborted=True)
-        elements = card.get("elements", card.get("body", {}).get("elements", []))
-        error_panels = [e for e in elements if e.get("tag") == "collapsible_panel"
-                        and "Interrupted" in e.get("header", {}).get("title", {}).get("content", "")]
-        assert len(error_panels) == 1
-        assert "stopped" in error_panels[0]["elements"][0]["content"]
-
-
-# --- 线性完成态卡片 ---
-
-
-def _seg(seg_type: str, text: str = "", **kwargs: int | float):
-    """Create a Segment-like mock for the legacy ``build_linear_complete_card`` path.
-
-    v1.1.0: the real ``Segment`` class was removed (the linear state now
-    uses ``ReasoningRound`` + ``UnifiedLinearState``).  The legacy segment
-    path in ``build_linear_complete_card`` still accepts any duck-typed
-    object exposing the attributes accessed below, so we build a
-    ``SimpleNamespace`` here instead of importing the removed class.
-    """
-    from types import SimpleNamespace
-    seg = SimpleNamespace(
-        type=seg_type,
-        el_id=f"{seg_type}_0",
-        text=text,
-        tool_offset=int(kwargs.get("tool_offset", 0)),
-        tool_end_offset=int(kwargs.get("tool_end_offset", 0)),
-        elapsed_ms=float(kwargs.get("elapsed_ms", 0.0)),
-        start_time=float(kwargs.get("start_time", 0.0)),
-        created=True,
-        dirty=False,
-    )
-    if seg_type == "reasoning":
-        seg.text_el_id = f"{seg_type}_0_text"
-    return seg
-
-
-class TestBuildLinearCompleteCard:
-    def test_empty_segments_and_skipped_reasoning(self) -> None:
-        """空 segments 渲染 Done；空 reasoning 被跳过."""
-        card = build_linear_complete_card(segments=[], all_tool_steps=[])
-        assert card["schema"] == "2.0"
-        assert any("Done" in str(e) or "完成" in str(e) for e in card["body"]["elements"])
-
-        card2 = build_linear_complete_card(segments=[_seg("reasoning", "")], all_tool_steps=[])
-        assert any("Done" in str(e) or "完成" in str(e) for e in card2["body"]["elements"])
-
-    def test_answer_only_no_done(self) -> None:
-        card = build_linear_complete_card(
-            segments=[_seg("answer", "hello world")],
-            all_tool_steps=[],
-        )
-        elements = card["body"]["elements"]
-        assert any("hello world" in str(e) for e in elements)
-        assert not any("Done" in str(e) for e in elements)
-
-    def test_reasoning_before_answer(self) -> None:
-        card = build_linear_complete_card(
-            segments=[_seg("reasoning", "think"), _seg("answer", "reply")],
-            all_tool_steps=[],
-        )
-        contents = [str(e) for e in card["body"]["elements"]]
-        r_idx = next(i for i, c in enumerate(contents) if "think" in c)
-        a_idx = next(i for i, c in enumerate(contents) if "reply" in c)
-        assert r_idx < a_idx
-
-    def test_tool_segment_uses_steps_slice(self) -> None:
-        steps = [_STEP_RUNNING, _STEP_SUCCESS, _STEP_RUNNING]
-        card = build_linear_complete_card(
-            segments=[_seg("tool", tool_offset=1, tool_end_offset=3)],
-            all_tool_steps=steps,
-        )
-        tool_elements = [e for e in card["body"]["elements"] if e.get("tag") == "collapsible_panel"]
-        assert len(tool_elements) == 1
-        assert len(tool_elements[0].get("elements", [])) == 2  # steps[1:3]
-
-    def test_three_round_ordering(self) -> None:
-        card = build_linear_complete_card(
-            segments=[
-                _seg("reasoning", "r1"),
-                _seg("answer", "a1"),
-                _seg("tool", tool_offset=0, tool_end_offset=2),
-                _seg("reasoning", "r2"),
-                _seg("answer", "a2"),
-            ],
-            all_tool_steps=[_STEP_SUCCESS, _STEP_RUNNING],
-        )
-        contents = [str(e) for e in card["body"]["elements"]]
-        r1 = next(i for i, c in enumerate(contents) if "r1" in c)
-        a1 = next(i for i, c in enumerate(contents) if "a1" in c)
-        r2 = next(i for i, c in enumerate(contents) if "r2" in c)
-        a2 = next(i for i, c in enumerate(contents) if "a2" in c)
-        assert r1 < a1 < r2 < a2
-
-    def test_tool_end_offset_zero_uses_all_steps(self) -> None:
-        steps = [_STEP_SUCCESS, _STEP_RUNNING]
-        card = build_linear_complete_card(
-            segments=[_seg("tool", tool_offset=0, tool_end_offset=0)],
-            all_tool_steps=steps,
-        )
-        inner = next(e for e in card["body"]["elements"] if e.get("tag") == "collapsible_panel")["elements"]
-        assert len(inner) == 2
-
-    def test_tool_empty_steps_skipped(self) -> None:
-        card = build_linear_complete_card(
-            segments=[_seg("tool", tool_offset=5, tool_end_offset=5)],
-            all_tool_steps=[_STEP_SUCCESS],
-        )
-        assert not any(e.get("tag") == "collapsible_panel" for e in card["body"]["elements"])
-
-    def test_summary_truncated_from_last_answer(self) -> None:
-        card = build_linear_complete_card(
-            segments=[_seg("answer", "short"), _seg("answer", "x" * 200)],
-            all_tool_steps=[],
-        )
-        summary = card["config"].get("summary", {})
-        assert len(summary.get("content", "")) <= 120
-        # i18n_content must also be updated (Bug #3 fix)
-        i18n = summary.get("i18n_content", {})
-        assert "zh_cn" in i18n
-        assert "en_us" in i18n
-        assert i18n["zh_cn"] == summary["content"]
-
-    def test_error_message_adds_error_panel(self) -> None:
-        card = build_linear_complete_card(segments=[], all_tool_steps=[], error_message="test error")
-        elements = card["body"]["elements"]
-        error_panels = [e for e in elements if e.get("tag") == "collapsible_panel"
-                        and "Error" in e.get("header", {}).get("title", {}).get("content", "")]
-        assert len(error_panels) == 1
-        assert "test error" in error_panels[0]["elements"][0]["content"]
-
-    def test_error_message_after_segments_in_linear_mode(self) -> None:
-        """线性模式下错误面板在内容之后（v0.18.1 变更）."""
-        card = build_linear_complete_card(
-            segments=[_seg("answer", "hello")],
-            all_tool_steps=[],
-            error_message="oops",
-        )
-        contents = [str(e) for e in card["body"]["elements"]]
-        error_idx = next(i for i, c in enumerate(contents) if "oops" in c)
-        answer_idx = next(i for i, c in enumerate(contents) if "hello" in c)
-        assert error_idx > answer_idx  # 错误面板在内容之后
 
 
 class TestBuildCronCard:

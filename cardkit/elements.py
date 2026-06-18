@@ -120,9 +120,6 @@ if TYPE_CHECKING:
 STREAMING_ELEMENT_ID = "streaming_content"
 ANSWER_ELEMENT_ID = "answer_content"
 UNIFIED_PANEL_ELEMENT_ID = "agent_process_panel"
-REASONING_ELEMENT_ID = "reasoning_content"
-REASONING_TEXT_ELEMENT_ID = "reasoning_text"
-TOOL_PANEL_ELEMENT_ID = "tool_panel"
 _LOADING_ELEMENT_ID = "loading_icon"
 _LOADING_HINT_ELEMENT_ID = "context_loading_hint"
 _LOADING_IMG_KEY = "img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg"
@@ -616,47 +613,6 @@ def build_unified_panel(
     return panel
 
 
-# ---------------------------------------------------------------------------
-# Tool panel builders (existing — kept for backward compatibility)
-# ---------------------------------------------------------------------------
-
-def _build_tool_panel(
-    steps: list[dict],
-    elapsed_ms: float = 0,
-    *,
-    expanded: bool = True,
-    element_id: str | None = TOOL_PANEL_ELEMENT_ID,
-) -> dict:
-    en_t, zh_t = _T["tool_use"]
-    en_parts, zh_parts = [en_t], [zh_t]
-    if steps:
-        tpl_en, tpl_zh = _T["steps"]
-        en_parts.append(tpl_en.format(len(steps), "s" if len(steps) > 1 else ""))
-        zh_parts.append(tpl_zh.format(len(steps), ""))
-    if elapsed_ms > 0:
-        en_parts.append(f"({_format_elapsed(elapsed_ms)})")
-        zh_parts.append(f"({_format_elapsed(elapsed_ms)})")
-
-    children: list[dict] = []
-    for s in steps:
-        children.extend(_build_tool_step_elements(s))
-
-    panel = _collapsible_panel(
-        expanded=expanded,
-        title_el={
-            "tag": "plain_text",
-            "content": ' · '.join(en_parts),
-            "i18n_content": _i18n(' · '.join(en_parts), ' · '.join(zh_parts)),
-            "text_color": "grey",
-            "text_size": "notation",
-        },
-        elements=children,
-    )
-    if element_id:
-        panel["element_id"] = element_id
-    return panel
-
-
 def _build_tool_step_elements(step: dict) -> list[dict]:
     elements: list[dict] = [_build_tool_step_title(step)]
     detail = _build_tool_step_detail(step)
@@ -802,39 +758,6 @@ def _longest_backtick_run(value: str) -> int:
 
 def _escape_md(value: str) -> str:
     return re.sub(r"([`*_{}\[\]<>])", r"\\\1", value.replace("\\", "\\\\"))
-
-
-def _build_reasoning_panel(
-    text: str, elapsed_ms: float = 0, *, expanded: bool = False, element_id: str | None = None,
-    text_element_id: str | None = REASONING_TEXT_ELEMENT_ID,
-) -> dict:
-    if elapsed_ms > 0:
-        d = _format_elapsed(elapsed_ms)
-        en_label, zh_label = _T["thought_for"][0].format(d), _T["thought_for"][1].format(d)
-    elif not text.strip():
-        en_label, zh_label = _T["thinking_panel"]
-    else:
-        en_label, zh_label = _T["thought"]
-    panel = _collapsible_panel(
-        expanded=expanded,
-        title_el={
-            "tag": "plain_text",
-            "content": en_label,
-            "i18n_content": _i18n(en_label, zh_label),
-            "text_color": "grey",
-            "text_size": "notation",
-        },
-        elements=[{
-            "tag": "markdown",
-            "content": text,
-            "text_size": "notation",
-            **({"element_id": text_element_id} if text_element_id else {}),
-        }],
-        vertical_spacing="8px",
-    )
-    if element_id:
-        panel["element_id"] = element_id
-    return panel
 
 
 def _build_error_panel(

@@ -611,9 +611,6 @@ class TestClarifyCardRegistry:
 class TestClarifyI18n:
     """Test clarify-related i18n entries exist."""
 
-    def test_clarify_question_entry(self) -> None:
-        assert "clarify_question" in _T
-
     def test_clarify_select_placeholder_entry(self) -> None:
         assert "clarify_select_placeholder" in _T
 
@@ -634,7 +631,7 @@ class TestClarifyI18n:
 
     def test_all_entries_are_tuples_of_two(self) -> None:
         clarify_keys = [
-            "clarify_question", "clarify_select_placeholder",
+            "clarify_select_placeholder",
             "clarify_input_placeholder", "clarify_selected",
             "clarify_submitted", "clarify_retry", "clarify_confirmed",
         ]

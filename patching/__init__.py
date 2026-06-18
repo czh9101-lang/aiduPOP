@@ -27,9 +27,7 @@ task execution context.
 from __future__ import annotations
 
 import contextvars
-import functools
 import logging
-import sys
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -67,8 +65,6 @@ __all__ = [
     '_get_config',
     '_get_event_message_id',
     '_get_thread_local_ctx',
-    '_resolve_hermes_agent_module',
-    '_detect_hermes_layout',
     '_apply_gateway_runner_patches',
     'apply_patches',
     '_schedule_direct_patch',
@@ -247,91 +243,7 @@ from .hooks import (  # noqa: E402
 )
 
 
-# ── Namespace-collision-safe module resolver ────────────────────────
-
-
-def _resolve_hermes_agent_module() -> tuple[Any, Any] | None:
-    """Resolve Hermes's ``agent.conversation_loop`` module reliably.
-
-    This function works around a **namespace collision** bug on Apple
-    Silicon Macs where a PyPI package named ``agent`` shadows Hermes's
-    own ``agent`` package.  The symptom is::
-
-        ModuleNotFoundError: No module named 'agent.conversation_loop'
-
-    (Python finds *an* ``agent`` package, just not Hermes's one.)
-
-    Resolution strategy (in order of priority):
-
-    1. **sys.modules cache** — if Hermes already imported
-      ``agent.conversation_loop``, it's sitting in ``sys.modules``.
-      Reading it from there bypasses the import machinery entirely and
-      is immune to any path / namespace issues.
-    2. **Anchor-based discovery** — use a known Hermes module
-      (``gateway.run`` or ``run_agent``) as a filesystem anchor to
-      locate the ``agent/`` directory, then load it directly with
-      ``importlib``.
-    3. **Standard import** — ``from agent.conversation_loop import …``
-      as a last resort (works when there's no collision).
-
-    Returns ``(conversation_loop_module, run_conversation_func)`` or
-    ``None`` if the module cannot be found.
-
-    .. note::
-        As of Task 3.2/3.3, all Hermes internal access is funneled
-        through :class:`HermesCompat`. This function is preserved as a
-        backward-compat shim and simply delegates to ``HermesCompat``.
-    """
-    compat = HermesCompat()
-    if compat.has_conversation_loop:
-        _logger.info(
-            "hermes-lark-streaming: agent.conversation_loop resolved "
-            "via HermesCompat (path=%s)",
-            getattr(compat.conversation_loop_module, "__file__", "?"),
-        )
-        return compat.conversation_loop_module, compat.conversation_loop_func
-
-    _logger.warning(
-        "hermes-lark-streaming: agent.conversation_loop could not be "
-        "resolved by HermesCompat. This is likely caused by a namespace "
-        "collision (another Python package named 'agent' shadowing "
-        "Hermes's 'agent'). Try: pip uninstall agent"
-    )
-    return None
-
-
 # ── Public entry point ─────────────────────────────────────────────
-
-
-def _detect_hermes_layout() -> dict[str, bool]:
-    """Probe which Hermes internal modules are available.
-
-    Hermes has undergone several internal restructurings:
-
-    - **Pre-v0.10**: ``run_conversation`` was a ~4000-line method inside
-      ``AIAgent`` (``run_agent.py``).  No ``agent/conversation_loop.py``
-      existed.
-    - **v0.10+**: The body was extracted into ``agent/conversation_loop.py``
-      and ``AIAgent.run_conversation`` became a thin forwarder that does
-      ``from agent.conversation_loop import run_conversation``.
-
-    Both layouts are fully supported — the probe just tells us which
-    patch strategy to prefer.
-
-    .. note::
-        As of Task 3.2/3.3, this function delegates to
-        :meth:`HermesCompat.get_layout_report`. The returned dict keys
-        match the ``HermesCompat`` property names (``has_gateway_runner``
-        rather than the legacy ``has_gateway_run``). The dict is still
-        printed verbatim by the ``doctor`` CLI command.
-    """
-    layout = HermesCompat().get_layout_report()
-
-    _logger.info(
-        "hermes-lark-streaming: Hermes layout probe → %s",
-        layout,
-    )
-    return layout
 
 
 def _apply_gateway_runner_patches() -> bool:

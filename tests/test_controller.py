@@ -20,7 +20,6 @@ from hermes_lark_streaming.controller.mixin import (
 from hermes_lark_streaming.feishu import (
     CARDKIT_CONTENT_FAILED,
     CARDKIT_ELEMENT_LIMIT,
-    CARDKIT_RATE_LIMITED,
     CARDKIT_SEQUENCE_CONFLICT,
     CARDKIT_STREAMING_CLOSED,
     FeishuAPIError,
@@ -425,25 +424,6 @@ class TestLinearDispatch:
         # After on_completed, state should be COMPLETING (not COMPLETED yet)
         # The actual completion happens asynchronously in _do_linear_complete
         assert session.state == COMPLETING
-
-    def test_nonlinear_answer_skipped(self) -> None:
-        """v1.1.0: non-linear session answer handling is dead code.
-
-        The non-linear ``on_answer`` path was removed in Task 1.1+1.2
-        (only the linear path remains). A session that is somehow not
-        flagged as linear will hit the dead-code branch in
-        ``on_answer`` which logs a warning and skips the text — the
-        answer is NOT appended to either ``session.text`` or
-        ``unified_state``. This test pins that behaviour so future
-        refactors don't silently reintroduce the non-linear path.
-        """
-        ctrl = _setup_ctrl()
-        session = _make_session("msg_nl", linear=False)
-        ctrl._sessions["msg_nl"] = session
-        ctrl.on_answer(message_id="msg_nl", text="answer text")
-        # Non-linear path is gone — both stores stay empty
-        assert session.unified_state is None
-        assert session.text.display_text == ""
 
     def test_guard_skips_terminal(self) -> None:
         ctrl = _setup_ctrl()
