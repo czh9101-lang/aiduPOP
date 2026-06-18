@@ -1,9 +1,9 @@
 """读取 Hermes 配置，提供本插件所需的配置项.
 
-v1.1.0 (Task 3.5): 支持配置项运行时热更新。
-- Config.reload() 方法清除缓存，强制下次属性访问时从磁盘重读
-- 文件 mtime 检测：如果 config.yaml 的 mtime 变了，自动失效缓存
-- Config.on_reload 回调列表：其他模块可注册回调在配置重载时收到通知
+配置刷新方式：
+- /aowen config reload 命令：用户在飞书发送命令，立即重新加载
+- 重启网关：下次启动时自动加载新配置
+- 不做自动 mtime 检测（避免每 token 一次 stat() 系统调用）
 """
 
 from __future__ import annotations
@@ -17,40 +17,34 @@ import yaml
 
 
 def _get_hermes_config_path() -> Path:
-    """动态获取 Hermes 配置文件路径.
-
-    在多 Profile 场景下，HERMES_HOME 环境变量会在 Gateway 启动时
-    通过 _apply_profile_override() 设置。如果在模块导入时就读取
-    该变量，可能会读到错误的路径。
-
-    此函数每次调用时都重新读取环境变量，确保始终使用正确的路径。
-    """
+    """动态获取 Hermes 配置文件路径."""
     return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
 
 
-_RELOAD_CACHE_TTL = 60.0  # 运行时可变配置的缓存 TTL（秒）— 60 秒平衡实时性与磁盘 IO
+_RELOAD_CACHE_TTL = 60.0  # 运行时可变配置的缓存 TTL（秒）— 仅用于 _reload_cached 路径
 
 
 class Config:
     """插件配置，惰性读取 Hermes 主配置.
 
-    v1.1.0: 支持热更新。调用 reload() 清除缓存，或依赖自动 mtime 检测。
+    配置刷新方式：
+    1. /aowen config reload — 立即清缓存重新读取
+    2. 重启网关 — 下次启动自动加载
+    不做自动 mtime 检测。
     """
 
     def __init__(self) -> None:
         self._raw: dict[str, Any] | None = None
         self._reload_cache: dict[str, Any] | None = None
         self._reload_cache_at: float = 0.0
-        self._config_mtime: float = 0.0  # v1.1.0: track file mtime for auto-reload
-        self._on_reload_callbacks: list[Callable[[], None]] = []  # v1.1.0
+        self._on_reload_callbacks: list[Callable[[], None]] = []
 
-    # ── v1.1.0: Hot reload support (Task 3.5) ──
+    # ── 配置刷新 ──
 
     def reload(self) -> None:
-        """Force reload configuration from disk on next property access.
+        """Force reload configuration from disk.
 
-        Clears all caches and fires registered on_reload callbacks.
-        Safe to call from any thread.
+        Clears all caches. Called by /aowen config reload command.
         """
         self._raw = None
         self._reload_cache = None
@@ -66,34 +60,6 @@ class Config:
     def on_reload(self, callback: Callable[[], None]) -> None:
         """Register a callback to be called when config is reloaded."""
         self._on_reload_callbacks.append(callback)
-
-    def _check_mtime_and_invalidate(self) -> None:
-        """Check if config.yaml mtime changed; if so, invalidate caches.
-
-        Called on every property access. O(1) stat() call.
-        """
-        try:
-            config_path = _get_hermes_config_path()
-            if config_path.exists():
-                mtime = config_path.stat().st_mtime
-                if mtime != self._config_mtime:
-                    if self._config_mtime > 0:  # Not first load
-                        _logger = __import__("logging").getLogger("hermes_lark_streaming")
-                        _logger.info(
-                            "HLS: config.yaml mtime changed (%.0f → %.0f), auto-reloading",
-                            self._config_mtime, mtime,
-                        )
-                        self._raw = None
-                        self._reload_cache = None
-                        self._reload_cache_at = 0.0
-                        for cb in self._on_reload_callbacks:
-                            try:
-                                cb()
-                            except Exception:
-                                pass
-                    self._config_mtime = mtime
-        except Exception:
-            pass  # Non-critical — stat failure shouldn't break config access
 
     @property
     def enabled(self) -> bool:
@@ -294,7 +260,6 @@ class Config:
 
     def _plugin_sec(self) -> dict[str, Any]:
         """Return the ``hermes_lark_streaming`` section from config."""
-        self._check_mtime_and_invalidate()
         raw = self._load()
         sec = raw.get("hermes_lark_streaming")
         if isinstance(sec, dict):

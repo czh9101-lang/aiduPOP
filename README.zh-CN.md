@@ -211,14 +211,14 @@ hermes_lark_streaming:
 | `/aowen status` | 查看插件状态 + 当前配置（折叠面板展示） |
 | `/aowen monitor` | 查看监控面板（卡片创建数、API 调用数、错误码分布等） |
 | `/aowen monitor reset` | 重置监控统计计数器 |
-| `/aowen config reload` | 立即重新加载 config.yaml（无需等待自动检测） |
+| `/aowen config reload` | 重新加载配置文件（改完 config.yaml 后执行） |
 | `/aowen` | 同 `/aowen help` |
 
 > `/aowen` 是插件的命令前缀，所有 `/aowen` 开头的命令都由插件处理，不经过 Hermes。命令触发时实时生成数据，不占用后台内存。
 
 ### 配置热更新
 
-修改 `~/.hermes/config.yaml` 后无需重启网关，插件会自动检测文件变化并重新加载配置（最多 60 秒延迟）。如需立即生效，可在飞书中发送 `/aowen config reload` 命令。
+修改 `~/.hermes/config.yaml` 后，在飞书中发送 `/aowen config reload` 命令立即生效，或重启网关生效。
 
 ### 飞书凭据
 

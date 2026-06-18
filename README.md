@@ -211,14 +211,14 @@ Send `/aowen` commands in Feishu, the plugin replies with cards directly (bypass
 | `/aowen status` | Show plugin status + current config (collapsible panel) |
 | `/aowen monitor` | Show metrics dashboard (cards created, API calls, error codes, etc.) |
 | `/aowen monitor reset` | Reset metrics counters |
-| `/aowen config reload` | Reload config.yaml immediately (no need to wait for auto-detection) |
+| `/aowen config reload` | Reload config.yaml (run after modifying config) |
 | `/aowen` | Same as `/aowen help` |
 
 > `/aowen` is the plugin's command prefix; all `/aowen` commands are handled by the plugin, not Hermes. Data is generated on-demand — zero background memory usage.
 
 ### Hot Config Reload
 
-After modifying `~/.hermes/config.yaml`, the plugin auto-detects file changes and reloads config (up to 60s delay). No gateway restart needed. To apply changes immediately, send `/aowen config reload` in Feishu.
+After modifying `~/.hermes/config.yaml`, send `/aowen config reload` in Feishu to apply immediately, or restart the gateway.
 
 ### Feishu Credentials
 

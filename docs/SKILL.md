@@ -77,7 +77,7 @@ Background: _run_background_task ── [Hook 1/2]
 | `└ controller.py` | 节流调度器 | CardKit 80ms / IM PATCH 1.5s，互斥锁 + re-flush |
 | **config/** | **配置读取子包** | |
 | `├ __init__.py` | 重导出门面 | `Config`, `_get_hermes_config_path` |
-| `└ reader.py` | 配置读取 | `_plugin_sec()` 惰性加载 + 60秒 TTL 缓存 + mtime 热更新 (v1.1.0) |
+| `└ reader.py` | 配置读取 | `_plugin_sec()` 惰性加载 + `/aowen config reload` 手动刷新 |
 | **aowen/** | **监控命令子包 (v1.1.0)** | |
 | `└ __init__.py` | /aowen 命令体系 | pre_gateway_dispatch hook + metrics 收集 + 卡片构建 |
 | **plugin/** | **插件注册子包 (v1.1.0)** | |
@@ -112,7 +112,7 @@ Background: _run_background_task ── [Hook 1/2]
 
 **4.12 并发限流 (v1.1.0)**: `on_message_started` 时 seal 同 chat_id 的旧活跃卡片为"被新消息取代"，防止多张活跃卡片竞争 API 调用。
 
-**4.13 配置热更新 (v1.1.0)**: `Config.reload()` 清缓存 + mtime 自动检测 + `on_reload` 回调注册。修改 config.yaml 后最多 60 秒自动生效，无需重启网关。v1.1.0 P0 修复后 mtime 检测从 `enabled` 属性移到 `_plugin_sec()`，所有走该方法的属性都检测文件变化。`/aowen config reload` 命令可立即生效。
+**4.13 配置刷新 (v1.1.0)**: 不做自动 mtime 检测（避免每 token 一次 stat()）。配置刷新方式：`/aowen config reload` 命令立即生效，或重启网关生效。`Config.reload()` 清缓存，`on_reload` 回调注册。
 
 **4.14 /aowen 命令体系 (v1.1.0)**: `aowen/` 子包通过 `pre_gateway_dispatch` hook 拦截 `/aowen` 命令，直接回复飞书卡片，不经过 Hermes AI。命令：`/aowen help`、`/aowen status`（含配置折叠面板）、`/aowen monitor`、`/aowen monitor reset`、`/aowen config reload`。零后台内存占用。
 
