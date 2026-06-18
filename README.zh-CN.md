@@ -218,18 +218,16 @@ hermes_lark_streaming:
 
 ### 飞书凭据
 
-| 优先级 | 来源 | 示例 |
-|--------|------|------|
-| 1 | 环境变量 | `FEISHU_APP_ID`、`FEISHU_APP_SECRET` |
-| 2 | 文件 | `~/.hermes/.env` |
-| 3 | 配置文件 | `hermes_lark_streaming.feishu.app_id` |
+插件复用 Hermes 已配置的飞书凭据，无需单独配置。Hermes 安装时已在 `~/.hermes/.env` 中配置：
 
 ```bash
-# ~/.hermes/.env 示例
+# ~/.hermes/.env（Hermes 安装时已配置，插件直接复用）
 FEISHU_APP_ID=cli_xxxxxx
 FEISHU_APP_SECRET=xxxxxx
-FEISHU_BASE_URL=https://open.feishu.cn/open-apis
+FEISHU_DOMAIN=feishu          # feishu=国内版, lark=国际版
 ```
+
+> 插件自动读取 Hermes 的飞书凭据和域名配置。如果 Hermes 飞书渠道能正常工作，插件也能正常工作。
 
 ---
 

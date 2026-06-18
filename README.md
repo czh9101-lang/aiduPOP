@@ -218,18 +218,16 @@ Send `/aowen` commands in Feishu, the plugin replies with cards directly (bypass
 
 ### Feishu Credentials
 
-| Priority | Source | Example |
-|----------|--------|---------|
-| 1 | Environment Variables | `FEISHU_APP_ID`, `FEISHU_APP_SECRET` |
-| 2 | File | `~/.hermes/.env` |
-| 3 | Config File | `hermes_lark_streaming.feishu.app_id` |
+The plugin reuses Hermes's existing Feishu credentials — no separate configuration needed. Hermes already configures these in `~/.hermes/.env` during installation:
 
 ```bash
-# ~/.hermes/.env example
+# ~/.hermes/.env (configured by Hermes, reused by plugin)
 FEISHU_APP_ID=cli_xxxxxx
 FEISHU_APP_SECRET=xxxxxx
-FEISHU_BASE_URL=https://open.feishu.cn/open-apis
+FEISHU_DOMAIN=feishu          # feishu=China, lark=International
 ```
+
+> The plugin automatically reads Hermes's Feishu credentials and domain settings. If the Hermes Feishu channel works, the plugin works too.
 
 ---
 
