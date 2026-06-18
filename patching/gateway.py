@@ -672,6 +672,7 @@ def _wrap_run_conversation(orig: Callable) -> Callable:
         task_id=None,
         stream_callback=None,
         persist_user_message=None,
+        persist_user_timestamp=None,
         **kwargs,
     ):
         # ── inject_time: prepend current time to user_message ──
@@ -689,6 +690,7 @@ def _wrap_run_conversation(orig: Callable) -> Callable:
                 task_id,
                 stream_callback,
                 persist_user_message,
+                persist_user_timestamp,
                 **kwargs,
             )
         finally:
