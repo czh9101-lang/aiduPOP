@@ -13,7 +13,6 @@ Split from monkey_patch.py — contains:
 from __future__ import annotations
 
 import functools
-import logging
 import time
 from typing import Any, Callable
 

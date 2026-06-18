@@ -26,7 +26,6 @@ from .mixin import (
     TERMINATED,
     ControllerMixin,
 )
-from ..state.phase import TerminalReason
 from ..feishu import (
     FeishuClient,
     FeishuClientConfig,

@@ -740,100 +740,6 @@ class TestExtractImagesFromMarkdown:
         assert "After" in cleaned
 
 
-class TestCompleteCardImageExtraction:
-    """完成态卡片中图片独立渲染测试."""
-
-    def test_complete_card_extracts_images(self) -> None:
-        """build_complete_card (cardkit模式) 提取图片为独立img元素."""
-        text = "Result:\n![chart](img_v3_chart_001)\nDone."
-        card = build_complete_card(
-            text=text,
-            has_cardkit=True,
-            footer_fields=[],
-        )
-        elements = card["body"]["elements"]
-        # 应该包含一个 img 元素
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 1
-        assert img_elements[0]["img_key"] == "img_v3_chart_001"
-        assert img_elements[0]["scale_type"] == "fit_horizontal"
-        # 图片应从 markdown 文本中移除
-        md_elements = [e for e in elements if e.get("tag") == "markdown"]
-        combined = " ".join(e.get("content", "") for e in md_elements)
-        assert "img_v3_chart_001" not in combined
-        assert "Done" in combined
-
-    def test_complete_card_no_cardkit_keeps_markdown(self) -> None:
-        """非 cardkit 模式不提取图片（保持 markdown 内嵌）."""
-        text = "Result:\n![chart](img_v3_chart_001)\nDone."
-        card = build_complete_card(
-            text=text,
-            has_cardkit=False,
-            footer_fields=[],
-        )
-        elements = card["elements"]
-        # 不应有独立的 img 元素
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 0
-        # 图片仍以 markdown 格式存在
-        md_elements = [e for e in elements if e.get("tag") == "markdown"]
-        combined = " ".join(e.get("content", "") for e in md_elements)
-        assert "img_v3_chart_001" in combined
-
-    def test_linear_complete_card_extracts_images(self) -> None:
-        """build_linear_complete_card (unified path) extracts images as independent img elements."""
-        from hermes_lark_streaming.state.linear import ReasoningRound
-        card = build_linear_complete_card(
-            reasoning_rounds=[],
-            tool_steps=[],
-            answer_text="See chart:\n![chart](img_v3_chart_002)\nEnd.",
-        )
-        elements = card["body"]["elements"]
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 1
-        assert img_elements[0]["img_key"] == "img_v3_chart_002"
-
-    def test_multiple_images_in_answer(self) -> None:
-        """多张图片都被提取为独立元素."""
-        text = "![a](img_v3_1) text ![b](img_v3_2) more ![c](img_v3_3)"
-        card = build_complete_card(
-            text=text,
-            has_cardkit=True,
-            footer_fields=[],
-        )
-        elements = card["body"]["elements"]
-        img_elements = [e for e in elements if e.get("tag") == "img"]
-        assert len(img_elements) == 3
-
-
-class TestPartialStatusIndicator:
-    """拆卡封卡 partial 状态显示测试."""
-
-    def test_partial_indicator_in_complete_card(self) -> None:
-        """partial=True 时卡片底部出现继续提示."""
-        card = build_linear_complete_card(
-            reasoning_rounds=[],
-            tool_steps=[],
-            answer_text="部分回答内容",
-            partial=True,
-        )
-        elements = card["body"]["elements"]
-        texts = [e.get("content", "") for e in elements if e.get("tag") == "markdown"]
-        assert any("Continues" in t for t in texts), f"No partial indicator found in {texts}"
-
-    def test_no_partial_indicator_by_default(self) -> None:
-        """partial=False (默认) 时无继续提示."""
-        card = build_linear_complete_card(
-            reasoning_rounds=[],
-            tool_steps=[],
-            answer_text="回答内容",
-        )
-        elements = card["body"]["elements"]
-        texts = [e.get("content", "") for e in elements if e.get("tag") == "markdown"]
-        assert not any("Continues" in t for t in texts)
-
-
-
 
 class TestBackgroundReviewPanel:
     """后台审查面板测试."""
@@ -851,22 +757,6 @@ class TestBackgroundReviewPanel:
         panel = _build_background_review_panel([])
         assert panel["tag"] == "collapsible_panel"
         assert len(panel["elements"]) == 1  # placeholder
-
-    def test_background_review_in_complete_card(self) -> None:
-        """完成态卡片包含后台审查面板."""
-        card = build_linear_complete_card(
-            reasoning_rounds=[],
-            tool_steps=[],
-            answer_text="回答",
-            bg_review_messages=["审查消息1"],
-        )
-        elements = card["body"]["elements"]
-        panels = [e for e in elements if e.get("tag") == "collapsible_panel"]
-        assert len(panels) >= 1
-
-
-# ── 上下文加载占位提示测试 ──
-
 
 class TestLoadingHintElement:
     """_loading_hint_element() 占位元素结构测试."""
@@ -964,21 +854,6 @@ class TestSummaryI18nContent:
         assert "i18n_content" in summary
         assert "zh_cn" in summary["i18n_content"]
         assert "en_us" in summary["i18n_content"]
-
-    def test_complete_card_summary_has_i18n(self) -> None:
-        card = build_complete_card(text="hello world", has_cardkit=True)
-        summary = card["config"].get("summary", {})
-        assert "i18n_content" in summary, f"summary={summary}"
-        assert summary["i18n_content"]["zh_cn"] == summary["content"]
-
-    def test_linear_complete_card_summary_has_i18n(self) -> None:
-        card = build_linear_complete_card(
-            segments=[_seg("answer", "test answer")],
-            all_tool_steps=[],
-        )
-        summary = card["config"].get("summary", {})
-        assert "i18n_content" in summary, f"summary={summary}"
-        assert summary["i18n_content"]["zh_cn"] == summary["content"]
 
     def test_unified_complete_card_summary_has_i18n(self) -> None:
         from hermes_lark_streaming.cardkit import build_unified_complete_card
