@@ -8,15 +8,22 @@ triggers:
     branches:
       precise: [github_sync]
 
-# 通用变量（在 Gitee Go 流水线设置 → 通用变量 中配置）：
-#   OWNER  = Aowen-Nowor
-#   TOKEN  = 个人访问令牌（需 projects、releases 权限）
+# 变量配置（两种方式，任选其一）：
 #
-# ⚠️ 变量名不能以 GITEE_ 或 GO_ 开头（Gitee 系统保留前缀），
-#    所以用 OWNER/TOKEN 而不是 GITEE_OWNER/GITEE_TOKEN。
+# 方式 A：流水线「参数设置」（推荐）
+#   在 Gitee Go 流水线编辑页 → 参数设置 中添加：
+#     OWNER = Aowen-Nowor
+#     TOKEN = <个人访问令牌>（需 projects、releases 权限）
+#   这些变量会写入 GITEE_PARAMS 文件，本工作流有兜底逻辑从该文件读取。
 #
-# 这两个变量在 shell commands 中以环境变量形式存在，由 shell 自己展开，
-# 不经过 release@gitee 插件的参数模板引擎，所以一定生效。
+# 方式 B：「通用变量」+ 关联流水线
+#   在项目设置 → 通用变量 中添加 OWNER/TOKEN，
+#   然后在流水线设置中「关联」该通用变量组。
+#   关联后变量会作为环境变量注入。
+#
+# ⚠️ 变量名不能以 GITEE_ 或 GO_ 开头（Gitee 系统保留前缀）。
+#
+# 本工作流先尝试读环境变量，读不到则从 GITEE_PARAMS 文件兜底读取。
 
 stages:
   - name: release-stage
@@ -43,7 +50,38 @@ stages:
         displayName: 计算版本号并创建 Release
         pythonVersion: '3.11'
         commands:
-          - python3 scripts/create_release.py
+          - |
+            set -e
+
+            # ── 调试：打印环境变量（排查变量注入问题）──
+            echo "=== 环境变量检查 ==="
+            echo "OWNER=[${OWNER:-<未设置>}]"
+            echo "TOKEN=[${TOKEN:+<已设置，长度 ${#TOKEN}>}]"
+            echo "REPO=[${REPO:-<未设置>}]"
+            # 打印所有可能的 GITEE_ 系统变量（用于调试，不打印 TOKEN 值）
+            env | grep -E "^(GITEE_|GO_)" | grep -v -i "token" | head -20 || echo "(无 GITEE_/GO_ 系统变量)"
+
+            # ── 兜底：如果通用变量未注入，尝试从 GITEE_PARAMS 文件读取 ──
+            # 通用变量是项目级，需要「关联流水线」才会注入环境变量。
+            # 如果用户没关联，可以改在流水线「参数设置」里配 OWNER/TOKEN，
+            # 它们会写入 GITEE_PARAMS 文件。这里做兜底读取。
+            if [ -z "$OWNER" ] && [ -f GITEE_PARAMS ]; then
+              OWNER=$(grep '^OWNER=' GITEE_PARAMS 2>/dev/null | head -1 | sed 's/^OWNER=//; s/^"//; s/"$//') || true
+              if [ -n "$OWNER" ]; then
+                export OWNER
+                echo "ℹ️  从 GITEE_PARAMS 读取 OWNER"
+              fi
+            fi
+            if [ -z "$TOKEN" ] && [ -f GITEE_PARAMS ]; then
+              TOKEN=$(grep '^TOKEN=' GITEE_PARAMS 2>/dev/null | head -1 | sed 's/^TOKEN=//; s/^"//; s/"$//') || true
+              if [ -n "$TOKEN" ]; then
+                export TOKEN
+                echo "ℹ️  从 GITEE_PARAMS 读取 TOKEN"
+              fi
+            fi
+
+            # ── 运行发版脚本 ──
+            python3 scripts/create_release.py
         notify: []
         strategy:
           retry: '0'
