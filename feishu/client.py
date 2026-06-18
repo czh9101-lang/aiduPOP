@@ -204,8 +204,13 @@ class FeishuClient:
     def __init__(self, config: FeishuClientConfig) -> None:
         self.config = config
         builder = lark.Client.builder().app_id(config.app_id).app_secret(config.app_secret)
-        if config.base_url:
-            builder = builder.domain(config.base_url)
+        # .domain() 只接受域名（如 https://open.feishu.cn），不带路径后缀
+        # 如果 base_url 包含 /open-apis 后缀，去掉它
+        domain = config.base_url
+        if domain and "/open-apis" in domain:
+            domain = domain.split("/open-apis")[0]
+        if domain and domain != "https://open.feishu.cn":
+            builder = builder.domain(domain)
         self._client = builder.build()
         # Probe for async stream_element method (lark-oapi >= 1.x)
         self._use_async_stream_element = hasattr(
