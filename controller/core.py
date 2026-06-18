@@ -194,7 +194,7 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
 
         # v1.1.0: Record metrics
         try:
-            from ..monitor import record_card_created, set_active_sessions
+            from ..aowen import record_card_created, set_active_sessions
             record_card_created()
             set_active_sessions(sum(1 for s in self._sessions.values() if not s.is_terminal_phase))
         except Exception:
@@ -388,7 +388,7 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
 
         # v1.1.0: Record metrics
         try:
-            from ..monitor import record_card_aborted
+            from ..aowen import record_card_aborted
             record_card_aborted()
         except Exception:
             pass

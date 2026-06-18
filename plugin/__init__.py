@@ -257,7 +257,7 @@ def register(ctx: "PluginContext") -> None:
 
     # ── v1.1.0: Register /aowen command hook (Task 3.7) ──
     try:
-        from ..monitor import handle_pre_gateway_dispatch
+        from ..aowen import handle_pre_gateway_dispatch
         ctx.register_hook("pre_gateway_dispatch", handle_pre_gateway_dispatch)
         _logger.info("hermes-lark-streaming v%s: /aowen commands registered (help, status, monitor)", __version__)
     except Exception:

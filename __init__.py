@@ -65,7 +65,7 @@ Runtime Patching:
     hooks.py                  Hook functions (on_message_started, on_answer_delta, etc.)
 
 Monitoring:
-  monitor/                    Sub-package
+  aowen/                      Sub-package
     __init__.py               /aowen command system (pre_gateway_dispatch hook + metrics + cards)
 
 Plugin Entry:

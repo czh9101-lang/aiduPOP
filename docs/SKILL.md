@@ -78,7 +78,7 @@ Background: _run_background_task ── [Hook 1/2]
 | **config/** | **配置读取子包** | |
 | `├ __init__.py` | 重导出门面 | `Config`, `_get_hermes_config_path` |
 | `└ reader.py` | 配置读取 | `_plugin_sec()` 惰性加载 + 60秒 TTL 缓存 + mtime 热更新 (v1.1.0) |
-| **monitor/** | **监控命令子包 (v1.1.0)** | |
+| **aowen/** | **监控命令子包 (v1.1.0)** | |
 | `└ __init__.py` | /aowen 命令体系 | pre_gateway_dispatch hook + metrics 收集 + 卡片构建 |
 | **plugin/** | **插件注册子包 (v1.1.0)** | |
 | `└ __init__.py` | 注册入口 | `register()`/`unregister()` + 自动备份 config + FeishuClient 预热 + monitor 启动 |
@@ -114,7 +114,7 @@ Background: _run_background_task ── [Hook 1/2]
 
 **4.13 配置热更新 (v1.1.0)**: `Config.reload()` 清缓存 + mtime 自动检测 + `on_reload` 回调注册。修改 config.yaml 后最多 60 秒自动生效，无需重启网关。v1.1.0 P0 修复后 mtime 检测从 `enabled` 属性移到 `_plugin_sec()`，所有走该方法的属性都检测文件变化。`/aowen config reload` 命令可立即生效。
 
-**4.14 /aowen 命令体系 (v1.1.0)**: `monitor/` 子包通过 `pre_gateway_dispatch` hook 拦截 `/aowen` 命令，直接回复飞书卡片，不经过 Hermes AI。命令：`/aowen help`、`/aowen status`（含配置折叠面板）、`/aowen monitor`、`/aowen monitor reset`、`/aowen config reload`。零后台内存占用。
+**4.14 /aowen 命令体系 (v1.1.0)**: `aowen/` 子包通过 `pre_gateway_dispatch` hook 拦截 `/aowen` 命令，直接回复飞书卡片，不经过 Hermes AI。命令：`/aowen help`、`/aowen status`（含配置折叠面板）、`/aowen monitor`、`/aowen monitor reset`、`/aowen config reload`。零后台内存占用。
 
 **4.15 状态机标志位收敛 (v1.1.0)**: 8 个布尔标志位合并为 `_creation_stages: set[str]`（含 `"panel"`/`"answer"`/`"hint_removed"`）+ 4 个正交布尔（`_streaming_closed`/`_was_aborted`/`_pending_flush`/`_first_flush_done`）。
 

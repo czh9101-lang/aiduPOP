@@ -230,7 +230,7 @@ class FeishuClient:
                 result = await coro_factory()
                 # v1.1.0: Record successful API call
                 try:
-                    from ..monitor import record_api_call
+                    from ..aowen import record_api_call
                     record_api_call(operation)
                 except Exception:
                     pass
@@ -258,7 +258,7 @@ class FeishuClient:
             msg = response.msg or ""
             # v1.1.0: Record API error metrics
             try:
-                from ..monitor import record_api_error
+                from ..aowen import record_api_error
                 record_api_error(code, operation)
             except Exception:
                 pass

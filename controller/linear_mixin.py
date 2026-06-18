@@ -1638,7 +1638,7 @@ class UnifiedControllerMixin:
                 )
                 # v1.1.0: Record metrics
                 try:
-                    from ..monitor import record_full_rebuild
+                    from ..aowen import record_full_rebuild
                     record_full_rebuild()
                 except Exception:
                     pass
@@ -1654,7 +1654,7 @@ class UnifiedControllerMixin:
             session.state = COMPLETED
             # v1.1.0: Record metrics
             try:
-                from ..monitor import record_card_completed
+                from ..aowen import record_card_completed
                 record_card_completed()
             except Exception:
                 pass
@@ -1666,7 +1666,7 @@ class UnifiedControllerMixin:
             )
             # v1.1.0: Record metrics
             try:
-                from ..monitor import record_card_failed
+                from ..aowen import record_card_failed
                 record_card_failed()
             except Exception:
                 pass
