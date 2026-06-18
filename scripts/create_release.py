@@ -4,9 +4,12 @@
 在工作流中由 .workflow/release-pipeline.yml 调用。所有变量通过环境
 变量传入（shell 自己展开，不依赖 release@gitee 插件的参数模板引擎）：
 
-必需环境变量：
-    GITEE_OWNER  仓库 owner（如 Aowen-Nowor）
-    GITEE_TOKEN  个人访问令牌（需 projects、releases 权限）
+必需环境变量（在 Gitee Go 流水线设置 → 通用变量 中配置）：
+    OWNER  仓库 owner（如 Aowen-Nowor）
+    TOKEN  个人访问令牌（需 projects、releases 权限）
+
+    注意：变量名不能以 GITEE_ 或 GO_ 开头（Gitee 系统保留前缀），
+    所以用 OWNER/TOKEN 而不是 GITEE_OWNER/GITEE_TOKEN。
 
 可选环境变量：
     REPO         仓库名（默认 hermes-lark-streaming）
@@ -50,23 +53,28 @@ def extract_version() -> str:
 
 
 def ensure_env() -> tuple[str, str, str, str]:
-    """校验并返回 (owner, token, repo, target_branch)."""
-    owner = os.environ.get("GITEE_OWNER", "").strip()
-    token = os.environ.get("GITEE_TOKEN", "").strip()
+    """校验并返回 (owner, token, repo, target_branch).
+
+    变量名用 OWNER/TOKEN（不能以 GITEE_/GO_ 开头，Gitee 系统保留前缀）。
+    """
+    owner = os.environ.get("OWNER", "").strip()
+    token = os.environ.get("TOKEN", "").strip()
     repo = os.environ.get("REPO", "hermes-lark-streaming").strip()
     target = os.environ.get("TARGET_BRANCH", "github_sync").strip()
 
     if not owner:
         print(
-            "ERROR: 环境变量 GITEE_OWNER 未配置\n"
-            "请在 Gitee Go 流水线设置 → 通用变量 中配置 GITEE_OWNER=Aowen-Nowor",
+            "ERROR: 环境变量 OWNER 未配置\n"
+            "请在 Gitee Go 流水线设置 → 通用变量 中配置 OWNER=Aowen-Nowor\n"
+            "注意：变量名不能以 GITEE_ 或 GO_ 开头（系统保留前缀）",
             file=sys.stderr,
         )
         sys.exit(1)
     if not token:
         print(
-            "ERROR: 环境变量 GITEE_TOKEN 未配置\n"
-            "请在 Gitee Go 流水线设置 → 通用变量 中配置 GITEE_TOKEN=<个人访问令牌>",
+            "ERROR: 环境变量 TOKEN 未配置\n"
+            "请在 Gitee Go 流水线设置 → 通用变量 中配置 TOKEN=<个人访问令牌>\n"
+            "注意：变量名不能以 GITEE_ 或 GO_ 开头（系统保留前缀）",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -165,9 +173,16 @@ def create_gitee_release(
                 print("✅ Release 创建成功（响应非 JSON）")
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", errors="replace")
-        # 已存在的 Release 视为成功
-        lower = err_body.lower()
-        if "已存在" in err_body or "already exist" in lower or "exist" in lower:
+        # 已存在的 Release 视为成功（幂等）
+        # 注意：不能用模糊的 "exist" 匹配——401 Unauthorized 的错误信息
+        # "Access token does not exist" 也包含 "exist"，会被误判。
+        # 只认明确的"已存在"提示（Gitee API 返回 400 + 明确文案）。
+        is_already_exist = (
+            "已存在" in err_body
+            or "already exist" in err_body.lower()
+            or "release already" in err_body.lower()
+        )
+        if is_already_exist:
             print(f"ℹ️  Release {tag} 已存在，跳过创建")
         else:
             print(f"❌ Release 创建失败，HTTP {e.code}", file=sys.stderr)
