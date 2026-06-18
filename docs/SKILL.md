@@ -50,11 +50,10 @@ Background: _run_background_task ── [Hook 1/2]
 | `├ callbacks.py` | 回调包装 | 5 个内部 wrapper + `already_streamed` 透传 + 长度去重 |
 | `└ adapter.py` | FeishuAdapter 包装 | send/edit/reaction/clarify 包装 + gateway card 注册 |
 | **cardkit/** | **卡片构建子包** | |
-| `├ __init__.py` | 重导出门面 | `from .elements/cards/special/theme import *` |
+| `├ __init__.py` | 重导出门面 | `from .elements/cards/special import *` |
 | `├ elements.py` | 原始元素构建器 | 统一面板 + answer streaming + footer + `build_panel_header/children` |
 | `├ cards.py` | 卡片组装器 | streaming/complete/IM-fallback 卡片 |
 | `├ special.py` | 专用卡片类型 | cron/gateway/clarify 三态卡片 |
-| `├ theme.py` | 卡片主题 (v1.1.0) | 3 预设 (default/dark/compact) + 用户自定义覆盖 |
 | `├ i18n.py` | 中英双语映射 | `_T` dict + `_i18n()`/`_t()` |
 | `└ md.py` | Markdown 处理 | 标题/表格降级、长文本分块 |
 | **controller/** | **主控制器子包** | |
@@ -113,15 +112,13 @@ Background: _run_background_task ── [Hook 1/2]
 
 **4.12 并发限流 (v1.1.0)**: `on_message_started` 时 seal 同 chat_id 的旧活跃卡片为"被新消息取代"，防止多张活跃卡片竞争 API 调用。
 
-**4.13 配置热更新 (v1.1.0)**: `Config.reload()` 清缓存 + mtime 自动检测 + `on_reload` 回调注册。修改 config.yaml 后最多 60 秒自动生效，无需重启网关。
+**4.13 配置热更新 (v1.1.0)**: `Config.reload()` 清缓存 + mtime 自动检测 + `on_reload` 回调注册。修改 config.yaml 后最多 60 秒自动生效，无需重启网关。v1.1.0 P0 修复后 mtime 检测从 `enabled` 属性移到 `_plugin_sec()`，所有走该方法的属性都检测文件变化。`/aowen config reload` 命令可立即生效。
 
-**4.14 卡片主题 (v1.1.0)**: `cardkit/theme.py` 提供 3 个预设主题（default/dark/compact）+ 用户自定义覆盖。颜色、图标等不再硬编码。
+**4.14 /aowen 命令体系 (v1.1.0)**: `monitor/` 子包通过 `pre_gateway_dispatch` hook 拦截 `/aowen` 命令，直接回复飞书卡片，不经过 Hermes AI。命令：`/aowen help`、`/aowen status`（含配置折叠面板）、`/aowen monitor`、`/aowen monitor reset`、`/aowen config reload`。零后台内存占用。
 
-**4.15 /aowen 命令体系 (v1.1.0)**: `monitor/` 子包通过 `pre_gateway_dispatch` hook 拦截 `/aowen` 命令，直接回复飞书卡片，不经过 Hermes AI。命令：`/aowen help`、`/aowen status`（含配置折叠面板）、`/aowen monitor`、`/aowen monitor reset`。零后台内存占用。
+**4.15 状态机标志位收敛 (v1.1.0)**: 8 个布尔标志位合并为 `_creation_stages: set[str]`（含 `"panel"`/`"answer"`/`"hint_removed"`）+ 4 个正交布尔（`_streaming_closed`/`_was_aborted`/`_pending_flush`/`_first_flush_done`）。
 
-**4.16 状态机标志位收敛 (v1.1.0)**: 8 个布尔标志位合并为 `_creation_stages: set[str]`（含 `"panel"`/`"answer"`/`"hint_removed"`）+ 4 个正交布尔（`_streaming_closed`/`_was_aborted`/`_pending_flush`/`_first_flush_done`）。
-
-**4.17 去重机制收敛 (v1.1.0)**: 从 5 层降到 2 层——保留 `_hls_wrapper` 标记 + `already_streamed` 透传 + `_stream_consumed_len` 长度追踪。移除 `_native_reasoning_active`（用 `bool(state._current_reasoning)` 代替）和 `_force_rewrap`（用 ContextVar 重解析代替）。
+**4.16 去重机制收敛 (v1.1.0)**: 从 5 层降到 2 层——保留 `_hls_wrapper` 标记 + `already_streamed` 透传 + `_stream_consumed_len` 长度追踪。移除 `_native_reasoning_active`（用 `bool(state._current_reasoning)` 代替）和 `_force_rewrap`（用 ContextVar 重解析代替）。
 
 ---
 
@@ -254,9 +251,6 @@ hermes_lark_streaming:
   footer:
     show_label: false
     fields: [[status, elapsed, model, cost, compression_exhausted]]
-  # v1.1.0 新增：
-  theme:
-    name: default                  # default / dark / compact
 
 # display 节是 Hermes 全局配置，不在 hermes_lark_streaming 下
 display:

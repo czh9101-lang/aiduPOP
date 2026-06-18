@@ -170,16 +170,16 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
                 chat_id[:12],
                 message_id[:12],
             )
-            # Fire interrupt hook to seal the old card
+            # Fire interrupt to seal the old card
             try:
-                self.on_message_interrupted(
-                    message_id=existing_msg_id,
+                self.on_interrupted(
+                    old_message_id=existing_msg_id,
                     new_message_id=message_id,
                     chat_id=chat_id,
                     anchor_id=anchor_id,
                 )
             except Exception:
-                _logger.debug("HLS: concurrency seal failed", exc_info=True)
+                _logger.warning("HLS: concurrency seal failed", exc_info=True)
 
         loop = self._get_loop()
         if loop is None:

@@ -256,28 +256,12 @@ def register(ctx: "PluginContext") -> None:
         _logger.debug("hermes-lark-streaming v%s: FeishuClient pre-warm skipped", __version__, exc_info=True)
 
     # ── v1.1.0: Register /aowen command hook (Task 3.7) ──
-    # /aowen is the plugin's command prefix. All /aowen commands are
-    # intercepted by the plugin (via pre_gateway_dispatch hook) and
-    # never reach the Hermes agent.
-    # Current commands:
-    #   /aowen monitor  — show metrics card
-    #   /aowen help     — show available commands
-    #   /aowen          — same as /aowen help
     try:
         from ..monitor import handle_pre_gateway_dispatch
         ctx.register_hook("pre_gateway_dispatch", handle_pre_gateway_dispatch)
         _logger.info("hermes-lark-streaming v%s: /aowen commands registered (help, status, monitor)", __version__)
     except Exception:
         _logger.debug("hermes-lark-streaming v%s: /aowen hook registration skipped", __version__, exc_info=True)
-
-    # ── v1.1.0: Register theme cache invalidation on config reload (Task 3.5+3.6) ──
-    try:
-        from ..cardkit.theme import invalidate_theme_cache
-        from ..config import Config as _Cfg
-
-        _Cfg().on_reload(invalidate_theme_cache)
-    except Exception:
-        _logger.debug("hermes-lark-streaming v%s: theme cache invalidation registration skipped", __version__, exc_info=True)
 
 
 def unregister(ctx: "PluginContext") -> None:
@@ -286,4 +270,11 @@ def unregister(ctx: "PluginContext") -> None:
     Cleans up the injected hermes_lark_streaming config from config.yaml.
     """
     _cleanup_config()
+    # Clear controller sessions
+    try:
+        from ..controller import get_controller
+        ctrl = get_controller()
+        ctrl._sessions.clear()
+    except Exception:
+        pass
     _logger.info("hermes-lark-streaming: unregistered")

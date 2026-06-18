@@ -291,6 +291,7 @@ def build_help_card() -> dict[str, Any]:
         ("`/aowen status`", "查看插件状态 + 当前配置（折叠面板）"),
         ("`/aowen monitor`", "查看监控面板（卡片创建数、API 调用数等）"),
         ("`/aowen monitor reset`", "重置监控统计计数器"),
+        ("`/aowen config reload`", "重新加载配置文件（改完 config.yaml 后执行）"),
         ("`/aowen`", "同 `/aowen help`"),
     ]
     command_lines = [f"  • {cmd} — {desc}" for cmd, desc in commands]
@@ -402,6 +403,12 @@ def handle_pre_gateway_dispatch(event: Any, gateway: Any = None, **kwargs) -> di
             _send_card_async(chat_id, build_status_card(), "status")
             return _skip("/aowen status handled")
 
+        elif subcommand == "config" and sub_arg == "reload":
+            # /aowen config reload
+            card = _handle_config_reload()
+            _send_card_async(chat_id, card, "config_reload")
+            return _skip("/aowen config reload handled")
+
         elif subcommand == "monitor":
             if sub_arg == "reset":
                 # /aowen monitor reset
@@ -440,6 +447,55 @@ def handle_pre_gateway_dispatch(event: Any, gateway: Any = None, **kwargs) -> di
     except Exception:
         _logger.debug("HLS: /aowen handler error", exc_info=True)
         return None
+
+
+def _handle_config_reload() -> dict:
+    """Handle /aowen config reload — reload config and return result card."""
+    try:
+        from ..config import Config
+        cfg = Config()
+        cfg.reload()
+        _logger.info("HLS: config reloaded via /aowen config reload")
+        return {
+            "schema": "2.0",
+            "config": {"update_multi": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "配置已重新加载"},
+                "template": "green",
+            },
+            "body": {
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": f"配置已重新加载。\n\n**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n新的配置已立即生效。",
+                        },
+                    },
+                ],
+            },
+        }
+    except Exception as e:
+        _logger.error("HLS: config reload failed", exc_info=True)
+        return {
+            "schema": "2.0",
+            "config": {"update_multi": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "配置加载失败"},
+                "template": "red",
+            },
+            "body": {
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": f"配置加载失败，插件继续使用旧配置。\n\n**错误**: {str(e)[:200]}",
+                        },
+                    },
+                ],
+            },
+        }
 
 
 def _do_reset() -> None:

@@ -204,6 +204,8 @@ class FeishuClient:
     def __init__(self, config: FeishuClientConfig) -> None:
         self.config = config
         builder = lark.Client.builder().app_id(config.app_id).app_secret(config.app_secret)
+        if config.base_url:
+            builder = builder.domain(config.base_url)
         self._client = builder.build()
         # Probe for async stream_element method (lark-oapi >= 1.x)
         self._use_async_stream_element = hasattr(

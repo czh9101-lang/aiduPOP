@@ -39,11 +39,10 @@ Core Controller:
 
 Card Building:
   cardkit/                    Sub-package
-    __init__.py               Re-exports from elements/cards/special/theme
+    __init__.py               Re-exports from elements/cards/special
     elements.py               Primitive element builders (unified panel, panels, footers)
     cards.py                  Card assemblers (streaming, complete, unified)
     special.py                Specialized cards (cron, gateway, clarify)
-    theme.py                  Card theme system (presets + custom overrides)
     md.py                     Markdown processing (downgrade, split, optimize)
     i18n.py                   i18n zh/en bilingual text mapping
 

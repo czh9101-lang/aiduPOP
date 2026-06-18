@@ -132,8 +132,6 @@ feishu:
 | `streaming_panel_expanded` | `false` | bool | 流式态卡片面板是否展开 |
 | `footer.show_label` | `false` | bool | 是否显示页脚字段标签 |
 | `footer.fields` | `[[status, elapsed, model, cost, compression_exhausted]]` | array | 页脚字段配置 |
-| `theme.name` | `default` | str | 卡片主题预设（`default`/`dark`/`compact`） |
-| `theme.*` | — | str | 覆盖主题的单个值（如 `theme.panel_icon`） |
 
 ### display 节（Hermes 全局配置，非 hermes_lark_streaming 节）
 
@@ -158,9 +156,6 @@ hermes_lark_streaming:
     show_label: false
     fields:
       - [status, elapsed, model, cost, compression_exhausted]
-  # v1.1.0 新增：卡片主题（可选）
-  theme:
-    name: default
 
 # display 节是 Hermes 全局配置，不在 hermes_lark_streaming 下
 display:
@@ -181,6 +176,7 @@ display:
 | `/aowen status` | 查看插件状态 + 当前配置（折叠面板展示） |
 | `/aowen monitor` | 查看监控面板（卡片创建数、API 调用数、错误码分布等） |
 | `/aowen monitor reset` | 重置监控统计计数器 |
+| `/aowen config reload` | 立即重新加载 config.yaml（不等自动 mtime 检测） |
 | `/aowen` | 同 `/aowen help` |
 
 ## 提供的钩子（Hooks）

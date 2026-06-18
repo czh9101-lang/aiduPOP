@@ -98,7 +98,6 @@ class Config:
     @property
     def enabled(self) -> bool:
         """是否启用流式卡片."""
-        self._check_mtime_and_invalidate()
         sec = self._plugin_sec()
         return bool(sec.get("enabled", False))
 
@@ -295,6 +294,7 @@ class Config:
 
     def _plugin_sec(self) -> dict[str, Any]:
         """Return the ``hermes_lark_streaming`` section from config."""
+        self._check_mtime_and_invalidate()
         raw = self._load()
         sec = raw.get("hermes_lark_streaming")
         if isinstance(sec, dict):

@@ -211,27 +211,14 @@ hermes_lark_streaming:
 | `/aowen status` | 查看插件状态 + 当前配置（折叠面板展示） |
 | `/aowen monitor` | 查看监控面板（卡片创建数、API 调用数、错误码分布等） |
 | `/aowen monitor reset` | 重置监控统计计数器 |
+| `/aowen config reload` | 立即重新加载 config.yaml（无需等待自动检测） |
 | `/aowen` | 同 `/aowen help` |
 
 > `/aowen` 是插件的命令前缀，所有 `/aowen` 开头的命令都由插件处理，不经过 Hermes。命令触发时实时生成数据，不占用后台内存。
 
-### 卡片样式主题
-
-支持自定义卡片颜色、图标等外观：
-
-```yaml
-hermes_lark_streaming:
-  theme:
-    name: default    # 预设主题：default / dark / compact
-    # 可覆盖单个值（可选）：
-    # panel_icon: robot_filled
-    # header_color_success: green
-    # tool_color_running: orange
-```
-
 ### 配置热更新
 
-修改 `~/.hermes/config.yaml` 后无需重启网关，插件会自动检测文件变化并重新加载配置（最多 60 秒延迟）。
+修改 `~/.hermes/config.yaml` 后无需重启网关，插件会自动检测文件变化并重新加载配置（最多 60 秒延迟）。如需立即生效，可在飞书中发送 `/aowen config reload` 命令。
 
 ### 飞书凭据
 
