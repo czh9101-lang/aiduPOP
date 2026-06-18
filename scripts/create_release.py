@@ -43,7 +43,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PLUGIN_YAML = REPO_ROOT / "plugin.yaml"
-CHANGELOG_MD = REPO_ROOT / "docs" / "CHANGELOG.md"
 
 GITEE_API_BASE = "https://gitee.com/api/v5/repos"
 
@@ -99,24 +98,13 @@ def ensure_env() -> tuple[str, str, str, str]:
 
 
 def build_release_body(tag: str, owner: str, repo: str) -> str:
-    """构造 Release 描述：版本号 + 完整 CHANGELOG 链接 + CHANGELOG 内容."""
+    """构造 Release 描述：只放完整更新日志链接（用户点击可跳转）.
+
+    不再把 CHANGELOG.md 全部内容塞进 Release body（太长）。
+    用户点击链接即可查看完整更新日志。
+    """
     changelog_url = f"https://gitee.com/{owner}/{repo}/raw/github_sync/docs/CHANGELOG.md"
-
-    # 读取 CHANGELOG.md 内容（截断到 60000 字符避免 API 拒绝）
-    try:
-        changelog_body = CHANGELOG_MD.read_text(encoding="utf-8")[:60000]
-    except Exception as e:
-        changelog_body = f"（读取 CHANGELOG.md 失败: {e}）"
-
-    return (
-        f"{tag} 发行版\n"
-        f"\n"
-        f"完整更新日志：{changelog_url}\n"
-        f"\n"
-        f"---\n"
-        f"\n"
-        f"{changelog_body}"
-    )
+    return f"完整更新日志：{changelog_url}"
 
 
 def create_gitee_release(
