@@ -133,28 +133,13 @@ jobs:
             echo "🆕 Tag $TAG does not exist on GitHub, will create Release"
           fi
 
-      - name: Extract release notes from CHANGELOG
+      - name: Prepare release notes
         if: steps.detect.outputs.has_changes == 'true' && steps.run_tests.outputs.exit_code == '0' && steps.check_tag.outputs.tag_exists == 'false'
-        id: release_notes
         run: |
-          # 从 CHANGELOG.md 提取当前版本的 release notes
-          # 格式：## v1.1.0 (2026-06-17) 到下一个 ## v 之间的内容
-          VERSION="${{ steps.version.outputs.version }}"
-          python3 -c "
-          import re
-          with open('docs/CHANGELOG.md', 'r') as f:
-            content = f.read()
-          # 匹配 ## v{version} 到下一个 ## v 之间的内容
-          pattern = rf'(## v{re.escape(VERSION)}.*?)(?=\n## v|\Z)'
-          match = re.search(pattern, content, re.DOTALL)
-          if match:
-            notes = match.group(1).strip()
-          else:
-            notes = f'## v{VERSION}\n\nSee [CHANGELOG.md](docs/CHANGELOG.md) for details.'
-          with open('release_notes.md', 'w') as f:
-            f.write(notes)
-          "
-          echo "📝 Release notes extracted to release_notes.md"
+          # Release 描述只放完整更新日志链接（与 Gitee Release 描述保持一致）
+          echo "完整更新日志：https://raw.githubusercontent.com/${{ github.repository }}/master/docs/CHANGELOG.md" > release_notes.md
+          echo "📝 Release notes prepared:"
+          cat release_notes.md
 
       - name: Create GitHub Release
         if: steps.detect.outputs.has_changes == 'true' && steps.run_tests.outputs.exit_code == '0' && steps.check_tag.outputs.tag_exists == 'false'
