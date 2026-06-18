@@ -18,6 +18,27 @@ stages:
     trigger: auto
     executor: []
     steps:
+      # ─────────────────────────────────────────────────────────────
+      # 单步骤完成：计算版本号 + 调 Gitee API 创建 Release（自动创建 tag）
+      # ─────────────────────────────────────────────────────────────
+      # 为什么不用 release@gitee 插件？
+      #   release@gitee 的参数字段（releaseName/tagName/description）只解析
+      #   「配置时已知的变量」（系统变量如 ${GITEE_PIPELINE_BUILD_NUMBER}），
+      #   不解析运行时通过 GITEE_PARAMS 写入的自定义变量。实测
+      #   ${RELEASE_VERSION} 在插件参数里为空，导致 tag/releaseName 都变成 "v"。
+      #
+      # 为什么不用 git tag + git push？
+      #   CI 环境（Gitee Go python-build 容器）没有 git 凭据，
+      #   git push origin <tag> 报 "could not read Username for https://gitee.com"。
+      #
+      # 最终方案：只调 Gitee Open API 创建 Release：
+      #   - tag_name = v{version}
+      #   - target_commitish = GITEE_COMMIT（系统变量，当前 commit SHA）
+      #   - Gitee API 会在创建 Release 时自动创建对应的 tag（如果不存在）
+      #   - 所有变量在 Python 进程里通过 os.environ 读取，不经过插件模板引擎
+      #
+      # 实际逻辑放在 scripts/create_release.py（避免在 YAML 块标量里
+      # 嵌入复杂多行 Python 字符串导致 YAML 解析失败）。
       - step: build@python
         name: create_release
         displayName: 计算版本号并创建 Release

@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
-"""Gitee Go 流水线发版脚本 —— 创建 git tag + 调用 Gitee API 创建 Release.
+"""Gitee Go 流水线发版脚本 —— 调用 Gitee API 创建 Release（自动创建 tag）.
 
 在工作流中由 .workflow/release-pipeline.yml 调用。所有变量通过环境
 变量传入（shell 自己展开，不依赖 release@gitee 插件的参数模板引擎）：
 
-必需环境变量（在 Gitee Go 流水线设置 → 通用变量 中配置）：
+必需环境变量（在 Gitee Go 流水线参数设置 中配置）：
     OWNER  仓库 owner（如 Aowen-Nowor）
     TOKEN  个人访问令牌（需 projects、releases 权限）
 
     注意：变量名不能以 GITEE_ 或 GO_ 开头（Gitee 系统保留前缀），
     所以用 OWNER/TOKEN 而不是 GITEE_OWNER/GITEE_TOKEN。
 
+系统变量（Gitee Go 自动注入，无需配置）：
+    GITEE_COMMIT  当前 commit SHA（用作 target_commitish）
+    GITEE_REPO    仓库全名（owner/repo 格式，如 Aowen-Nowor/hermes-lark-streaming）
+
 可选环境变量：
     REPO         仓库名（默认 hermes-lark-streaming）
-    TARGET_BRANCH Release 的 target_commitish（默认 github_sync）
+    TARGET_BRANCH Release 的 target_commitish（默认 github_sync；但优先用 GITEE_COMMIT）
+
+工作流设计（v1.1.0 最终方案）：
+  - 不用 release@gitee 插件（其参数不支持运行时变量）
+  - 不用 git tag/git push（CI 环境无 git 凭据，push 会失败）
+  - 只调 Gitee API 创建 Release：
+    * tag_name = v{version}
+    * target_commitish = GITEE_COMMIT（当前 commit）
+    * Gitee API 会在创建 Release 时自动创建对应的 tag（如果不存在）
 
 版本号从 plugin.yaml 提取（grep + sed，不依赖 PyYAML）。
 CHANGELOG.md 内容作为 Release body（顶部加完整更新日志链接，用户点击可跳转）。
@@ -23,7 +35,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -44,7 +55,6 @@ def extract_version() -> str:
         sys.exit(1)
     for line in PLUGIN_YAML.read_text(encoding="utf-8").splitlines():
         if line.startswith("version:"):
-            # 用 grep+sed 同款逻辑，保持与 shell 实现一致
             value = line.split(":", 1)[1].strip()
             value = value.strip('"').strip("'")
             return value
@@ -53,19 +63,26 @@ def extract_version() -> str:
 
 
 def ensure_env() -> tuple[str, str, str, str]:
-    """校验并返回 (owner, token, repo, target_branch).
+    """校验并返回 (owner, token, repo, target_commitish).
 
     变量名用 OWNER/TOKEN（不能以 GITEE_/GO_ 开头，Gitee 系统保留前缀）。
+    target_commitish 优先用 GITEE_COMMIT 系统变量（当前 commit SHA），
+    这样 Gitee API 创建 Release 时会基于该 commit 自动创建 tag。
     """
     owner = os.environ.get("OWNER", "").strip()
     token = os.environ.get("TOKEN", "").strip()
     repo = os.environ.get("REPO", "hermes-lark-streaming").strip()
-    target = os.environ.get("TARGET_BRANCH", "github_sync").strip()
+    # 优先用 GITEE_COMMIT（当前 commit SHA），其次 TARGET_BRANCH 环境变量，默认 github_sync
+    target_commitish = (
+        os.environ.get("GITEE_COMMIT", "").strip()
+        or os.environ.get("TARGET_BRANCH", "").strip()
+        or "github_sync"
+    )
 
     if not owner:
         print(
             "ERROR: 环境变量 OWNER 未配置\n"
-            "请在 Gitee Go 流水线设置 → 通用变量 中配置 OWNER=Aowen-Nowor\n"
+            "请在 Gitee Go 流水线设置 → 参数设置 中配置 OWNER=Aowen-Nowor\n"
             "注意：变量名不能以 GITEE_ 或 GO_ 开头（系统保留前缀）",
             file=sys.stderr,
         )
@@ -73,33 +90,12 @@ def ensure_env() -> tuple[str, str, str, str]:
     if not token:
         print(
             "ERROR: 环境变量 TOKEN 未配置\n"
-            "请在 Gitee Go 流水线设置 → 通用变量 中配置 TOKEN=<个人访问令牌>\n"
+            "请在 Gitee Go 流水线设置 → 参数设置 中配置 TOKEN=<个人访问令牌>\n"
             "注意：变量名不能以 GITEE_ 或 GO_ 开头（系统保留前缀）",
             file=sys.stderr,
         )
         sys.exit(1)
-    return owner, token, repo, target
-
-
-def create_git_tag(tag: str) -> None:
-    """创建并推送 git tag（已存在则跳过）."""
-    # 检查 tag 是否已存在
-    result = subprocess.run(
-        ["git", "rev-parse", tag],
-        capture_output=True,
-    )
-    if result.returncode == 0:
-        print(f"ℹ️  tag {tag} 已存在，跳过创建")
-        return
-
-    # 配置 git 身份
-    subprocess.run(["git", "config", "user.email", "ci@gitee.com"], check=True)
-    subprocess.run(["git", "config", "user.name", "gitee-go"], check=True)
-
-    # 创建并推送 tag
-    subprocess.run(["git", "tag", tag], check=True)
-    subprocess.run(["git", "push", "origin", tag], check=True)
-    print(f"✅ 已创建并推送 tag {tag}")
+    return owner, token, repo, target_commitish
 
 
 def build_release_body(tag: str, owner: str, repo: str) -> str:
@@ -130,9 +126,12 @@ def create_gitee_release(
     repo: str,
     tag: str,
     body: str,
-    target_branch: str,
+    target_commitish: str,
 ) -> None:
     """调用 Gitee Open API 创建 Release.
+
+    如果 tag 不存在，Gitee API 会基于 target_commitish 自动创建 tag。
+    如果 Release 已存在，视为成功（幂等）。
 
     API 文档: https://gitee.com/api/v5/swagger
     """
@@ -143,7 +142,7 @@ def create_gitee_release(
         "name": tag,
         "body": body,
         "prerelease": False,
-        "target_commitish": target_branch,
+        "target_commitish": target_commitish,
     }
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
@@ -157,6 +156,7 @@ def create_gitee_release(
     print(f"   URL: {url}")
     print(f"   tag: {tag}")
     print(f"   name: {tag}")
+    print(f"   target_commitish: {target_commitish[:12]}...")
 
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
@@ -164,8 +164,8 @@ def create_gitee_release(
             status = resp.status
             print(f"✅ API 响应码: {status}")
             try:
-                data = json.loads(resp_body)
-                release_url = data.get("html_url", "")
+                resp_data = json.loads(resp_body)
+                release_url = resp_data.get("html_url", "")
                 if release_url:
                     print("✅ Release 创建成功！")
                     print(f"   URL: {release_url}")
@@ -200,19 +200,17 @@ def main() -> None:
     print(f"✅ 检测到版本号: {version}  →  tag: {tag}")
 
     # 2. 校验环境变量
-    owner, token, repo, target = ensure_env()
+    owner, token, repo, target_commitish = ensure_env()
     print(f"✅ 仓库: {owner}/{repo}")
+    print(f"✅ target_commitish: {target_commitish}")
 
-    # 3. 创建 git tag
-    create_git_tag(tag)
-
-    # 4. 构造 Release 描述
+    # 3. 构造 Release 描述
     body = build_release_body(tag, owner, repo)
 
-    # 5. 调用 Gitee API 创建 Release
+    # 4. 调用 Gitee API 创建 Release（API 会自动创建 tag，无需 git push）
     create_gitee_release(
         owner=owner, token=token, repo=repo,
-        tag=tag, body=body, target_branch=target,
+        tag=tag, body=body, target_commitish=target_commitish,
     )
 
     print("✅ 发版流水线完成")
