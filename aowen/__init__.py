@@ -114,81 +114,92 @@ def _get_version() -> str:
 # ── Card builders ──
 
 def build_monitor_card() -> dict[str, Any]:
-    """Build monitor metrics card (v2-safe: div + lark_md + hr only)."""
+    """Build monitor metrics card with responsive column_set layout.
+
+    Uses column_set flex_mode=stretch so metrics stack vertically on mobile
+    and show 2 columns side-by-side on desktop.
+    """
     m = get_metrics()
 
-    def _fmt(label: str, value: Any, color: str = "default") -> str:
-        color_map = {
-            "default": None,
-            "error": "red",
-            "warning": "orange",
-            "success": "green",
-        }
+    def _metric_div(label: str, value: Any, color: str = "default") -> dict:
+        color_map = {"default": None, "error": "red", "warning": "orange", "success": "green"}
         font_color = color_map.get(color)
         if font_color:
-            return f"  • **{label}**: <font color='{font_color}'>{value}</font>"
-        return f"  • **{label}**: {value}"
+            content = f"**{label}**\n<font color='{font_color}'>{value}</font>"
+        else:
+            content = f"**{label}**\n{value}"
+        return {"tag": "div", "text": {"tag": "lark_md", "content": content}}
 
-    metrics_lines = [
-        _fmt("卡片创建", m["cards_created"]),
-        _fmt("已完成", m["cards_completed"], "success"),
-        _fmt("失败", m["cards_failed"], "error"),
-        _fmt("已停止", m["cards_aborted"]),
-        _fmt("API 调用", m["api_calls"]),
-        _fmt("API 错误", m["api_errors"], "error" if m["api_errors"] > 0 else "default"),
-        _fmt("流式调用", m["stream_element_calls"]),
-        _fmt("流式失败", m["stream_element_failures"], "error" if m["stream_element_failures"] > 0 else "default"),
-        _fmt("批量更新", m["batch_update_calls"]),
-        _fmt("全卡重建", m["full_rebuilds"], "warning" if m["full_rebuilds"] > 0 else "default"),
-        _fmt("活跃会话", m["active_sessions"]),
-        _fmt("运行时间", m["uptime_human"]),
+    # Pair metrics into 2-per-row for bisect layout
+    metrics = [
+        ("卡片创建", m["cards_created"], "default"),
+        ("已完成", m["cards_completed"], "success"),
+        ("失败", m["cards_failed"], "error"),
+        ("已停止", m["cards_aborted"], "default"),
+        ("API 调用", m["api_calls"], "default"),
+        ("API 错误", m["api_errors"], "error" if m["api_errors"] > 0 else "default"),
+        ("流式调用", m["stream_element_calls"], "default"),
+        ("流式失败", m["stream_element_failures"], "error" if m["stream_element_failures"] > 0 else "default"),
+        ("批量更新", m["batch_update_calls"], "default"),
+        ("全卡重建", m["full_rebuilds"], "warning" if m["full_rebuilds"] > 0 else "default"),
+        ("活跃会话", m["active_sessions"], "default"),
+        ("运行时间", m["uptime_human"], "default"),
     ]
 
+    # Build column_set elements: 2 metrics per row, stretch on mobile
+    elements: list[dict] = [
+        {
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**版本**: v{_get_version()}  |  **运行时间**: {m['uptime_human']}"},
+        },
+        {"tag": "hr"},
+    ]
+
+    # Add metrics in 2-column rows
+    for i in range(0, len(metrics), 2):
+        pair = metrics[i:i+2]
+        columns = []
+        for label, value, color in pair:
+            columns.append({
+                "tag": "column",
+                "width": "weighted",
+                "weight": 1,
+                "elements": [_metric_div(label, value, color)],
+            })
+        elements.append({
+            "tag": "column_set",
+            "flex_mode": "stretch",
+            "columns": columns,
+        })
+
+    # Error codes section
     if m["error_codes"]:
         error_lines = [f"  • 错误码 `{code}`: {count} 次" for code, count in sorted(m["error_codes"].items())]
-        metrics_lines.append("")
-        metrics_lines.append("<font color='orange'>**错误码分布**</font>")
-        metrics_lines.extend(error_lines)
+        elements.append({"tag": "hr"})
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": "<font color='orange'>**错误码分布**</font>\n" + "\n".join(error_lines)},
+        })
+
+    elements.append({"tag": "hr"})
+    elements.append({
+        "tag": "div",
+        "text": {
+            "tag": "plain_text",
+            "content": f"数据更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}  |  发送 /aowen monitor 刷新  |  发送 /aowen monitor reset 重置",
+        },
+    })
 
     return {
         "schema": "2.0",
         "config": {"update_multi": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": "插件监控面板"},
-            "template": "blue",
-        },
-        "body": {
-            "elements": [
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": f"**版本**: v{_get_version()}  |  **运行时间**: {m['uptime_human']}",
-                    },
-                },
-                {"tag": "hr"},
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": "\n".join(metrics_lines),
-                    },
-                },
-                {"tag": "hr"},
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "plain_text",
-                        "content": f"数据更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}  |  发送 /aowen monitor 刷新  |  发送 /aowen monitor reset 重置",
-                    },
-                },
-            ],
-        },
+        "header": {"title": {"tag": "plain_text", "content": "插件监控面板"}, "template": "blue"},
+        "body": {"elements": elements},
     }
 
 
 def build_status_card() -> dict[str, Any]:
-    """Build status card with config in collapsible panel (v2-safe)."""
+    """Build status card with responsive layout + config in collapsible panel."""
     try:
         from ..controller import get_controller
         from ..patching import _patch_status
@@ -197,7 +208,7 @@ def build_status_card() -> dict[str, Any]:
         ctrl = get_controller()
         cfg = Config()
 
-        # ── Status section ──
+        # ── Status section: 3 key metrics in a row ──
         patch_lines = []
         if _patch_status:
             for key, val in _patch_status.items():
@@ -206,20 +217,13 @@ def build_status_card() -> dict[str, Any]:
                 icon = "[OK]" if val in ("✓", "applied") else ("[!]" if "pending" in str(val) else "[X]")
                 patch_lines.append(f"  {icon} `{key}`: {val}")
         else:
-            patch_lines.append("  [!] 补丁状态不可用（网关未启动或补丁未应用）")
+            patch_lines.append("  [!] 补丁状态不可用")
 
         ctrl_ready = ctrl.enabled and ctrl._client_ok()
         creds_status = "已就绪" if ctrl_ready else "未就绪"
         active_count = sum(1 for s in ctrl._sessions.values() if not s.is_terminal_phase)
 
         from .. import __version__ as plugin_version
-
-        status_text = (
-            f"**版本**: v{plugin_version}\n"
-            f"**飞书客户端**: {creds_status}\n"
-            f"**活跃会话**: {active_count}\n\n"
-            f"**补丁应用状态**:\n" + "\n".join(patch_lines)
-        )
 
         # ── Config section (for collapsible panel) ──
         config_lines = [
@@ -243,7 +247,6 @@ def build_status_card() -> dict[str, Any]:
 
         config_text = "当前生效配置（修改 config.yaml 后发送 /aowen config reload 生效）：\n\n" + "\n".join(config_lines)
 
-        # ── Build card with collapsible panel for config ──
         return {
             "schema": "2.0",
             "config": {"update_multi": True},
@@ -253,22 +256,31 @@ def build_status_card() -> dict[str, Any]:
             },
             "body": {
                 "elements": [
+                    # 3 key metrics in a row, stretch on mobile
                     {
-                        "tag": "div",
-                        "text": {"tag": "lark_md", "content": status_text},
+                        "tag": "column_set",
+                        "flex_mode": "stretch",
+                        "columns": [
+                            {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                                {"tag": "div", "text": {"tag": "lark_md", "content": f"**版本**\nv{plugin_version}"}},
+                            ]},
+                            {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                                {"tag": "div", "text": {"tag": "lark_md", "content": f"**飞书客户端**\n{creds_status}"}},
+                            ]},
+                            {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                                {"tag": "div", "text": {"tag": "lark_md", "content": f"**活跃会话**\n{active_count}"}},
+                            ]},
+                        ],
                     },
+                    {"tag": "hr"},
+                    {"tag": "div", "text": {"tag": "lark_md", "content": "**补丁应用状态**:\n" + "\n".join(patch_lines)}},
                     {"tag": "hr"},
                     {
                         "tag": "collapsible_panel",
                         "expanded": False,
-                        "header": {
-                            "title": {"tag": "plain_text", "content": "当前配置（点击展开）"},
-                        },
+                        "header": {"title": {"tag": "plain_text", "content": "当前配置（点击展开）"}},
                         "elements": [
-                            {
-                                "tag": "div",
-                                "text": {"tag": "lark_md", "content": config_text},
-                            },
+                            {"tag": "div", "text": {"tag": "lark_md", "content": config_text}},
                         ],
                     },
                 ],
@@ -285,43 +297,67 @@ def build_status_card() -> dict[str, Any]:
 
 
 def build_help_card() -> dict[str, Any]:
-    """Build help card listing all /aowen commands."""
+    """Build help card with responsive column_set layout.
+
+    Each command is a row with command name + description side by side,
+    stacking vertically on mobile via flex_mode=stretch.
+    """
     commands = [
-        ("`/aowen help`", "显示本帮助信息"),
-        ("`/aowen status`", "查看插件状态 + 当前配置（折叠面板）"),
-        ("`/aowen monitor`", "查看监控面板（卡片创建数、API 调用数等）"),
-        ("`/aowen monitor reset`", "重置监控统计计数器"),
-        ("`/aowen config reload`", "重新加载配置文件（改完 config.yaml 后执行）"),
-        ("`/aowen`", "同 `/aowen help`"),
+        ("/aowen help", "显示本帮助信息"),
+        ("/aowen status", "查看插件状态 + 当前配置（折叠面板）"),
+        ("/aowen monitor", "查看监控面板（卡片创建数、API 调用数等）"),
+        ("/aowen monitor reset", "重置监控统计计数器"),
+        ("/aowen config reload", "修改 config.yaml 后重新加载配置立即生效"),
+        ("/aowen", "同 /aowen help"),
     ]
-    command_lines = [f"  • {cmd} — {desc}" for cmd, desc in commands]
+
+    # Build column_set for each command: left=command, right=description
+    elements: list[dict] = [
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"**hermes-lark-streaming** v{_get_version()}\n\n所有命令以 `/aowen` 开头，不经过 Hermes AI，直接由插件处理：",
+            },
+        },
+        {"tag": "hr"},
+    ]
+
+    for cmd, desc in commands:
+        elements.append({
+            "tag": "column_set",
+            "flex_mode": "stretch",
+            "columns": [
+                {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "elements": [
+                        {"tag": "div", "text": {"tag": "lark_md", "content": f"`{cmd}`"}},
+                    ],
+                },
+                {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 2,
+                    "elements": [
+                        {"tag": "div", "text": {"tag": "lark_md", "content": desc}},
+                    ],
+                },
+            ],
+        })
+
+    elements.append({"tag": "hr"})
+    elements.append({
+        "tag": "div",
+        "text": {"tag": "plain_text", "content": "发送 /aowen <命令名> 使用对应功能"},
+    })
 
     return {
         "schema": "2.0",
         "config": {"update_multi": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": "插件命令帮助"},
-            "template": "blue",
-        },
-        "body": {
-            "elements": [
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": f"**hermes-lark-streaming** v{_get_version()}\n\n所有命令以 `/aowen` 开头，不经过 Hermes AI，直接由插件处理：\n\n" + "\n".join(command_lines),
-                    },
-                },
-                {"tag": "hr"},
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "plain_text",
-                        "content": "发送 /aowen <命令名> 使用对应功能",
-                    },
-                },
-            ],
-        },
+        "header": {"title": {"tag": "plain_text", "content": "插件命令帮助"}, "template": "blue"},
+        "body": {"elements": elements},
     }
 
 
