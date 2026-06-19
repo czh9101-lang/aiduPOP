@@ -828,11 +828,28 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
             )
 
     def _prune_stale_sessions(self) -> None:
+        """v1.1.1: 只清理已终态的过期 session，保护活跃 session.
+
+        之前不检查 state，STREAMING 状态的 session 超过 TTL 也会被清理，
+        导致 AI 回调找不到 session、卡片永远卡在"流式中"。
+
+        现在：
+        - 已终态（COMPLETED/CREATION_FAILED/ABORTED/TERMINATED）+ 超 TTL → 清理
+        - 活跃（STREAMING/COMPLETING/CREATING）+ 超 TTL → 只打日志，不清理
+        """
         now = time.time()
-        stale = [mid for mid, s in self._sessions.items() if mid is not None and now - s.created_at > self._session_ttl]
-        for mid in stale:
-            _logger.warning("pruning stale session: msg=%s", mid[:12])
-            self._cleanup(mid)
+        for mid, s in list(self._sessions.items()):
+            if mid is None or now - s.created_at <= self._session_ttl:
+                continue
+            if s.is_terminal_phase:
+                _logger.warning("pruning stale terminal session: msg=%s", mid[:12])
+                self._cleanup(mid)
+            else:
+                # 活跃 session 超 TTL 只打日志，不清理（避免 AI 回调丢失）
+                _logger.warning(
+                    "HLS: active session over TTL but not terminal, skip cleanup: msg=%s",
+                    mid[:12],
+                )
 
     @staticmethod
     def _on_bg_task_done(fut: ConcurrentFuture) -> None:
