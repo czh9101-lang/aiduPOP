@@ -102,16 +102,12 @@ jobs:
         run: |
           python -m pytest tests/ -v --tb=short --ignore=tests/e2e --ignore=tests/integration --junitxml=unit_test_report.xml 2>&1 | tee unit_test_output.txt
 
-      - name: Run E2E mock tests
-        if: steps.detect.outputs.has_changes == 'true' || inputs.force_tests == true
-        run: |
-          # E2E mock 模式（无 FEISHU_E2E_* 环境变量，自动用 mock server）
-          python -m pytest tests/e2e/ -v --tb=short --junitxml=e2e_mock_report.xml 2>&1 | tee e2e_mock_output.txt
-
-      - name: Run E2E real Feishu tests
+      - name: Run E2E tests (真飞书为主，mock 为辅)
         if: steps.detect.outputs.has_changes == 'true' || inputs.force_tests == true
         env:
           # v1.1.1: 注入 GitHub Secrets 到 E2E 环境变量（映射变量名）
+          # 真飞书为主：大部分测试直接用真飞书 API
+          # mock 为辅：少数需要模拟飞书错误的测试用 mock
           FEISHU_E2E_APP_ID: ${{ secrets.FEISHU_APPID }}
           FEISHU_E2E_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_E2E_CHAT_ID: ${{ secrets.FEISHU_CHAT_ID }}
@@ -119,14 +115,17 @@ jobs:
         run: |
           # 只有 4 个 secrets 都配置了才跑真飞书测试
           if [ -z "$FEISHU_E2E_APP_ID" ] || [ -z "$FEISHU_E2E_APP_SECRET" ] || [ -z "$FEISHU_E2E_CHAT_ID" ] || [ -z "$FEISHU_E2E_OPEN_ID" ]; then
-            echo "⚠️  跳过真飞书 E2E 测试：未配置 FEISHU_APPID/FEISHU_APP_SECRET/FEISHU_CHAT_ID/FEISHU_OPEN_ID secrets"
-            echo "配置方法：GitHub 仓库 → Settings → Secrets and variables → Actions → New repository secret"
+            echo "⚠️  未配置飞书 secrets，降级为 mock 模式"
+            echo "配置方法：GitHub 仓库 → Settings → Secrets → Actions → New repository secret"
+            echo "需要 4 个 secret: FEISHU_APPID / FEISHU_APP_SECRET / FEISHU_CHAT_ID / FEISHU_OPEN_ID"
+            # 降级为 mock 模式（不设环境变量，E2ETestRunner 自动用 mock）
+            python -m pytest tests/e2e/ -v --tb=short --junitxml=e2e_report.xml 2>&1 | tee e2e_output.txt
             exit 0
           fi
-          echo "✅ 检测到飞书凭据，开始真飞书 E2E 测试"
+          echo "✅ 检测到飞书凭据，开始真飞书 E2E 测试（真飞书为主，mock 为辅）"
           # 串行跑（-p no:randomly），避免并发触发飞书 API 限制
           # 飞书 CardKit 流式模式豁免 QPS，但 create/send/close 计入 1000/分 & 50/秒
-          python -m pytest tests/e2e/ -v --tb=short -p no:randomly --junitxml=e2e_real_report.xml 2>&1 | tee e2e_real_output.txt
+          python -m pytest tests/e2e/ -v --tb=short -p no:randomly --junitxml=e2e_report.xml 2>&1 | tee e2e_output.txt
 
       - name: Set test exit code
         if: steps.detect.outputs.has_changes == 'true' || inputs.force_tests == true
@@ -134,7 +133,7 @@ jobs:
         run: |
           # 检查所有测试报告，任一失败则整体失败
           EXIT_CODE=0
-          for report in unit_test_output.txt e2e_mock_output.txt e2e_real_output.txt; do
+          for report in unit_test_output.txt e2e_output.txt; do
             if [ -f "$report" ] && grep -q "FAILED\|ERROR" "$report"; then
               EXIT_CODE=1
               echo "❌ $report 有失败"
@@ -194,11 +193,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify Feishu
-        if: steps.detect.outputs.has_changes == 'true' || inputs.force_tests == true
+        if: always() && (steps.detect.outputs.has_changes == 'true' || inputs.force_tests == true)
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           FEISHU_SECRET: ${{ secrets.FEISHU_SIGN_SECRET }}
-          TEST_EXIT_CODE: ${{ steps.run_tests.outputs.exit_code }}
+          TEST_EXIT_CODE: ${{ steps.run_tests.outputs.exit_code || '1' }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           SERVER_URL: ${{ github.server_url }}
