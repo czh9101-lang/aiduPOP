@@ -339,39 +339,40 @@ class E2ETestRunner:
         *,
         message_id: str = "",
         chat_id: str = "",
+        use_open_id: bool = False,
     ) -> Any:
         """Start a new message session — creates placeholder card.
 
-        In real mode: uses FEISHU_E2E_CHAT_ID from environment, and the
-        anchor message_id obtained automatically during setup(). Each test
-        gets a unique synthetic message_id (the anchor is used as the
-        reply target by the plugin internally).
+        v1.1.1: 新增 use_open_id 参数，True 时用 open_id 发私聊（测试私聊场景）。
+        默认 False，用 chat_id 发群聊。
+
+        In real mode: uses FEISHU_E2E_CHAT_ID or FEISHU_E2E_OPEN_ID from environment.
         In mock mode: uses the provided chat_id/message_id or generates defaults.
         """
         if self._use_real_feishu:
-            chat_id = chat_id or os.environ.get("FEISHU_E2E_CHAT_ID", "")
-            if not chat_id:
-                raise RuntimeError(
-                    "Real Feishu mode requires FEISHU_E2E_CHAT_ID environment variable"
-                )
+            # v1.1.1: 私聊模式用 open_id，群聊模式用 chat_id
+            if use_open_id:
+                chat_id = chat_id or os.environ.get("FEISHU_E2E_OPEN_ID", "")
+                if not chat_id:
+                    raise RuntimeError("Real Feishu mode requires FEISHU_E2E_OPEN_ID for private chat")
+            else:
+                chat_id = chat_id or os.environ.get("FEISHU_E2E_CHAT_ID", "")
+                if not chat_id:
+                    raise RuntimeError("Real Feishu mode requires FEISHU_E2E_CHAT_ID for group chat")
             if not self._real_anchor_message_id:
                 raise RuntimeError(
                     "Real Feishu mode: anchor message_id not obtained during setup. "
                     "Call await runner.setup() first."
                 )
-            # Generate a unique message_id for this test session (used as
-            # the session key in _sessions dict). The anchor_id (reply target)
-            # is set to the REAL anchor message obtained during setup.
             if not message_id:
                 self._real_msg_counter += 1
                 message_id = f"om_e2e_{int(time.time())}_{self._real_msg_counter}"
-            # Use the real anchor as the reply target
             anchor_id = self._real_anchor_message_id
         else:
             if not message_id:
                 message_id = f"om_test_{int(time.time()*1000)}"
             if not chat_id:
-                chat_id = "oc_test_chat"
+                chat_id = "oc_test_chat" if not use_open_id else "ou_test_user"
             anchor_id = message_id
 
         self._controller.on_message_started(
