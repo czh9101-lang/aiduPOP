@@ -1,4 +1,10 @@
-"""飞书通知脚本 — 由 GitHub Actions workflow 调用，环境变量传入参数。"""
+"""飞书通知脚本 — 由 GitHub Actions workflow 调用，环境变量传入参数。
+
+v1.1.1: 卡片美化 + 支持多个测试报告 + 变更文件列表。
+- 读取 unit_test_report.xml + e2e_report.xml 汇总测试结果
+- 读取 changed_files.txt 显示变更文件（最多 10 条）
+- 卡片用 column_set/div/hr/icon 美化，颜色语义化
+"""
 
 import base64
 import hashlib
@@ -23,6 +29,7 @@ try:
 except Exception:
     import sys, traceback
     traceback.print_exc(file=sys.stderr)
+
 # ── 从环境变量读取配置 ──
 
 FEISHU_WEBHOOK = os.environ["FEISHU_WEBHOOK"]
@@ -51,59 +58,66 @@ hmac_code = hmac.new(
 sign = base64.b64encode(hmac_code).decode("utf-8")
 
 
-# ── 解析 JUnit XML，按文件聚合 ──
+# ── 解析多个测试报告 ──
 
-failed_summary = []  # 只收集失败的文件
-skipped_details = []  # 收集跳过的测试名和原因
+failed_summary = []
+skipped_details = []
 total_tests = 0
 total_failures = 0
 total_errors = 0
 total_skipped = 0
 
-try:
-    tree = ET.parse("test_report.xml")
-    root = tree.getroot()
+# v1.1.1: 支持多个报告文件
+_report_files = [
+    ("单元测试", "unit_test_report.xml"),
+    ("E2E 测试", "e2e_report.xml"),
+]
 
-    file_map = {}
-    for tc in root.iter("testcase"):
-        cn = tc.get("classname", "unknown")
-        parts = cn.split(".")
-        if len(parts) >= 2:
-            fname = parts[0] + "/" + parts[1] + ".py"
-        else:
-            fname = cn.replace(".", "/") + ".py"
+for _report_label, _report_file in _report_files:
+    if not os.path.exists(_report_file):
+        continue
+    try:
+        tree = ET.parse(_report_file)
+        root = tree.getroot()
 
-        if fname not in file_map:
-            file_map[fname] = {"total": 0, "fail": 0, "error": 0, "skip": 0}
-        file_map[fname]["total"] += 1
-        if tc.find("failure") is not None:
-            file_map[fname]["fail"] += 1
-        if tc.find("error") is not None:
-            file_map[fname]["error"] += 1
-        if tc.find("skipped") is not None:
-            file_map[fname]["skip"] += 1
-            # 收集跳过原因
-            skip_el = tc.find("skipped")
-            skip_msg = skip_el.get("message", "") if skip_el is not None else ""
-            tc_name = tc.get("name", "unknown")
-            # 类名取最后一段做简短显示
-            short_cn = cn.split(".")[-1] if "." in cn else cn
-            skipped_details.append(f"  • `{short_cn}::{tc_name}` — {skip_msg[:80]}")
+        file_map = {}
+        for tc in root.iter("testcase"):
+            cn = tc.get("classname", "unknown")
+            parts = cn.split(".")
+            if len(parts) >= 2:
+                fname = parts[0] + "/" + parts[1] + ".py"
+            else:
+                fname = cn.replace(".", "/") + ".py"
 
-    for fname, counts in sorted(file_map.items()):
-        total_tests += counts["total"]
-        total_failures += counts["fail"]
-        total_errors += counts["error"]
-        total_skipped += counts["skip"]
+            if fname not in file_map:
+                file_map[fname] = {"total": 0, "fail": 0, "error": 0, "skip": 0}
+            file_map[fname]["total"] += 1
+            if tc.find("failure") is not None:
+                file_map[fname]["fail"] += 1
+            if tc.find("error") is not None:
+                file_map[fname]["error"] += 1
+            if tc.find("skipped") is not None:
+                file_map[fname]["skip"] += 1
+                skip_el = tc.find("skipped")
+                skip_msg = skip_el.get("message", "") if skip_el is not None else ""
+                tc_name = tc.get("name", "unknown")
+                short_cn = cn.split(".")[-1] if "." in cn else cn
+                skipped_details.append(f"  • `{short_cn}::{tc_name}` — {skip_msg[:80]}")
 
-        if counts["fail"] + counts["error"] > 0:
-            detail = f"{counts['total']} ran, {counts['fail']} failed"
-            if counts["error"] > 0:
-                detail += f", {counts['error']} errors"
-            failed_summary.append(f"❌ `{fname}` — {detail}")
+        for fname, counts in sorted(file_map.items()):
+            total_tests += counts["total"]
+            total_failures += counts["fail"]
+            total_errors += counts["error"]
+            total_skipped += counts["skip"]
 
-except Exception as e:
-    failed_summary = [f"⚠️ 无法解析测试报告: {e}"]
+            if counts["fail"] + counts["error"] > 0:
+                detail = f"{counts['total']} ran, {counts['fail']} failed"
+                if counts["error"] > 0:
+                    detail += f", {counts['error']} errors"
+                failed_summary.append(f"❌ `{fname}` — {detail}")
+
+    except Exception as e:
+        failed_summary.append(f"⚠️ 无法解析 {_report_file}: {e}")
 
 
 # ── 状态判定 ──
@@ -111,57 +125,26 @@ except Exception as e:
 passed = TEST_EXIT_CODE == "0"
 status_icon = "✅" if passed else "❌"
 status_text = "PASSED" if passed else "FAILED"
-color = "turquoise" if passed else "red"
+header_color = "turquoise" if passed else "red"
 summary_line = f"{total_tests} tests, {total_failures} failed, {total_skipped} skipped"
 
 
-# ── Actions 日志：打印完整测试输出 ──
+# ── 读取变更文件 ──
 
-print("=" * 60)
-print("📋 完整测试输出:")
-print("=" * 60)
-try:
-    with open("test_output.txt", "r") as f:
-        print(f.read())
-except Exception:
-    print("无法读取 test_output.txt")
-
-if not passed:
-    print("\n" + "=" * 60)
-    print("❌ 失败用例详情:")
-    print("=" * 60)
-    try:
-        tree = ET.parse("test_report.xml")
-        root = tree.getroot()
-        for tc in root.iter("testcase"):
-            failure = tc.find("failure")
-            if failure is not None:
-                name = tc.get("name", "unknown")
-                msg = failure.get("message") or ""
-                text = (failure.text or "")[:500]
-                print(f"\n--- {name} ---")
-                print(f"Message: {msg}")
-                print(text)
-    except Exception as e:
-        print(f"无法解析失败详情: {e}")
-
-print("\n" + "=" * 60)
-print("🔄 变更文件:")
-print("=" * 60)
+changed_files = []
 try:
     with open("changed_files.txt", "r") as f:
-        print(f.read())
+        for line in f:
+            line = line.strip()
+            if line:
+                changed_files.append(line)
 except Exception:
-    print("无变更文件记录")
+    pass
 
-print("\n" + "=" * 60)
-print("📝 提交日志:")
-print("=" * 60)
-try:
-    with open("commit_log.txt", "r") as f:
-        print(f.read())
-except Exception:
-    print("无提交日志")
+# 最多 10 条
+changed_files_display = changed_files[:10]
+if len(changed_files) > 10:
+    changed_files_display.append(f"... 共 {len(changed_files)} 个文件")
 
 
 # ── 读取提交日志 ──
@@ -174,24 +157,20 @@ try:
             if line:
                 commit_lines.append(line)
 except Exception:
-    import sys, traceback
-    traceback.print_exc(file=sys.stderr)
-# ── Gitee MR 合并去重 ──
-# Gitee 合并 MR 时会产生两条 commit：原始 commit 和带 "!N" 前缀的合并 commit，
-# 内容相同但 git 把它们当作两条。去掉 "!N " 前缀后内容一致的只保留一条（优先保留带前缀的）。
+    pass
+
+# Gitee MR 合并去重
 import re as _re
 
 def _strip_mr_prefix(msg: str) -> str:
-    """去掉 Gitee MR 编号前缀，如 '!42 fix: xxx' → 'fix: xxx'"""
     return _re.sub(r"^!\d+\s+", "", msg)
 
-_seen_bare: dict[str, str] = {}  # bare_text → best original line (prefer with !N prefix)
+_seen_bare: dict[str, str] = {}
 for line in commit_lines:
     bare = _strip_mr_prefix(line)
     if bare not in _seen_bare:
         _seen_bare[bare] = line
     else:
-        # Prefer the version with !N prefix (it's more informative)
         existing = _seen_bare[bare]
         if _re.match(r"^!\d+\s+", line) and not _re.match(r"^!\d+\s+", existing):
             _seen_bare[bare] = line
@@ -199,29 +178,70 @@ commit_lines = list(_seen_bare.values())
 
 commit_summary = ""
 if commit_lines:
-    # 飞书卡片单条消息过长会被截断，限制每条 80 字符
     items = [f"> `{c[:80]}`" for c in commit_lines]
     commit_summary = "\n".join(items)
 
-# ── 构建飞书卡片 ──
+
+# ── 构建飞书卡片（v1.1.1 美化版）──
+
+def _metric_col(label: str, value: str, color: str = "default") -> dict:
+    """构建一个指标列."""
+    color_map = {"default": None, "green": "green", "red": "red", "orange": "orange-300"}
+    font_color = color_map.get(color)
+    if font_color:
+        value_md = f"<font color='{font_color}'>**{value}**</font>"
+    else:
+        value_md = f"**{value}**"
+    return {
+        "tag": "div",
+        "text": {
+            "tag": "lark_md",
+            "content": f"<font color='grey'>{label}</font>\n{value_md}",
+        },
+    }
+
 
 elements = [
+    # ── 顶部：版本 + 状态 ──
+    {
+        "tag": "column_set",
+        "flex_mode": "stretch",
+        "columns": [
+            {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                _metric_col("版本", f"v{PLUGIN_VERSION}", "default"),
+            ]},
+            {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                _metric_col("同步", "✅ 已推送", "green"),
+            ]},
+            {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                _metric_col("触发", trigger_label.split("（")[0], "default"),
+            ]},
+        ],
+    },
+    {"tag": "hr"},
+    # ── 测试汇总 ──
     {
         "tag": "div",
         "text": {
             "tag": "lark_md",
-            "content": (
-                f"**版本**: `v{PLUGIN_VERSION}`\n"
-                f"**同步**: ✅ 已推送\n"
-                f"**触发**: {trigger_label}\n"
-                f"**仓库**: {REPO} `master`\n"
-                f"**测试汇总**: {status_icon} {status_text} — {summary_line}"
-            ),
+            "content": f"**测试汇总**: {status_icon} {status_text} — {summary_line}",
         },
     },
 ]
 
-# 提交说明区块
+# ── 变更文件区块 ──
+if changed_files_display:
+    elements.append({"tag": "hr"})
+    file_lines = "\n".join(f"  • `{f}`" for f in changed_files_display)
+    elements.append({
+        "tag": "div",
+        "text": {
+            "tag": "lark_md",
+            "content": f"**🔄 变更文件** ({len(changed_files)}):\n{file_lines}",
+        },
+    })
+
+# ── 提交说明区块 ──
 if commit_summary:
     elements.append({"tag": "hr"})
     elements.append({
@@ -232,21 +252,20 @@ if commit_summary:
         },
     })
 
-# 只有失败时才展示失败文件列表
+# ── 失败详情 ──
 if failed_summary:
     elements.append({"tag": "hr"})
     elements.append({
         "tag": "div",
         "text": {
             "tag": "lark_md",
-            "content": "**❌ 失败脚本**:\n" + "\n".join(failed_summary),
+            "content": "**❌ 失败详情**:\n" + "\n".join(failed_summary),
         },
     })
 
-# 跳过的测试展示原因
+# ── 跳过的测试 ──
 if skipped_details:
     elements.append({"tag": "hr"})
-    # 最多展示 10 条，避免卡片过长
     display_skips = skipped_details[:10]
     if len(skipped_details) > 10:
         display_skips.append(f"  • ... 共 {len(skipped_details)} 条跳过")
@@ -279,11 +298,39 @@ payload = {
                 "tag": "plain_text",
                 "content": "飞书流式卡片插件·动态",
             },
-            "template": color,
+            "template": header_color,
         },
         "elements": elements,
     },
 }
+
+
+# ── Actions 日志 ──
+
+print("=" * 60)
+print("📋 测试输出:")
+print("=" * 60)
+for _label, _file in [("单元测试", "unit_test_output.txt"), ("E2E", "e2e_output.txt")]:
+    try:
+        with open(_file, "r") as f:
+            content = f.read()
+            if content:
+                print(f"\n--- {_label} ---")
+                print(content[-3000:])  # 最多 3000 字符
+    except Exception:
+        pass
+
+print("\n" + "=" * 60)
+print("🔄 变更文件:")
+print("=" * 60)
+for f in changed_files_display:
+    print(f"  {f}")
+
+print("\n" + "=" * 60)
+print("📝 提交日志:")
+print("=" * 60)
+for c in commit_lines:
+    print(f"  {c}")
 
 
 # ── 发送请求 ──
@@ -296,6 +343,6 @@ req = urllib.request.Request(
 )
 try:
     with urllib.request.urlopen(req) as resp:
-        print(f"✅ Feishu notified: {resp.read().decode()}")
+        print(f"\n✅ Feishu notified: {resp.read().decode()}")
 except Exception as e:
-    print(f"❌ Failed to notify Feishu: {e}")
+    print(f"\n❌ Failed to notify Feishu: {e}")
