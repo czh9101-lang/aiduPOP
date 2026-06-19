@@ -40,7 +40,7 @@ class TestSimpleAnswer:
         await runner.feed_answer(session, "Response")
         await runner.complete(session, answer="Response")
 
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
 
     @pytest.mark.asyncio
     async def test_multiple_answer_deltas_concatenated(self, runner):
@@ -99,7 +99,7 @@ class TestReasoningAndTools:
         await runner.complete(session, answer="Here's what I found.")
 
         runner.assert_card_created(session)
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
 
 
 class TestErrorHandling:
@@ -116,7 +116,7 @@ class TestErrorHandling:
 
         # The card should still be created and sealed despite any errors
         runner.assert_card_created(session)
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
 
 
 class TestConcurrency:
@@ -129,20 +129,29 @@ class TestConcurrency:
         In e2e tests we don't have the full patching layer (no _started_msg_ids
         tracking), so we directly call on_message_interrupted to simulate
         the concurrency limit behavior.
+
+        v1.1.1: 真飞书模式下用 session 的真实 message_id 和 chat_id。
         """
-        session1 = await runner.start_message("first", message_id="om_test_first")
+        session1 = await runner.start_message("first")
         await runner.feed_answer(session1, "First response...")
 
-        # Directly invoke the interrupt method (what concurrency limit calls)
+        # 用 session1 的真实 message_id 和 chat_id
         runner.controller.on_interrupted(
-            old_message_id="om_test_first",
-            new_message_id="om_test_second",
-            chat_id="oc_test_chat",
-            anchor_id="om_test_first",
+            old_message_id=session1.message_id,
+            new_message_id=f"{session1.message_id}_new",
+            chat_id=session1.chat_id,
+            anchor_id=session1.anchor_id or session1.message_id,
         )
 
         # Wait for interrupt/seal to complete (async)
-        await asyncio.sleep(1.0)
+        # v1.1.1: 真飞书模式需要更长等待
+        if runner.is_real_mode:
+            for _ in range(20):
+                await asyncio.sleep(0.5)
+                if session1.is_terminal_phase:
+                    break
+        else:
+            await asyncio.sleep(1.0)
 
         # The old session should be in a terminal state
         assert session1.state in ("aborted", "terminated", "completed"), \
@@ -150,11 +159,17 @@ class TestConcurrency:
 
 
 class TestCardStructure:
-    """Test card JSON structure correctness."""
+    """Test card JSON structure correctness.
+
+    v1.1.1: 真飞书模式下无法查询卡片元素内容，这些测试只 mock 模式跑。
+    """
 
     @pytest.mark.asyncio
     async def test_card_has_loading_hint_initially(self, runner):
         """Placeholder card should have a loading hint element."""
+        if runner.is_real_mode:
+            pytest.skip("Card structure inspection only available in mock mode")
+
         from hermes_lark_streaming.cardkit.elements import _LOADING_HINT_ELEMENT_ID
 
         session = await runner.start_message("test")
@@ -166,6 +181,9 @@ class TestCardStructure:
     @pytest.mark.asyncio
     async def test_loading_hint_removed_after_first_content(self, runner):
         """Loading hint should be removed after first content arrives."""
+        if runner.is_real_mode:
+            pytest.skip("Card structure inspection only available in mock mode")
+
         from hermes_lark_streaming.cardkit.elements import _LOADING_HINT_ELEMENT_ID
 
         session = await runner.start_message("test")
@@ -179,6 +197,9 @@ class TestCardStructure:
     @pytest.mark.asyncio
     async def test_answer_element_created(self, runner):
         """Answer element should be created after first answer delta."""
+        if runner.is_real_mode:
+            pytest.skip("Card structure inspection only available in mock mode")
+
         from hermes_lark_streaming.cardkit.elements import ANSWER_ELEMENT_ID
 
         session = await runner.start_message("test")
@@ -222,7 +243,7 @@ class TestRealFeishuMode:
         await runner.complete(session, answer="这是一条来自真飞书 e2e 测试的消息。")
 
         runner.assert_card_created(session)
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
         # Verify answer text is in the session state
         answer = runner.get_answer_text(session)
         assert "真飞书 e2e 测试" in answer, f"Answer not found in session state: {answer!r}"
@@ -241,7 +262,7 @@ class TestRealFeishuMode:
         await runner.complete(session, answer="分析完成，找到了 3 个相关文件。")
 
         runner.assert_card_created(session)
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
 
     @pytest.mark.asyncio
     async def test_real_card_streaming_typewriter(self, runner):
@@ -256,7 +277,7 @@ class TestRealFeishuMode:
         await runner.complete(session, answer="Hello world! This is a streaming test.")
 
         runner.assert_card_created(session)
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
         assert "Hello world" in answer
 
@@ -288,7 +309,7 @@ class TestV111BugFixes:
         runner.controller._client.cardkit_stream_element = original_stream
 
         runner.assert_card_created(session)
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
         # 答案应该通过 batch_update fallback 写入
         answer = runner.get_answer_text(session)
         assert "drain after streaming closed" in answer
@@ -313,7 +334,7 @@ class TestV111BugFixes:
         runner.controller._client.cardkit_stream_element = original_stream
 
         runner.assert_card_created(session)
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
         assert "313 fallback test" in answer
 
@@ -345,8 +366,12 @@ class TestV111SessionManagement:
         await runner.feed_answer(session, "done")
         await runner.complete(session, answer="done")
 
-        # 确认已 COMPLETED
+        # 确认已 COMPLETED（真飞书模式可能需要等待异步封卡完成）
         from hermes_lark_streaming.state.phase import CardPhase
+        for _ in range(20):
+            if runner.controller._sessions[session.message_id].state == CardPhase.COMPLETED:
+                break
+            await asyncio.sleep(0.5)
         assert runner.controller._sessions[session.message_id].state == CardPhase.COMPLETED
 
         # 模拟超时
@@ -366,6 +391,13 @@ class TestV111SessionManagement:
         await runner.feed_answer(session, "answer to be released")
         await runner.complete(session, answer="answer to be released")
 
+        # 真飞书模式：等待封卡完成释放数据
+        if runner.is_real_mode:
+            for _ in range(20):
+                if runner.controller._sessions[session.message_id].unified_state is None:
+                    break
+                await asyncio.sleep(0.5)
+
         # 封卡后 unified_state 应该被释放
         assert runner.controller._sessions[session.message_id].unified_state is None
 
@@ -382,7 +414,7 @@ class TestV111CardLifecycle:
         await runner.complete(session, answer="partial", error_message="AI encountered an error")
 
         runner.assert_card_created(session)
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
 
     @pytest.mark.asyncio
     async def test_card_lifecycle_interrupted(self, runner):
@@ -396,7 +428,7 @@ class TestV111CardLifecycle:
         await runner.complete(session2, answer="second answer")
 
         runner.assert_card_created(session2)
-        runner.assert_card_sealed(session2)
+        await runner.assert_card_sealed(session2)
 
     @pytest.mark.asyncio
     async def test_card_lifecycle_long_answer(self, runner):
@@ -410,7 +442,7 @@ class TestV111CardLifecycle:
         await runner.complete(session, answer=full_answer)
 
         runner.assert_card_created(session)
-        runner.assert_card_sealed(session)
+        await runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
         assert "Chunk 0" in answer
         assert "Chunk 19" in answer
