@@ -201,8 +201,34 @@ def _metric_col(label: str, value: str, color: str = "default") -> dict:
     }
 
 
+def _fold(title, elements_content, *, expanded=False, border_color="grey"):
+    """构建一个折叠面板（collapsible_panel）."""
+    return {
+        "tag": "collapsible_panel",
+        "expanded": expanded,
+        "header": {
+            "title": {"tag": "plain_text", "content": title, "text_color": "grey", "text_size": "notation"},
+            "vertical_align": "center",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "down-small-ccm_outlined",
+                "size": "16px 16px",
+                "color": "grey",
+            },
+            "icon_position": "right",
+            "icon_expanded_angle": -180,
+        },
+        "border": {"color": border_color, "corner_radius": "5px"},
+        "vertical_spacing": "4px",
+        "padding": "8px 8px 8px 8px",
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": elements_content}},
+        ],
+    }
+
+
 elements = [
-    # ── 顶部：版本 + 状态 ──
+    # ── 顶部：版本 + 状态（3 列）──
     {
         "tag": "column_set",
         "flex_mode": "stretch",
@@ -229,63 +255,49 @@ elements = [
     },
 ]
 
-# ── 变更文件区块 ──
+# ── 变更文件（折叠面板）──
 if changed_files_display:
     elements.append({"tag": "hr"})
     file_lines = "\n".join(f"  • `{f}`" for f in changed_files_display)
-    elements.append({
-        "tag": "div",
-        "text": {
-            "tag": "lark_md",
-            "content": f"**🔄 变更文件** ({len(changed_files)}):\n{file_lines}",
-        },
-    })
+    elements.append(_fold(
+        f"🔄 变更文件 ({len(changed_files)})",
+        file_lines,
+        expanded=len(changed_files) <= 3,  # ≤3 个默认展开
+    ))
 
-# ── 提交说明区块 ──
+# ── 提交说明（折叠面板）──
 if commit_summary:
     elements.append({"tag": "hr"})
-    elements.append({
-        "tag": "div",
-        "text": {
-            "tag": "lark_md",
-            "content": f"**📝 提交说明**:\n{commit_summary}",
-        },
-    })
+    elements.append(_fold("📝 提交说明", commit_summary, expanded=False))
 
-# ── 失败详情 ──
+# ── 失败详情（折叠面板，默认展开）──
 if failed_summary:
     elements.append({"tag": "hr"})
-    elements.append({
-        "tag": "div",
-        "text": {
-            "tag": "lark_md",
-            "content": "**❌ 失败详情**:\n" + "\n".join(failed_summary),
-        },
-    })
+    elements.append(_fold(
+        "❌ 失败详情",
+        "\n".join(failed_summary),
+        expanded=True,  # 失败详情默认展开
+        border_color="red",
+    ))
 
-# ── 跳过的测试 ──
+# ── 跳过的测试（折叠面板）──
 if skipped_details:
     elements.append({"tag": "hr"})
     display_skips = skipped_details[:10]
     if len(skipped_details) > 10:
         display_skips.append(f"  • ... 共 {len(skipped_details)} 条跳过")
-    elements.append({
-        "tag": "div",
-        "text": {
-            "tag": "lark_md",
-            "content": f"**⏭️ 跳过的测试** ({total_skipped}):\n" + "\n".join(display_skips),
-        },
-    })
+    elements.append(_fold(
+        f"⏭️ 跳过的测试 ({total_skipped})",
+        "\n".join(display_skips),
+        expanded=False,
+    ))
 
 elements.append({"tag": "hr"})
 elements.append({
-    "tag": "action",
-    "actions": [{
-        "tag": "button",
-        "text": {"tag": "plain_text", "content": "🔗 查看 Actions 详情"},
-        "url": run_url,
-        "type": "primary",
-    }],
+    "tag": "button",
+    "text": {"tag": "plain_text", "content": "🔗 查看 Actions 详情"},
+    "url": run_url,
+    "type": "primary",
 })
 
 payload = {
@@ -293,6 +305,8 @@ payload = {
     "sign": sign,
     "msg_type": "interactive",
     "card": {
+        "schema": "2.0",
+        "config": {"update_multi": True},
         "header": {
             "title": {
                 "tag": "plain_text",
@@ -300,7 +314,7 @@ payload = {
             },
             "template": header_color,
         },
-        "elements": elements,
+        "body": {"elements": elements},
     },
 }
 
