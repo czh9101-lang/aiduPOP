@@ -63,12 +63,12 @@ async def _rate_limit_guard():
     - 单卡片级：10 次/秒
     - create/send/close 计入配额
 
-    测试间加 1 秒延迟，确保非流式调用不密集爆发。
+    v1.1.1: 延迟从 1 秒加到 2 秒，确保不触发限流。
     mock 模式不需要延迟。
     """
     yield
     if _has_real_feishu_creds():
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(2.0)
 
 
 # ── Pytest configuration ──
