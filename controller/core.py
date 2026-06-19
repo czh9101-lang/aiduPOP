@@ -236,8 +236,12 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
             "HLS: on_reasoning msg=%s text=%r current_reasoning_len=%d",
             (message_id or "?")[:12],
             text[:50] if text else "",
-            len(session.unified_state._current_reasoning),
+            len(session.unified_state._current_reasoning) if session.unified_state else 0,
         )
+        # v1.1.1: 真飞书模式下卡片创建可能降级（unified_state=None），加保护
+        if session.unified_state is None:
+            _logger.warning("HLS: on_thinking but unified_state is None, skipping msg=%s", (message_id or "?")[:12])
+            return
         session.unified_state.on_reasoning_delta(text)
         # v1.1.0 (Task 1.3): The _native_reasoning_active flag was
         # removed.  _linear_on_thinking now uses
@@ -283,6 +287,10 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
 
         # v1.1.0 (Task 1.1+1.2): linear is the only path — session.linear
         # and session.unified_state are always set after _do_create_linear_card.
+        # v1.1.1: 真飞书模式下卡片创建可能降级（unified_state=None），加保护
+        if session.unified_state is None:
+            _logger.warning("HLS: on_tool_update but unified_state is None, skipping msg=%s", (message_id or "?")[:12])
+            return
         is_new_tool = status in ("running", "started", "tool.started")
         session.unified_state.on_tool_event(is_new_tool=is_new_tool)
         self._schedule_linear_flush(session)
@@ -312,8 +320,12 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
 
         # v1.1.0 (Task 1.1+1.2): linear is the only path — session.linear
         # and session.unified_state are always set after _do_create_linear_card.
+        # v1.1.1: 真飞书模式下卡片创建可能降级（unified_state=None），加保护
         answer_text = strip_reasoning_tags(text)
         if answer_text:
+            if session.unified_state is None:
+                _logger.warning("HLS: on_answer but unified_state is None, skipping msg=%s", (message_id or "?")[:12])
+                return
             session.unified_state.on_answer_delta(answer_text)
             self._schedule_linear_flush(session)
 

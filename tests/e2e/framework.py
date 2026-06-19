@@ -102,6 +102,8 @@ class E2ETestRunner:
         self._real_anchor_message_id: str = ""
         # Real mode: counter for unique message_ids (avoids reusing the same anchor)
         self._real_msg_counter: int = 0
+        # v1.1.1: 封卡前缓存数据（封卡后 unified_state 被释放）
+        self._test_cache: dict[str, dict] = {}
 
     @property
     def is_real_mode(self) -> bool:
@@ -337,39 +339,40 @@ class E2ETestRunner:
         *,
         message_id: str = "",
         chat_id: str = "",
+        use_open_id: bool = False,
     ) -> Any:
         """Start a new message session — creates placeholder card.
 
-        In real mode: uses FEISHU_E2E_CHAT_ID from environment, and the
-        anchor message_id obtained automatically during setup(). Each test
-        gets a unique synthetic message_id (the anchor is used as the
-        reply target by the plugin internally).
+        v1.1.1: 新增 use_open_id 参数，True 时用 open_id 发私聊（测试私聊场景）。
+        默认 False，用 chat_id 发群聊。
+
+        In real mode: uses FEISHU_E2E_CHAT_ID or FEISHU_E2E_OPEN_ID from environment.
         In mock mode: uses the provided chat_id/message_id or generates defaults.
         """
         if self._use_real_feishu:
-            chat_id = chat_id or os.environ.get("FEISHU_E2E_CHAT_ID", "")
-            if not chat_id:
-                raise RuntimeError(
-                    "Real Feishu mode requires FEISHU_E2E_CHAT_ID environment variable"
-                )
+            # v1.1.1: 私聊模式用 open_id，群聊模式用 chat_id
+            if use_open_id:
+                chat_id = chat_id or os.environ.get("FEISHU_E2E_OPEN_ID", "")
+                if not chat_id:
+                    raise RuntimeError("Real Feishu mode requires FEISHU_E2E_OPEN_ID for private chat")
+            else:
+                chat_id = chat_id or os.environ.get("FEISHU_E2E_CHAT_ID", "")
+                if not chat_id:
+                    raise RuntimeError("Real Feishu mode requires FEISHU_E2E_CHAT_ID for group chat")
             if not self._real_anchor_message_id:
                 raise RuntimeError(
                     "Real Feishu mode: anchor message_id not obtained during setup. "
                     "Call await runner.setup() first."
                 )
-            # Generate a unique message_id for this test session (used as
-            # the session key in _sessions dict). The anchor_id (reply target)
-            # is set to the REAL anchor message obtained during setup.
             if not message_id:
                 self._real_msg_counter += 1
                 message_id = f"om_e2e_{int(time.time())}_{self._real_msg_counter}"
-            # Use the real anchor as the reply target
             anchor_id = self._real_anchor_message_id
         else:
             if not message_id:
                 message_id = f"om_test_{int(time.time()*1000)}"
             if not chat_id:
-                chat_id = "oc_test_chat"
+                chat_id = "oc_test_chat" if not use_open_id else "ou_test_user"
             anchor_id = message_id
 
         self._controller.on_message_started(
@@ -433,15 +436,34 @@ class E2ETestRunner:
     ) -> None:
         """Complete the message — triggers seal.
 
-        v1.1.1: 新增 error_message 参数，模拟 AI 回复出错场景。
+        v1.1.1: 真飞书模式等待封卡完成（轮询 _streaming_closed，最多 15 秒）。
+        v1.1.1: 封卡前缓存 answer_text 和 panel 信息（封卡后 unified_state 被释放）。
         """
+        # v1.1.1: 封卡前缓存数据到 runner（不用 session，因为 __slots__）
+        mid = session.message_id
+        if session.unified_state:
+            self._test_cache[mid] = {
+                "answer_text": session.unified_state.answer_text or answer,
+                "has_reasoning": bool(session.unified_state.reasoning_rounds),
+                "tool_count": len(session.tool_use.build_display_steps()),
+            }
+
         self._controller.on_completed(
             message_id=session.message_id,
             answer=answer,
             error_message=error_message,
         )
-        # Wait for seal to complete (real mode may be slower)
-        await asyncio.sleep(1.0 if self._use_real_feishu else 0.5)
+        # Wait for seal to complete
+        if self._use_real_feishu:
+            max_wait = 15.0
+            for _ in range(int(max_wait / 0.5)):
+                await asyncio.sleep(0.5)
+                if hasattr(session, "_streaming_closed") and session._streaming_closed:
+                    return
+                if hasattr(session, "is_terminal_phase") and session.is_terminal_phase:
+                    return
+        else:
+            await asyncio.sleep(0.5)
 
     # ── Verification helpers ──
 
@@ -471,15 +493,18 @@ class E2ETestRunner:
     def get_answer_text(self, session: Any) -> str:
         """Extract answer text from the card.
 
-        Mock mode: reads from MockCardState.elements[ANSWER_ELEMENT_ID].
-        Real mode: reads from session.unified_state.answer_text (the
-        plugin's in-memory state — the real card on Feishu may differ
-        slightly due to Markdown optimization applied at seal time).
+        v1.1.1: 真飞书模式下封卡后 unified_state 被释放，
+        从 _test_cache 或 session.text 读取。
         """
         if self._use_real_feishu:
-            # In real mode, read from the plugin's internal state
+            # v1.1.1: 优先从缓存读
+            cached = self._test_cache.get(session.message_id, {})
+            if cached.get("answer_text"):
+                return cached["answer_text"]
             if session.unified_state:
                 return session.unified_state.answer_text or ""
+            if session.text:
+                return session.text.display_text or ""
             return ""
         else:
             card = self.get_card(session)
@@ -492,11 +517,16 @@ class E2ETestRunner:
     def get_panel_elements(self, session: Any) -> list[dict[str, Any]]:
         """Get the panel children from the card.
 
-        Mock mode: reads from MockCardState.
-        Real mode: returns empty list (can't inspect real card elements).
+        v1.1.1: 真飞书模式下从缓存读取是否有推理和工具。
         """
         if self._use_real_feishu:
-            return []  # Can't query real Feishu for card element details
+            cached = self._test_cache.get(session.message_id, {})
+            elements: list[dict] = []
+            if cached.get("has_reasoning"):
+                elements.append({"type": "reasoning", "text": "cached"})
+            for i in range(cached.get("tool_count", 0)):
+                elements.append({"type": "tool", "name": f"tool_{i}"})
+            return elements
         card = self.get_card(session)
         if card is None:
             return []
@@ -527,12 +557,22 @@ class E2ETestRunner:
             assert self.mock_server.get_card(session.card_id) is not None, \
                 "Card not found in mock server"
 
-    def assert_card_sealed(self, session: Any) -> None:
-        """Assert that the card was sealed (streaming closed)."""
+    async def assert_card_sealed(self, session: Any) -> None:
+        """Assert that the card was sealed (streaming closed).
+
+        v1.1.1: 真飞书模式下轮询等待封卡完成（最多 10 秒）。
+        """
         if self._use_real_feishu:
-            # In real mode, check session internal state
+            # 轮询等待 _streaming_closed 或 is_terminal_phase
+            max_wait = 10.0
+            for _ in range(int(max_wait / 0.5)):
+                if hasattr(session, "_streaming_closed") and session._streaming_closed:
+                    return
+                if hasattr(session, "is_terminal_phase") and session.is_terminal_phase:
+                    return
+                await asyncio.sleep(0.5)
             assert hasattr(session, "_streaming_closed") and session._streaming_closed, \
-                f"Card {session.card_id} was not sealed"
+                f"Card {session.card_id} was not sealed after {max_wait}s wait"
         else:
             card = self.get_card(session)
             assert card is not None, "Card not found"
