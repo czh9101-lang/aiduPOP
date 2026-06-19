@@ -58,13 +58,14 @@ _logger = logging.getLogger("hermes_lark_streaming")
 def _has_real_feishu_creds() -> bool:
     """Check if real Feishu credentials are available in environment.
 
-    Only 3 variables required: app_id, app_secret, chat_id.
-    message_id is obtained automatically by sending a text message.
+    v1.1.1: 4 variables required: app_id, app_secret, chat_id, open_id.
+    chat_id 用于群聊测试，open_id 用于私聊测试，两个都需要。
     """
     return bool(
         os.environ.get("FEISHU_E2E_APP_ID")
         and os.environ.get("FEISHU_E2E_APP_SECRET")
         and os.environ.get("FEISHU_E2E_CHAT_ID")
+        and os.environ.get("FEISHU_E2E_OPEN_ID")
     )
 
 
@@ -156,6 +157,9 @@ class E2ETestRunner:
     async def _setup_real_client(self, cfg: Any) -> None:
         """Configure controller with REAL FeishuClient.
 
+        v1.1.1: 同时支持 chat_id（群聊）和 open_id（私聊）。
+        自动发 anchor 消息到群聊获取 message_id。
+
         Automatically sends a text message to the test chat to obtain
         an anchor message_id. Cards created during tests will be replies
         to this anchor message.
@@ -165,6 +169,7 @@ class E2ETestRunner:
         app_id = os.environ["FEISHU_E2E_APP_ID"]
         app_secret = os.environ["FEISHU_E2E_APP_SECRET"]
         chat_id = os.environ["FEISHU_E2E_CHAT_ID"]
+        open_id = os.environ.get("FEISHU_E2E_OPEN_ID", "")
         base_url = os.environ.get(
             "FEISHU_E2E_BASE_URL", "https://open.feishu.cn/open-apis"
         )
@@ -174,6 +179,10 @@ class E2ETestRunner:
         cfg.feishu_base_url = base_url
         cfg.env_app_id = app_id
         cfg.env_app_secret = app_secret
+
+        # 保存 chat_id 和 open_id 供测试使用
+        self._real_chat_id = chat_id
+        self._real_open_id = open_id
 
         # Create real FeishuClient
         client = FeishuClient(FeishuClientConfig(
@@ -194,8 +203,9 @@ class E2ETestRunner:
             )
             _logger.info(
                 "HLS e2e: REAL Feishu API ready — anchor message sent "
-                "(app_id=%s..., chat=%s, anchor_msg=%s)",
-                app_id[:8], chat_id[:12], self._real_anchor_message_id[:12],
+                "(app_id=%s..., chat=%s, open_id=%s, anchor_msg=%s)",
+                app_id[:8], chat_id[:12], open_id[:12] if open_id else "(none)",
+                self._real_anchor_message_id[:12],
             )
         except Exception as e:
             raise RuntimeError(
@@ -296,6 +306,29 @@ class E2ETestRunner:
     def controller(self) -> Any:
         return self._controller
 
+    # ── v1.1.1: 时间模拟工具 ──
+
+    def simulate_session_age(self, message_id: str, age_seconds: float) -> bool:
+        """模拟 session 已存活 age_seconds 秒（不改真实时间）.
+
+        用于测试 TTL 超时、_prune_stale_sessions 等场景，
+        避免真等 600 秒。
+
+        修改 session.created_at 和 card_created_at 为 (now - age_seconds)，
+        让 _prune_stale_sessions 和 TTL 延长逻辑认为 session 已超时。
+
+        Returns True if session found and modified, False otherwise.
+        """
+        session = self._controller._sessions.get(message_id)
+        if session is None:
+            return False
+        import time as _time
+        past = _time.time() - age_seconds
+        session.created_at = past
+        if hasattr(session, "card_created_at") and session.card_created_at:
+            session.card_created_at = past
+        return True
+
     # ── Test flow helpers ──
 
     async def start_message(
@@ -391,11 +424,21 @@ class E2ETestRunner:
         )
         await asyncio.sleep(0.15)
 
-    async def complete(self, session: Any, answer: str = "") -> None:
-        """Complete the message — triggers seal."""
+    async def complete(
+        self,
+        session: Any,
+        answer: str = "",
+        *,
+        error_message: str = "",
+    ) -> None:
+        """Complete the message — triggers seal.
+
+        v1.1.1: 新增 error_message 参数，模拟 AI 回复出错场景。
+        """
         self._controller.on_completed(
             message_id=session.message_id,
             answer=answer,
+            error_message=error_message,
         )
         # Wait for seal to complete (real mode may be slower)
         await asyncio.sleep(1.0 if self._use_real_feishu else 0.5)
