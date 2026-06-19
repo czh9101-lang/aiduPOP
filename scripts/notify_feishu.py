@@ -124,9 +124,20 @@ for _report_label, _report_file in _report_files:
 
 passed = TEST_EXIT_CODE == "0"
 status_icon = "✅" if passed else "❌"
-status_text = "PASSED" if passed else "FAILED"
+status_text = "通过" if passed else "失败"
 header_color = "turquoise" if passed else "red"
-summary_line = f"{total_tests} tests, {total_failures} failed, {total_skipped} skipped"
+
+# v1.1.1: 测试汇总含失败/错误(阻塞)/跳过
+summary_parts = [f"{total_tests} 个测试"]
+if total_failures > 0:
+    summary_parts.append(f"{total_failures} 个失败")
+if total_errors > 0:
+    summary_parts.append(f"{total_errors} 个错误(阻塞)")
+if total_skipped > 0:
+    summary_parts.append(f"{total_skipped} 个跳过")
+if not total_failures and not total_errors and not total_skipped:
+    summary_parts.append("全部通过")
+summary_line = " · ".join(summary_parts)
 
 
 # ── 读取变更文件 ──
@@ -271,16 +282,29 @@ if commit_summary:
     elements.append(_fold("📝 提交说明", commit_summary, expanded=False))
 
 # ── 失败详情（折叠面板，默认展开）──
-if failed_summary:
+# v1.1.1: 分开失败(failure)和阻塞(error)
+failure_items = [s for s in failed_summary if s.startswith("❌")]
+error_items = [s for s in failed_summary if s.startswith("⚠️")]
+
+if failure_items:
     elements.append({"tag": "hr"})
     elements.append(_fold(
-        "❌ 失败详情",
-        "\n".join(failed_summary),
+        f"❌ 失败详情 ({total_failures})",
+        "\n".join(failure_items),
         expanded=True,  # 失败详情默认展开
         border_color="red",
     ))
 
-# ── 跳过的测试（折叠面板）──
+if error_items or total_errors > 0:
+    elements.append({"tag": "hr"})
+    elements.append(_fold(
+        f"🚫 阻塞详情 ({total_errors})",
+        "\n".join(error_items) if error_items else "  • 解析报告时出错",
+        expanded=True,  # 阻塞详情默认展开
+        border_color="red",
+    ))
+
+# ── 跳过的测试（折叠面板，有数据才展示）──
 if skipped_details:
     elements.append({"tag": "hr"})
     display_skips = skipped_details[:10]

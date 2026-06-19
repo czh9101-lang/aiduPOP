@@ -211,9 +211,9 @@ class E2ETestRunner:
             )
         except Exception as e:
             raise RuntimeError(
-                f"HLS e2e: failed to send anchor message to chat {chat_id[:12]}. "
-                f"Check that the bot is a member of the chat and has send permission. "
-                f"Error: {e}"
+                f"E2E: 发送群聊 anchor 消息失败 chat={chat_id[:12]}。"
+                f"请检查 bot 是否在群内且有发送权限。"
+                f"错误: {e}"
             ) from e
 
     async def _send_anchor_message(self, client: Any, chat_id: str) -> str:
@@ -245,10 +245,10 @@ class E2ETestRunner:
         resp = await client._client.im.v1.message.acreate(request)
         if not resp.success():
             raise RuntimeError(
-                f"send anchor message failed: code={resp.code} msg={resp.msg}"
+                f"发送 anchor 消息失败: code={resp.code} msg={resp.msg}"
             )
         if not resp.data or not resp.data.message_id:
-            raise RuntimeError("send anchor message: response missing message_id")
+            raise RuntimeError("发送 anchor 消息失败: 响应缺少 message_id")
         return str(resp.data.message_id)
 
     async def _send_private_anchor(self, client: Any, open_id: str) -> str:
@@ -279,10 +279,10 @@ class E2ETestRunner:
         resp = await client._client.im.v1.message.acreate(request)
         if not resp.success():
             raise RuntimeError(
-                f"send private anchor failed: code={resp.code} msg={resp.msg}"
+                f"发送私聊 anchor 消息失败: code={resp.code} msg={resp.msg}"
             )
         if not resp.data or not resp.data.message_id:
-            raise RuntimeError("send private anchor: response missing message_id")
+            raise RuntimeError("发送私聊 anchor 消息失败: 响应缺少 message_id")
         return str(resp.data.message_id)
 
     def _create_mock_client(self) -> Any:
@@ -386,15 +386,15 @@ class E2ETestRunner:
             if use_open_id:
                 chat_id = chat_id or os.environ.get("FEISHU_E2E_OPEN_ID", "")
                 if not chat_id:
-                    raise RuntimeError("Real Feishu mode requires FEISHU_E2E_OPEN_ID for private chat")
+                    raise RuntimeError("真飞书模式需要 FEISHU_E2E_OPEN_ID 环境变量（私聊测试）")
             else:
                 chat_id = chat_id or os.environ.get("FEISHU_E2E_CHAT_ID", "")
                 if not chat_id:
-                    raise RuntimeError("Real Feishu mode requires FEISHU_E2E_CHAT_ID for group chat")
+                    raise RuntimeError("真飞书模式需要 FEISHU_E2E_CHAT_ID 环境变量（群聊测试）")
             if not self._real_anchor_message_id:
                 raise RuntimeError(
-                    "Real Feishu mode: anchor message_id not obtained during setup. "
-                    "Call await runner.setup() first."
+                    "真飞书模式: setup 时未获取到 anchor message_id。"
+                    "请先调用 await runner.setup()。"
                 )
             if not message_id:
                 self._real_msg_counter += 1
