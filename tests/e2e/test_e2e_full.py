@@ -1,9 +1,9 @@
 """End-to-end tests — full message → card pipeline.
 
-v1.1.1: 精简测试，真飞书为主，mock 为辅。
-- 核心流程：基本答案/推理+工具/多段答案/错误/中断（群聊 + 私聊各一套）
-- Bug 验证：300309/300313 fallback/prune/release
-- 卡片结构：mock 专属（真飞书无法查元素）
+v1.1.1: 群聊为主，私聊覆盖核心流程。
+- 核心流程（TestCoreFlow）：群聊 + 私聊各跑一遍
+- 其他测试：只跑群聊（和聊天场景无关，不需要重复私聊）
+- 卡片结构：mock 专属
 
 测试间自动加 2 秒延迟（真飞书模式）避免触发飞书 API 限流。
 """
@@ -13,14 +13,21 @@ from __future__ import annotations
 import asyncio
 import pytest
 
+# v1.1.1: 只有核心流程参数化群聊+私聊
+_CHAT_MODES = [
+    pytest.param(False, id="群聊"),
+    pytest.param(True, id="私聊"),
+]
+
 
 class TestCoreFlow:
-    """核心流程测试——群聊场景."""
+    """核心流程测试——群聊 + 私聊各跑一遍."""
 
     @pytest.mark.asyncio
-    async def test_basic_answer(self, runner):
+    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
+    async def test_basic_answer(self, runner, use_open_id):
         """基本答案：发消息 → AI 回复 → 卡片显示答案 → 封卡."""
-        session = await runner.start_message("hello")
+        session = await runner.start_message("hello", use_open_id=use_open_id)
         await runner.feed_answer(session, "Hello! How can I help you?")
         await runner.complete(session, answer="Hello! How can I help you?")
 
@@ -30,9 +37,10 @@ class TestCoreFlow:
         assert "Hello! How can I help you?" in answer, f"答案未显示在卡片中: {answer!r}"
 
     @pytest.mark.asyncio
-    async def test_reasoning_and_tools(self, runner):
+    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
+    async def test_reasoning_and_tools(self, runner, use_open_id):
         """推理 + 工具：AI 回复含推理过程和工具调用."""
-        session = await runner.start_message("search and explain")
+        session = await runner.start_message("search and explain", use_open_id=use_open_id)
         await runner.feed_reasoning(session, "Let me search for that.")
         await runner.feed_tool_update(session, tool_name="web_search", status="success", detail="query=test")
         await runner.feed_answer(session, "Here is the result.")
@@ -44,9 +52,10 @@ class TestCoreFlow:
         assert len(panel) > 0, "面板应包含推理和工具元素"
 
     @pytest.mark.asyncio
-    async def test_multiple_answer_deltas(self, runner):
+    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
+    async def test_multiple_answer_deltas(self, runner, use_open_id):
         """多段答案拼接：多个 delta 应拼接成完整答案."""
-        session = await runner.start_message("tell me a story")
+        session = await runner.start_message("tell me a story", use_open_id=use_open_id)
         for chunk in ["Once upon a time, ", "there was a plugin ", "that rendered cards."]:
             await runner.feed_answer(session, chunk)
         await runner.complete(session, answer="Once upon a time, there was a plugin that rendered cards.")
@@ -58,52 +67,8 @@ class TestCoreFlow:
         assert "rendered cards" in answer, "答案缺少结尾部分"
 
 
-class TestPrivateChat:
-    """私聊场景测试——和群聊保持一致的核心流程."""
-
-    @pytest.mark.asyncio
-    async def test_basic_answer(self, runner):
-        """私聊基本答案：用 open_id 发消息 → 卡片显示在私聊."""
-        session = await runner.start_message("private hello", use_open_id=True)
-        await runner.feed_answer(session, "Private reply!")
-        await runner.complete(session, answer="Private reply!")
-
-        runner.assert_card_created(session)
-        await runner.assert_card_sealed(session)
-        answer = runner.get_answer_text(session)
-        assert "Private reply!" in answer, f"私聊答案未显示在卡片中: {answer!r}"
-
-    @pytest.mark.asyncio
-    async def test_reasoning_and_tools(self, runner):
-        """私聊推理 + 工具."""
-        session = await runner.start_message("private search", use_open_id=True)
-        await runner.feed_reasoning(session, "私聊推理中...")
-        await runner.feed_tool_update(session, tool_name="web_search", status="success", detail="query=private")
-        await runner.feed_answer(session, "私聊工具结果.")
-        await runner.complete(session, answer="私聊工具结果.")
-
-        runner.assert_card_created(session)
-        await runner.assert_card_sealed(session)
-        panel = runner.get_panel_elements(session)
-        assert len(panel) > 0, "私聊面板应包含推理和工具元素"
-
-    @pytest.mark.asyncio
-    async def test_multiple_answer_deltas(self, runner):
-        """私聊多段答案拼接."""
-        session = await runner.start_message("private story", use_open_id=True)
-        for chunk in ["私聊第一段 ", "私聊第二段 ", "私聊第三段."]:
-            await runner.feed_answer(session, chunk)
-        await runner.complete(session, answer="私聊第一段 私聊第二段 私聊第三段.")
-
-        runner.assert_card_created(session)
-        await runner.assert_card_sealed(session)
-        answer = runner.get_answer_text(session)
-        assert "私聊第一段" in answer, "私聊答案缺少开头部分"
-        assert "私聊第三段" in answer, "私聊答案缺少结尾部分"
-
-
 class TestBugFixes:
-    """v1.1.1 Bug 修复验证."""
+    """v1.1.1 Bug 修复验证——只跑群聊（和聊天场景无关）."""
 
     @pytest.mark.asyncio
     async def test_drain_300309_fallback(self, runner):
@@ -149,7 +114,7 @@ class TestBugFixes:
 
 
 class TestSessionManagement:
-    """session 管理测试."""
+    """session 管理测试——只跑群聊（和聊天场景无关）."""
 
     @pytest.mark.asyncio
     async def test_prune_skips_streaming_session(self, runner):
@@ -202,7 +167,7 @@ class TestSessionManagement:
 
 
 class TestCardLifecycle:
-    """卡片生命周期测试."""
+    """卡片生命周期测试——只跑群聊（和聊天场景无关）."""
 
     @pytest.mark.asyncio
     async def test_error_recovery(self, runner):
