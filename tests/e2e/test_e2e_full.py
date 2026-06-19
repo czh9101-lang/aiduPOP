@@ -1,12 +1,11 @@
 """End-to-end tests — full message → card pipeline.
 
 v1.1.1: 精简测试，真飞书为主，mock 为辅。
-- 核心流程：基本答案/推理+工具/多段答案/错误/中断
+- 核心流程：基本答案/推理+工具/多段答案/错误/中断（群聊 + 私聊各一套）
 - Bug 验证：300309/300313 fallback/prune/release
-- 私聊场景：open_id 发卡片
 - 卡片结构：mock 专属（真飞书无法查元素）
 
-测试间自动加 1 秒延迟（真飞书模式）避免触发 API 限制。
+测试间自动加 2 秒延迟（真飞书模式）避免触发飞书 API 限流。
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ class TestCoreFlow:
         runner.assert_card_created(session)
         await runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
-        assert "Hello! How can I help you?" in answer, f"Answer not in card: {answer!r}"
+        assert "Hello! How can I help you?" in answer, f"答案未显示在卡片中: {answer!r}"
 
     @pytest.mark.asyncio
     async def test_reasoning_and_tools(self, runner):
@@ -42,7 +41,7 @@ class TestCoreFlow:
         runner.assert_card_created(session)
         await runner.assert_card_sealed(session)
         panel = runner.get_panel_elements(session)
-        assert len(panel) > 0, "Panel should have reasoning and tool elements"
+        assert len(panel) > 0, "面板应包含推理和工具元素"
 
     @pytest.mark.asyncio
     async def test_multiple_answer_deltas(self, runner):
@@ -55,15 +54,15 @@ class TestCoreFlow:
         runner.assert_card_created(session)
         await runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
-        assert "Once upon a time" in answer
-        assert "rendered cards" in answer
+        assert "Once upon a time" in answer, "答案缺少开头部分"
+        assert "rendered cards" in answer, "答案缺少结尾部分"
 
 
 class TestPrivateChat:
-    """私聊场景测试——open_id 发卡片."""
+    """私聊场景测试——和群聊保持一致的核心流程."""
 
     @pytest.mark.asyncio
-    async def test_private_chat_basic_answer(self, runner):
+    async def test_basic_answer(self, runner):
         """私聊基本答案：用 open_id 发消息 → 卡片显示在私聊."""
         session = await runner.start_message("private hello", use_open_id=True)
         await runner.feed_answer(session, "Private reply!")
@@ -72,7 +71,35 @@ class TestPrivateChat:
         runner.assert_card_created(session)
         await runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
-        assert "Private reply!" in answer
+        assert "Private reply!" in answer, f"私聊答案未显示在卡片中: {answer!r}"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_and_tools(self, runner):
+        """私聊推理 + 工具."""
+        session = await runner.start_message("private search", use_open_id=True)
+        await runner.feed_reasoning(session, "私聊推理中...")
+        await runner.feed_tool_update(session, tool_name="web_search", status="success", detail="query=private")
+        await runner.feed_answer(session, "私聊工具结果.")
+        await runner.complete(session, answer="私聊工具结果.")
+
+        runner.assert_card_created(session)
+        await runner.assert_card_sealed(session)
+        panel = runner.get_panel_elements(session)
+        assert len(panel) > 0, "私聊面板应包含推理和工具元素"
+
+    @pytest.mark.asyncio
+    async def test_multiple_answer_deltas(self, runner):
+        """私聊多段答案拼接."""
+        session = await runner.start_message("private story", use_open_id=True)
+        for chunk in ["私聊第一段 ", "私聊第二段 ", "私聊第三段."]:
+            await runner.feed_answer(session, chunk)
+        await runner.complete(session, answer="私聊第一段 私聊第二段 私聊第三段.")
+
+        runner.assert_card_created(session)
+        await runner.assert_card_sealed(session)
+        answer = runner.get_answer_text(session)
+        assert "私聊第一段" in answer, "私聊答案缺少开头部分"
+        assert "私聊第三段" in answer, "私聊答案缺少结尾部分"
 
 
 class TestBugFixes:
@@ -97,7 +124,7 @@ class TestBugFixes:
         runner.assert_card_created(session)
         await runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
-        assert "streaming closed" in answer
+        assert "streaming closed" in answer, "300309 fallback 后答案未写入"
 
     @pytest.mark.asyncio
     async def test_drain_300313_fallback_no_tag(self, runner):
@@ -118,7 +145,7 @@ class TestBugFixes:
         runner.assert_card_created(session)
         await runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
-        assert "313 test" in answer
+        assert "313 test" in answer, "300313 fallback 后答案未写入"
 
 
 class TestSessionManagement:
@@ -133,8 +160,8 @@ class TestSessionManagement:
         assert runner.simulate_session_age(session.message_id, 700) is True
         session2 = await runner.start_message("new message after TTL")
 
-        assert session.message_id in runner.controller._sessions
-        assert session2.message_id in runner.controller._sessions
+        assert session.message_id in runner.controller._sessions, "活跃 session 不应被清理"
+        assert session2.message_id in runner.controller._sessions, "新 session 应存在"
 
     @pytest.mark.asyncio
     async def test_prune_cleans_completed_session(self, runner):
@@ -148,13 +175,14 @@ class TestSessionManagement:
             if runner.controller._sessions[session.message_id].state == CardPhase.COMPLETED:
                 break
             await asyncio.sleep(0.5)
-        assert runner.controller._sessions[session.message_id].state == CardPhase.COMPLETED
+        assert runner.controller._sessions[session.message_id].state == CardPhase.COMPLETED, \
+            "session 应为 COMPLETED 状态"
 
         assert runner.simulate_session_age(session.message_id, 700) is True
         session2 = await runner.start_message("new message")
 
-        assert session.message_id not in runner.controller._sessions
-        assert session2.message_id in runner.controller._sessions
+        assert session.message_id not in runner.controller._sessions, "终态 session 超时应被清理"
+        assert session2.message_id in runner.controller._sessions, "新 session 应存在"
 
     @pytest.mark.asyncio
     async def test_release_session_data_after_seal(self, runner):
@@ -169,7 +197,8 @@ class TestSessionManagement:
                     break
                 await asyncio.sleep(0.5)
 
-        assert runner.controller._sessions[session.message_id].unified_state is None
+        assert runner.controller._sessions[session.message_id].unified_state is None, \
+            "封卡后 unified_state 应被释放"
 
 
 class TestCardLifecycle:
@@ -207,7 +236,7 @@ class TestCardLifecycle:
             await asyncio.sleep(1.0)
 
         assert session1.state in ("aborted", "terminated", "completed"), \
-            f"Old session should be terminal, got state={session1.state}"
+            f"旧 session 应为终态，实际: {session1.state}"
 
     @pytest.mark.asyncio
     async def test_long_answer(self, runner):
@@ -222,8 +251,8 @@ class TestCardLifecycle:
         runner.assert_card_created(session)
         await runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
-        assert "Chunk 0" in answer
-        assert "Chunk 19" in answer
+        assert "Chunk 0" in answer, "长答案缺少开头"
+        assert "Chunk 19" in answer, "长答案缺少结尾"
 
 
 class TestCardStructure:
@@ -233,7 +262,7 @@ class TestCardStructure:
     async def test_card_structure(self, runner):
         """卡片元素结构：loading hint → answer element → 移除 hint."""
         if runner.is_real_mode:
-            pytest.skip("Card structure inspection only available in mock mode")
+            pytest.skip("卡片结构检查仅在 mock 模式下可用（真飞书无法查询卡片元素）")
 
         from hermes_lark_streaming.cardkit.elements import (
             _LOADING_HINT_ELEMENT_ID,
@@ -242,13 +271,13 @@ class TestCardStructure:
 
         session = await runner.start_message("test")
         card = runner.get_card(session)
-        assert card is not None
-        assert _LOADING_HINT_ELEMENT_ID in card.elements, "Loading hint should be in initial card"
+        assert card is not None, "卡片未创建"
+        assert _LOADING_HINT_ELEMENT_ID in card.elements, "初始卡片应包含加载提示"
 
         await runner.feed_answer(session, "Answer text")
         await asyncio.sleep(0.2)
 
         card = runner.get_card(session)
-        assert card is not None
-        assert _LOADING_HINT_ELEMENT_ID not in card.elements, "Loading hint should be removed"
-        assert ANSWER_ELEMENT_ID in card.elements, "Answer element should exist"
+        assert card is not None, "卡片未创建"
+        assert _LOADING_HINT_ELEMENT_ID not in card.elements, "加载提示应被移除"
+        assert ANSWER_ELEMENT_ID in card.elements, "答案元素应存在"
