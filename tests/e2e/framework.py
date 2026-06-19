@@ -251,6 +251,40 @@ class E2ETestRunner:
             raise RuntimeError("send anchor message: response missing message_id")
         return str(resp.data.message_id)
 
+    async def _send_private_anchor(self, client: Any, open_id: str) -> str:
+        """v1.1.1: 发送私聊 anchor 消息，返回 message_id.
+
+        和群聊 anchor 不同，私聊用 receive_id_type=open_id。
+        """
+        import json
+        import time
+        from lark_oapi.api.im.v1 import (
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+        )
+
+        text = f"[e2e private anchor {time.strftime('%H:%M:%S')}]"
+        request = (
+            CreateMessageRequest.builder()
+            .receive_id_type("open_id")
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(open_id)
+                .msg_type("text")
+                .content(json.dumps({"text": text}))
+                .build()
+            )
+            .build()
+        )
+        resp = await client._client.im.v1.message.acreate(request)
+        if not resp.success():
+            raise RuntimeError(
+                f"send private anchor failed: code={resp.code} msg={resp.msg}"
+            )
+        if not resp.data or not resp.data.message_id:
+            raise RuntimeError("send private anchor: response missing message_id")
+        return str(resp.data.message_id)
+
     def _create_mock_client(self) -> Any:
         """Create a mock FeishuClient that delegates to MockFeishuServer."""
         mock_client = MagicMock()
@@ -345,9 +379,7 @@ class E2ETestRunner:
 
         v1.1.1: 新增 use_open_id 参数，True 时用 open_id 发私聊（测试私聊场景）。
         默认 False，用 chat_id 发群聊。
-
-        In real mode: uses FEISHU_E2E_CHAT_ID or FEISHU_E2E_OPEN_ID from environment.
-        In mock mode: uses the provided chat_id/message_id or generates defaults.
+        v1.1.1: 私聊模式下动态发私聊 anchor 消息（群聊 anchor 不能用于私聊 reply）。
         """
         if self._use_real_feishu:
             # v1.1.1: 私聊模式用 open_id，群聊模式用 chat_id
@@ -367,7 +399,20 @@ class E2ETestRunner:
             if not message_id:
                 self._real_msg_counter += 1
                 message_id = f"om_e2e_{int(time.time())}_{self._real_msg_counter}"
-            anchor_id = self._real_anchor_message_id
+
+            # v1.1.1: 私聊模式需要私聊 anchor（群聊 anchor 不能 reply 到私聊）
+            if use_open_id:
+                # 检查是否已有此 open_id 的私聊 anchor
+                if not hasattr(self, "_private_anchors"):
+                    self._private_anchors: dict[str, str] = {}
+                if chat_id not in self._private_anchors:
+                    # 发一条私聊 anchor 消息
+                    self._private_anchors[chat_id] = await self._send_private_anchor(
+                        self._controller._client, chat_id
+                    )
+                anchor_id = self._private_anchors[chat_id]
+            else:
+                anchor_id = self._real_anchor_message_id
         else:
             if not message_id:
                 message_id = f"om_test_{int(time.time()*1000)}"

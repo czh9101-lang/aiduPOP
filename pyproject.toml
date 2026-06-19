@@ -52,4 +52,7 @@ filterwarnings = [
     "ignore:datetime.datetime.utcfromtimestamp:DeprecationWarning",
     # lark_oapi ws client calls asyncio.get_event_loop() at import time
     "ignore:There is no current event loop:DeprecationWarning",
+    # v1.1.1: lark_oapi uses deprecated pkg_resources.declare_namespace
+    "ignore:pkg_resources is deprecated as an API:DeprecationWarning",
+    "ignore:Deprecated call to:DeprecationWarning",
 ]
