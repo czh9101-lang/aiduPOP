@@ -1,9 +1,9 @@
 """End-to-end tests — full message → card pipeline.
 
-v1.1.1: 群聊和私聊场景保持一致，每个测试都跑两遍（群聊 + 私聊）。
-- 核心流程：基本答案/推理+工具/多段答案/错误/中断
-- Bug 验证：300309/300313 fallback/prune/release
-- 卡片结构：mock 专属（真飞书无法查元素）
+v1.1.1: 群聊为主，私聊覆盖核心流程。
+- 核心流程（TestCoreFlow）：群聊 + 私聊各跑一遍
+- 其他测试：只跑群聊（和聊天场景无关，不需要重复私聊）
+- 卡片结构：mock 专属
 
 测试间自动加 2 秒延迟（真飞书模式）避免触发飞书 API 限流。
 """
@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import pytest
 
-# v1.1.1: 群聊和私聊都跑，参数化 use_open_id
+# v1.1.1: 只有核心流程参数化群聊+私聊
 _CHAT_MODES = [
     pytest.param(False, id="群聊"),
     pytest.param(True, id="私聊"),
@@ -68,16 +68,15 @@ class TestCoreFlow:
 
 
 class TestBugFixes:
-    """v1.1.1 Bug 修复验证——群聊 + 私聊各跑一遍."""
+    """v1.1.1 Bug 修复验证——只跑群聊（和聊天场景无关）."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
-    async def test_drain_300309_fallback(self, runner, use_open_id):
+    async def test_drain_300309_fallback(self, runner):
         """drain 遇 300309 改用 batch_update 写入答案."""
         from hermes_lark_streaming.feishu import FeishuAPIError, CARDKIT_STREAMING_CLOSED
         from unittest.mock import AsyncMock
 
-        session = await runner.start_message("test 300309", use_open_id=use_open_id)
+        session = await runner.start_message("test 300309")
         await runner.feed_answer(session, "answer after streaming closed")
 
         original = runner.controller._client.cardkit_stream_element
@@ -93,13 +92,12 @@ class TestBugFixes:
         assert "streaming closed" in answer, "300309 fallback 后答案未写入"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
-    async def test_drain_300313_fallback_no_tag(self, runner, use_open_id):
+    async def test_drain_300313_fallback_no_tag(self, runner):
         """drain 遇 300313 fallback 不带 tag."""
         from hermes_lark_streaming.feishu import FeishuAPIError, CARDKIT_ELEMENT_NOT_FOUND
         from unittest.mock import AsyncMock
 
-        session = await runner.start_message("test 300313", use_open_id=use_open_id)
+        session = await runner.start_message("test 300313")
         await runner.feed_answer(session, "answer for 313 test")
 
         original = runner.controller._client.cardkit_stream_element
@@ -116,26 +114,24 @@ class TestBugFixes:
 
 
 class TestSessionManagement:
-    """session 管理测试——群聊 + 私聊各跑一遍."""
+    """session 管理测试——只跑群聊（和聊天场景无关）."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
-    async def test_prune_skips_streaming_session(self, runner, use_open_id):
+    async def test_prune_skips_streaming_session(self, runner):
         """STREAMING 状态的 session 超 TTL 不被清理."""
-        session = await runner.start_message("long running task", use_open_id=use_open_id)
+        session = await runner.start_message("long running task")
         await runner.feed_answer(session, "partial answer")
 
         assert runner.simulate_session_age(session.message_id, 700) is True
-        session2 = await runner.start_message("new message after TTL", use_open_id=use_open_id)
+        session2 = await runner.start_message("new message after TTL")
 
         assert session.message_id in runner.controller._sessions, "活跃 session 不应被清理"
         assert session2.message_id in runner.controller._sessions, "新 session 应存在"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
-    async def test_prune_cleans_completed_session(self, runner, use_open_id):
+    async def test_prune_cleans_completed_session(self, runner):
         """COMPLETED 状态的 session 超 TTL 正常清理."""
-        session = await runner.start_message("completed task", use_open_id=use_open_id)
+        session = await runner.start_message("completed task")
         await runner.feed_answer(session, "done")
         await runner.complete(session, answer="done")
 
@@ -148,16 +144,15 @@ class TestSessionManagement:
             "session 应为 COMPLETED 状态"
 
         assert runner.simulate_session_age(session.message_id, 700) is True
-        session2 = await runner.start_message("new message", use_open_id=use_open_id)
+        session2 = await runner.start_message("new message")
 
         assert session.message_id not in runner.controller._sessions, "终态 session 超时应被清理"
         assert session2.message_id in runner.controller._sessions, "新 session 应存在"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
-    async def test_release_session_data_after_seal(self, runner, use_open_id):
+    async def test_release_session_data_after_seal(self, runner):
         """封卡后重数据被释放."""
-        session = await runner.start_message("test release data", use_open_id=use_open_id)
+        session = await runner.start_message("test release data")
         await runner.feed_answer(session, "answer to be released")
         await runner.complete(session, answer="answer to be released")
 
@@ -172,13 +167,12 @@ class TestSessionManagement:
 
 
 class TestCardLifecycle:
-    """卡片生命周期测试——群聊 + 私聊各跑一遍."""
+    """卡片生命周期测试——只跑群聊（和聊天场景无关）."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
-    async def test_error_recovery(self, runner, use_open_id):
+    async def test_error_recovery(self, runner):
         """错误恢复：AI 报错 → 卡片仍能封卡."""
-        session = await runner.start_message("trigger error", use_open_id=use_open_id)
+        session = await runner.start_message("trigger error")
         await runner.feed_answer(session, "partial")
         await runner.complete(session, answer="partial", error_message="AI encountered an error")
 
@@ -186,10 +180,9 @@ class TestCardLifecycle:
         await runner.assert_card_sealed(session)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
-    async def test_interrupted_by_new_message(self, runner, use_open_id):
+    async def test_interrupted_by_new_message(self, runner):
         """中断恢复：新消息中断旧消息 → 旧卡 seal."""
-        session1 = await runner.start_message("first message", use_open_id=use_open_id)
+        session1 = await runner.start_message("first message")
         await runner.feed_answer(session1, "first answer")
 
         runner.controller.on_interrupted(
@@ -211,10 +204,9 @@ class TestCardLifecycle:
             f"旧 session 应为终态，实际: {session1.state}"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("use_open_id", _CHAT_MODES)
-    async def test_long_answer(self, runner, use_open_id):
+    async def test_long_answer(self, runner):
         """长答案：20 段 delta 拼接 + 封卡完整."""
-        session = await runner.start_message("long answer test", use_open_id=use_open_id)
+        session = await runner.start_message("long answer test")
         chunks = [f"Chunk {i}. " for i in range(20)]
         full_answer = "".join(chunks)
         for chunk in chunks:
