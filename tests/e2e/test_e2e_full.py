@@ -259,3 +259,158 @@ class TestRealFeishuMode:
         runner.assert_card_sealed(session)
         answer = runner.get_answer_text(session)
         assert "Hello world" in answer
+
+
+# ── v1.1.1 新增：生命周期覆盖测试 ──
+
+
+class TestV111BugFixes:
+    """v1.1.1 Bug 修复的 E2E 测试."""
+
+    @pytest.mark.asyncio
+    async def test_drain_300309_falls_back_to_batch_update(self, runner):
+        """drain 遇 300309 (streaming closed) 改用 batch_update 写入答案."""
+        from hermes_lark_streaming.feishu import FeishuAPIError, CARDKIT_STREAMING_CLOSED
+        from unittest.mock import AsyncMock
+
+        session = await runner.start_message("test 300309 drain")
+        await runner.feed_answer(session, "answer that needs drain after streaming closed")
+
+        # Mock stream_element 抛 300309
+        original_stream = runner.controller._client.cardkit_stream_element
+        runner.controller._client.cardkit_stream_element = AsyncMock(
+            side_effect=FeishuAPIError("test", code=CARDKIT_STREAMING_CLOSED)
+        )
+
+        await runner.complete(session, answer="answer that needs drain after streaming closed")
+
+        # 恢复
+        runner.controller._client.cardkit_stream_element = original_stream
+
+        runner.assert_card_created(session)
+        runner.assert_card_sealed(session)
+        # 答案应该通过 batch_update fallback 写入
+        answer = runner.get_answer_text(session)
+        assert "drain after streaming closed" in answer
+
+    @pytest.mark.asyncio
+    async def test_drain_300313_falls_back_without_tag(self, runner):
+        """drain 遇 300313 fallback 不带 tag（不再报 300312）."""
+        from hermes_lark_streaming.feishu import FeishuAPIError, CARDKIT_ELEMENT_NOT_FOUND
+        from unittest.mock import AsyncMock
+
+        session = await runner.start_message("test 300313 drain")
+        await runner.feed_answer(session, "answer for 313 fallback test")
+
+        # Mock stream_element 抛 300313
+        original_stream = runner.controller._client.cardkit_stream_element
+        runner.controller._client.cardkit_stream_element = AsyncMock(
+            side_effect=FeishuAPIError("test", code=CARDKIT_ELEMENT_NOT_FOUND)
+        )
+
+        await runner.complete(session, answer="answer for 313 fallback test")
+
+        runner.controller._client.cardkit_stream_element = original_stream
+
+        runner.assert_card_created(session)
+        runner.assert_card_sealed(session)
+        answer = runner.get_answer_text(session)
+        assert "313 fallback test" in answer
+
+
+class TestV111SessionManagement:
+    """v1.1.1 session 管理测试."""
+
+    @pytest.mark.asyncio
+    async def test_prune_skips_streaming_session(self, runner):
+        """STREAMING 状态的 session 超 TTL 不被清理."""
+        session = await runner.start_message("long running task")
+        await runner.feed_answer(session, "partial answer")
+
+        # 模拟 session 已存活 700 秒（超过 TTL 600）
+        assert runner.simulate_session_age(session.message_id, 700) is True
+
+        # 触发 prune（发新消息会触发 _prune_stale_sessions）
+        session2 = await runner.start_message("new message after TTL")
+
+        # 旧 session 应该还在（STREAMING 状态不被清理）
+        assert session.message_id in runner.controller._sessions
+        # 新 session 也创建了
+        assert session2.message_id in runner.controller._sessions
+
+    @pytest.mark.asyncio
+    async def test_prune_cleans_completed_session(self, runner):
+        """COMPLETED 状态的 session 超 TTL 正常清理."""
+        session = await runner.start_message("completed task")
+        await runner.feed_answer(session, "done")
+        await runner.complete(session, answer="done")
+
+        # 确认已 COMPLETED
+        from hermes_lark_streaming.state.phase import CardPhase
+        assert runner.controller._sessions[session.message_id].state == CardPhase.COMPLETED
+
+        # 模拟超时
+        assert runner.simulate_session_age(session.message_id, 700) is True
+
+        # 触发 prune
+        session2 = await runner.start_message("new message")
+
+        # 旧 session 应被清理
+        assert session.message_id not in runner.controller._sessions
+        assert session2.message_id in runner.controller._sessions
+
+    @pytest.mark.asyncio
+    async def test_release_session_data_after_seal(self, runner):
+        """封卡成功后重数据被释放（unified_state is None）."""
+        session = await runner.start_message("test release data")
+        await runner.feed_answer(session, "answer to be released")
+        await runner.complete(session, answer="answer to be released")
+
+        # 封卡后 unified_state 应该被释放
+        assert runner.controller._sessions[session.message_id].unified_state is None
+
+
+class TestV111CardLifecycle:
+    """v1.1.1 卡片生命周期完整覆盖."""
+
+    @pytest.mark.asyncio
+    async def test_card_lifecycle_error(self, runner):
+        """错误卡片生命周期：AI 报错 → 卡片仍能封卡."""
+        session = await runner.start_message("trigger error")
+        await runner.feed_answer(session, "partial")
+        # 用 error 参数完成
+        await runner.complete(session, answer="partial", error_message="AI encountered an error")
+
+        runner.assert_card_created(session)
+        runner.assert_card_sealed(session)
+
+    @pytest.mark.asyncio
+    async def test_card_lifecycle_interrupted(self, runner):
+        """中断后卡片状态：新消息中断旧消息 → 旧卡 seal 为中断."""
+        session1 = await runner.start_message("first message")
+        await runner.feed_answer(session1, "first answer")
+
+        # 发新消息中断旧消息
+        session2 = await runner.start_message("second message", chat_id=session1.chat_id)
+        await runner.feed_answer(session2, "second answer")
+        await runner.complete(session2, answer="second answer")
+
+        runner.assert_card_created(session2)
+        runner.assert_card_sealed(session2)
+
+    @pytest.mark.asyncio
+    async def test_card_lifecycle_long_answer(self, runner):
+        """长答案分段写入 + 封卡完整."""
+        session = await runner.start_message("long answer test")
+        # 模拟 20 段 answer delta
+        chunks = [f"Chunk {i}. " for i in range(20)]
+        full_answer = "".join(chunks)
+        for chunk in chunks:
+            await runner.feed_answer(session, chunk)
+        await runner.complete(session, answer=full_answer)
+
+        runner.assert_card_created(session)
+        runner.assert_card_sealed(session)
+        answer = runner.get_answer_text(session)
+        assert "Chunk 0" in answer
+        assert "Chunk 19" in answer

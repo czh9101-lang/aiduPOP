@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.1.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.1.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -52,7 +52,7 @@
 > ```
 > 帮我安装飞书敖式卡片：
 > - Gitee：https://gitee.com/Aowen-Nowor/hermes-lark-streaming/raw/github_sync/docs/AGENT_GUIDE.md
-> - GitHub：https://raw.githubusercontent.com/Aowen-Nowor/hermes-lark-streaming/master/docs/AGENT_GUIDE.md
+> - GitHub：https://raw.githubusercontent.com/Aowen-Nowor/hermes-lark-streaming/github_sync/docs/AGENT_GUIDE.md
 > ```
 
 > 插件会自动读取 `HERMES_HOME` 环境变量定位安装路径（默认 `~/.hermes`），非默认路径下无需额外操作。

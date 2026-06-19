@@ -1,3 +1,20 @@
+## v1.1.1 (2026-06-20)
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| 🐛 Bug Fix | drain 遇 300309（streaming closed）直接 skip 答案丢失 | `linear_mixin.py` drain 阶段 `stream_element` 遇 300309 时直接 skip，没有 fallback，答案内容从未写入卡片 | 统一 fallback：300309 和 300313 都改用 `batch_update` + `partial_update_element`（不带 tag）写入答案 |
+| 🐛 Bug Fix | drain/seal fallback 带 tag 导致 300312 | `partial_update_element` 的 `partial_element` 带了 `tag`/`text_align`/`text_size`，飞书按官方文档拒绝（300312 "tag cannot be updated"） | 去掉 tag 等字段，只保留 `content`；新增 `_fallback_write_answer` 辅助函数统一处理 |
+| 🐛 Bug Fix | `_prune_stale_sessions` 误清理 STREAMING session | 之前不检查 session 状态，只看 `created_at > TTL`，STREAMING 状态的 session 也会被清理，导致 AI 回调找不到 session、卡片永远卡在"流式中" | 只清理 `is_terminal_phase` 的 session，活跃 session 超 TTL 只打日志不清理 |
+| 🔧 Fix | `_release_session_data` 死代码 | 函数定义了释放 `unified_state`/`text`/`tool_use` 重数据的逻辑，但从未被调用，封卡后 session 仍持有 AI 回答全文等重数据 | 封卡成功/失败后调用 `_release_session_data`，释放重数据，减少内存占用 |
+| ✨ Feature | E2E 支持 open_id + chat_id | 之前只支持 `FEISHU_E2E_CHAT_ID`，用户给的 open_id 无法跑真飞书测试 | 新增 `FEISHU_E2E_OPEN_ID`，chat_id 和 open_id 都必填（分别测群聊和私聊） |
+| ✨ Feature | E2E 时间模拟工具 | 长场景（TTL 超时等）测试需要真等 600 秒，耗时过长 | 新增 `simulate_session_age` 方法，修改 `session.created_at` 模拟超时，不用真等 |
+| ✨ Feature | E2E 生命周期覆盖完善 | 现有测试只覆盖基本流程，缺少 300309 fallback/TTL 超时/中断/错误/长答案等场景 | 新增 8 个 E2E 测试：300309/300313 fallback、prune 保护/清理、release 数据、错误/中断/长答案生命周期 |
+| ✨ Feature | sync-from-gitee 工作流支持真飞书 E2E | GitHub Actions 只跑 mock 测试，不跑真飞书测试 | 工作流分三步：单元测试（始终跑）+ E2E mock（始终跑）+ E2E 真飞书（有 secrets 才跑）；注入 4 个 GitHub Secrets 到 E2E 环境变量 |
+| 🔧 Fix | E2E 测试间加延迟避免触发飞书 API 限制 | 飞书 CardKit API 限制 1000 次/分 & 50 次/秒（流式豁免），create/send/close 计入配额 | 真飞书模式下测试间加 1 秒延迟；mock 模式不延迟 |
+| 📝 Docs | README GitHub 链接分支修正 | 智能安装提示的 GitHub 链接指向 `master` 分支，但 GitHub 备份仓库主分支是 `github_sync` | `master` → `github_sync` |
+
+---
+
 ## v1.1.0 (2026-06-17)
 
 | 类型 | 问题/功能 | 原因 | 修复/说明 |

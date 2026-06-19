@@ -192,13 +192,16 @@ def test_on_aborted_normally_aborts_non_completing_session() -> None:
 
 def test_prune_stale_sessions_ignores_none_key_and_prunes_valid_key() -> None:
     ctrl = StreamCardController()
+    # v1.1.1: _prune_stale_sessions 只清理 is_terminal_phase 的 session
     stale_session = SimpleNamespace(
         created_at=time.time() - ctrl._session_ttl - 1,
         flush=_DummyFlush(),
+        is_terminal_phase=True,
     )
     valid_stale_session = SimpleNamespace(
         created_at=time.time() - ctrl._session_ttl - 1,
         flush=_DummyFlush(),
+        is_terminal_phase=True,
     )
     ctrl._sessions[None] = stale_session  # type: ignore[index,assignment]
     ctrl._sessions["msg"] = valid_stale_session  # type: ignore[assignment]
@@ -924,6 +927,8 @@ class TestDoLinearComplete:
         client.cardkit_close_streaming = AsyncMock(
             side_effect=lambda *a, **k: api_calls.append("close"),
         )
+        # v1.1.1: 封卡后 _release_session_data 会置 None，mock 掉以便检查 dirty
+        ctrl._release_session_data = lambda s: None
 
         assert await ctrl._do_linear_complete(session) is True
 
@@ -961,6 +966,8 @@ class TestDoLinearComplete:
         client.cardkit_close_streaming = AsyncMock(
             side_effect=lambda *a, **k: api_calls.append("close"),
         )
+        # v1.1.1: 封卡后 _release_session_data 会置 None，mock 掉以便检查 dirty
+        ctrl._release_session_data = lambda s: None
 
         assert await ctrl._do_linear_complete(session) is True
 
@@ -1210,3 +1217,136 @@ class TestLinearOnThinkingNativeReasoningDedup:
 
         # Answer should be set (no streamed answer yet)
         assert "Here is my answer" in session.unified_state.answer_text
+
+
+# ── v1.1.1 新增测试 ──
+
+
+def test_prune_skips_streaming_session() -> None:
+    """v1.1.1: STREAMING 状态的 session 超 TTL 不被清理（避免 AI 回调丢失）."""
+    from types import SimpleNamespace
+    ctrl = StreamCardController()
+    # STREAMING 状态（活跃），超 TTL
+    active_session = SimpleNamespace(
+        created_at=time.time() - ctrl._session_ttl - 1,
+        flush=_DummyFlush(),
+        is_terminal_phase=False,  # STREAMING 不是终态
+    )
+    ctrl._sessions["active"] = active_session  # type: ignore[assignment]
+
+    ctrl._prune_stale_sessions()
+
+    # 活跃 session 不应被清理
+    assert "active" in ctrl._sessions
+    assert not active_session.flush.completed
+
+
+def test_prune_cleans_terminal_session() -> None:
+    """v1.1.1: COMPLETED 状态的 session 超 TTL 正常清理."""
+    from types import SimpleNamespace
+    ctrl = StreamCardController()
+    # COMPLETED 状态（终态），超 TTL
+    terminal_session = SimpleNamespace(
+        created_at=time.time() - ctrl._session_ttl - 1,
+        flush=_DummyFlush(),
+        is_terminal_phase=True,  # COMPLETED 是终态
+    )
+    ctrl._sessions["done"] = terminal_session  # type: ignore[assignment]
+
+    ctrl._prune_stale_sessions()
+
+    # 终态 session 应被清理
+    assert "done" not in ctrl._sessions
+    assert terminal_session.flush.completed
+
+
+@pytest.mark.asyncio
+async def test_release_session_data_after_seal() -> None:
+    """v1.1.1: 封卡成功后 _release_session_data 释放重数据."""
+    ctrl = _setup_ctrl()
+    session = _make_session("msg_release", linear=True)
+    session.state = STREAMING
+    session.card_id = "card_release"
+    session._creation_stages.add("answer")
+    session._creation_stages.add("hint_removed")
+    session.unified_state.on_answer_delta("test answer")
+    assert session.unified_state is not None
+    ctrl._sessions["msg_release"] = session
+
+    assert await ctrl._do_linear_complete(session) is True
+
+    # 封卡后重数据应被释放
+    assert session.unified_state is None
+    assert session.tool_use is not None  # 被重置为空 ToolUseTracker
+
+
+@pytest.mark.asyncio
+async def test_drain_300309_falls_back_to_batch_update() -> None:
+    """v1.1.1: drain 遇 300309 (streaming closed) 改用 batch_update 写入答案."""
+    ctrl = _setup_ctrl()
+    session = _make_session("msg_309", linear=True)
+    session.state = STREAMING
+    session.card_id = "card_309"
+    session._creation_stages.add("answer")
+    session._creation_stages.add("hint_removed")
+    session.unified_state.on_answer_delta("answer that needs drain")
+    ctrl._sessions["msg_309"] = session
+
+    # stream_element 抛 300309
+    client = ctrl._client
+    client.cardkit_stream_element = AsyncMock(
+        side_effect=FeishuAPIError("test", code=CARDKIT_STREAMING_CLOSED)
+    )
+    # batch_update 应被调用做 fallback
+    client.cardkit_batch_update = AsyncMock()
+    client.cardkit_close_streaming = AsyncMock()
+    ctrl._release_session_data = lambda s: None
+
+    result = await ctrl._do_linear_complete(session)
+
+    # batch_update 应被调用（drain fallback + seal）
+    assert client.cardkit_batch_update.called
+    # 封卡应成功
+    assert result is True
+    # 检查 fallback 调用的 actions 不含 tag
+    for call in client.cardkit_batch_update.call_args_list:
+        actions = call[0][1] if len(call[0]) > 1 else call[1].get("actions", [])
+        for action in actions:
+            if action.get("action") == "partial_update_element":
+                partial = action.get("params", {}).get("partial_element", {})
+                assert "tag" not in partial, "partial_update_element 不应带 tag"
+
+
+@pytest.mark.asyncio
+async def test_drain_300313_falls_back_without_tag() -> None:
+    """v1.1.1: drain 遇 300313 fallback 不带 tag（不再报 300312）."""
+    from hermes_lark_streaming.feishu import CARDKIT_ELEMENT_NOT_FOUND
+    ctrl = _setup_ctrl()
+    session = _make_session("msg_313", linear=True)
+    session.state = STREAMING
+    session.card_id = "card_313"
+    session._creation_stages.add("answer")
+    session._creation_stages.add("hint_removed")
+    session.unified_state.on_answer_delta("answer for 313 test")
+    ctrl._sessions["msg_313"] = session
+
+    # stream_element 抛 300313
+    client = ctrl._client
+    client.cardkit_stream_element = AsyncMock(
+        side_effect=FeishuAPIError("test", code=CARDKIT_ELEMENT_NOT_FOUND)
+    )
+    client.cardkit_batch_update = AsyncMock()
+    client.cardkit_close_streaming = AsyncMock()
+    ctrl._release_session_data = lambda s: None
+
+    result = await ctrl._do_linear_complete(session)
+
+    assert client.cardkit_batch_update.called
+    assert result is True
+    # 所有 partial_update_element 都不应带 tag
+    for call in client.cardkit_batch_update.call_args_list:
+        actions = call[0][1] if len(call[0]) > 1 else call[1].get("actions", [])
+        for action in actions:
+            if action.get("action") == "partial_update_element":
+                partial = action.get("params", {}).get("partial_element", {})
+                assert "tag" not in partial, "partial_update_element 不应带 tag"
