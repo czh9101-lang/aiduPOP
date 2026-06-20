@@ -158,7 +158,7 @@ hermes_lark_streaming:
 
 开启 `inject_time: true` 后，插件在每条用户消息前添加 `<time>HH:MM:SS</time>` 时间前缀，让 AI 无需调用 `date` 工具即可感知当前时间。使用 XML 标签是因为 LLM 普遍将其理解为结构化元数据，不会在回复中模仿。Prefix Cache 安全（每条约 6 tokens）。详见 [SKILL.md](docs/SKILL.md)。
 
-> **注意**：Hermes v0.17.0+ 内置了 `display.message_timestamps.enabled` 功能，会在用户消息前注入人类可读的时间戳（`[Tue 2026-04-28 13:40:53 CEST]`）。**如果开启了 Hermes 的 `message_timestamps`，请关闭插件的 `inject_time`**，避免出现重复的时间戳前缀。建议优先使用官方的 `message_timestamps`，而非插件的 `inject_time`。
+> **注意**：Hermes v0.17.0+ 内置了 `gateway.message_timestamps.enabled` 功能，会在用户消息前注入人类可读的时间戳（`[Tue 2026-04-28 13:40:53 CEST]`）。**如果开启了 Hermes 的 `message_timestamps`，请关闭插件的 `inject_time`**，避免出现重复的时间戳前缀。建议优先使用官方的 `message_timestamps`，而非插件的 `inject_time`。
 
 ### 推理面板显示
 

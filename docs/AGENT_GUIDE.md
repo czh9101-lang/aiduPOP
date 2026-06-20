@@ -126,7 +126,7 @@ feishu:
 | `max_reasoning_rounds` | `20` | 1–100 | 统一面板中推理轮次最大数量（超限折叠） |
 | `card_ttl_sec` | `600` | >0 | 会话 TTL（秒），超时卡片失效 |
 | `flush_interval_ms` | `100` | 70–2000 | 卡片刷新间隔（毫秒） |
-| `inject_time` | `false` | bool | 时间感知模式，自动注入当前时间。Hermes v0.17.0+ 建议用官方 `display.message_timestamps.enabled` 代替 |
+| `inject_time` | `false` | bool | 时间感知模式，自动注入当前时间。Hermes v0.17.0+ 建议用官方 `gateway.message_timestamps.enabled` 代替 |
 | `print_strategy` | `delay` | `fast`/`delay` | 打字机效果策略 |
 | `panel_expanded` | `false` | bool | 完成态卡片面板是否展开 |
 | `streaming_panel_expanded` | `false` | bool | 流式态卡片面板是否展开 |

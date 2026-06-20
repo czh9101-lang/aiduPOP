@@ -158,7 +158,7 @@ hermes_lark_streaming:
 
 When `inject_time: true`, the plugin prepends `<time>HH:MM:SS</time>` to each user message so the AI can perceive the current time without calling `date`. XML tags are used because LLMs understand them as metadata and won't mimic them in output. Prefix-cache safe (~6 tokens/message). See [SKILL.md](docs/SKILL.md) for full details.
 
-> **Note**: Hermes v0.17.0+ provides a built-in `display.message_timestamps.enabled` feature that injects human-readable timestamps (`[Tue 2026-04-28 13:40:53 CEST]`) into user messages. **If you enable Hermes's `message_timestamps`, disable the plugin's `inject_time`** to avoid duplicate timestamp prefixes. The official `message_timestamps` is recommended over `inject_time`.
+> **Note**: Hermes v0.17.0+ provides a built-in `gateway.message_timestamps.enabled` feature that injects human-readable timestamps (`[Tue 2026-04-28 13:40:53 CEST]`) into user messages. **If you enable Hermes's `message_timestamps`, disable the plugin's `inject_time`** to avoid duplicate timestamp prefixes. The official `message_timestamps` is recommended over `inject_time`.
 
 ### Reasoning Panel Display
 
