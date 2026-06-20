@@ -2,7 +2,7 @@ name: Hermes Integration Test
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 10:00 AM Asia/Shanghai (UTC+8)
+    - cron: '33 0 * * *'  # 08:33 AM Asia/Shanghai (UTC+8), 避开整点高负载
   workflow_dispatch:
 
 env:
