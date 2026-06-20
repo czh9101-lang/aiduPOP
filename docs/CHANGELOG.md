@@ -3,7 +3,7 @@
 | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |------|-----------|------|-----------|
 | ✨ Feature | Hermes v0.17.0 兼容性验证 | Hermes v0.17.0 (v2026.6.19) 发布，`_run_agent` 新增 `persist_user_message` 参数，`run_conversation` 内部重构 | 新增 3 个集成测试：验证 `_run_agent` 的 `persist_user_timestamp`/`persist_user_message` 参数存在，验证 `run_conversation` 仍可调用 |
-| 📝 Docs | inject_time 与 message_timestamps 关系说明 | Hermes v0.17.0 内置 `gateway.message_timestamps.enabled`，和插件 `inject_time` 功能重叠 | README/AGENT_GUIDE 补充说明：建议优先使用官方 `message_timestamps`，开启时关闭插件 `inject_time` |
+| 📝 Docs | inject_time 与 message_timestamps 关系说明 | Hermes v0.17.0 内置 `display.message_timestamps.enabled`，和插件 `inject_time` 功能重叠 | README/AGENT_GUIDE 补充说明：建议优先使用官方 `message_timestamps`，开启时关闭插件 `inject_time` |
 | 🔧 Fix | hermes-integration-test cron 时间调整 | `cron: '0 2 * * *'`（整点）GitHub Actions 延迟严重（5 小时） | 改为 `cron: '33 0 * * *'`（UTC 0:33 = 北京时间 8:33），避开整点高负载 |
 
 ---

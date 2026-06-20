@@ -502,83 +502,33 @@ class TestV017SignatureChanges:
 
     def test_run_agent_has_persist_user_timestamp_param(self, hermes_src: Path) -> None:
         """_run_agent 应支持 persist_user_timestamp 参数（v0.16.0+）."""
-        try:
-            import inspect
-            from gateway.run import GatewayRunner
-            sig = inspect.signature(GatewayRunner._run_agent)
-            params = sig.parameters
-            assert "persist_user_timestamp" in params, (
-                "_run_agent 缺少 persist_user_timestamp 参数 "
-                "（插件用 inspect.signature 检测此参数是否存在）"
-            )
-            return
-        except (ImportError, AttributeError, Exception):
-            pass
-        # AST fallback: 检查参数名是否出现在源码中
-        tree = _parse_ast(hermes_src, "gateway.run")
-        if tree is not None:
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if node.name == "_run_agent":
-                        arg_names = [arg.arg for arg in node.args.args]
-                        assert "persist_user_timestamp" in arg_names, (
-                            "_run_agent 缺少 persist_user_timestamp 参数（AST 分析）"
-                        )
-                        return
-        pytest.skip("无法验证 _run_agent 签名（import 和 AST 都失败）")
+        import inspect
+        from gateway.run import GatewayRunner
+        sig = inspect.signature(GatewayRunner._run_agent)
+        assert "persist_user_timestamp" in sig.parameters, (
+            "_run_agent 缺少 persist_user_timestamp 参数 "
+            "（插件用 inspect.signature 检测此参数是否存在）"
+        )
 
     def test_run_agent_has_persist_user_message_param(self, hermes_src: Path) -> None:
         """_run_agent 应支持 persist_user_message 参数（v0.17.0 新增）."""
-        try:
-            import inspect
-            from gateway.run import GatewayRunner
-            sig = inspect.signature(GatewayRunner._run_agent)
-            params = sig.parameters
-            if "persist_user_message" not in params:
-                pytest.skip(
-                    "_run_agent 无 persist_user_message 参数 "
-                    "（Hermes < v0.17.0，插件用 inspect.signature 自动兼容）"
-                )
-            return
-        except (ImportError, AttributeError, Exception):
-            pass
-        # AST fallback
-        tree = _parse_ast(hermes_src, "gateway.run")
-        if tree is not None:
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if node.name == "_run_agent":
-                        arg_names = [arg.arg for arg in node.args.args]
-                        if "persist_user_message" not in arg_names:
-                            pytest.skip(
-                                "_run_agent 无 persist_user_message 参数 "
-                                "（Hermes < v0.17.0，AST 分析确认）"
-                            )
-                        return
-        pytest.skip("无法验证 _run_agent 签名")
+        import inspect
+        from gateway.run import GatewayRunner
+        sig = inspect.signature(GatewayRunner._run_agent)
+        if "persist_user_message" not in sig.parameters:
+            pytest.skip(
+                "_run_agent 无 persist_user_message 参数 "
+                "（Hermes < v0.17.0，插件用 inspect.signature 自动兼容）"
+            )
 
     def test_run_conversation_still_callable(self, hermes_src: Path) -> None:
         """run_conversation 仍可调用（v0.17.0 重构后验证入口没变）."""
-        # 模块级函数
         try:
             from agent.conversation_loop import run_conversation  # noqa: F401
             return
         except (ImportError, AttributeError):
             pass
-        # AIAgent 方法
-        try:
-            from run_agent import AIAgent
-            assert hasattr(AIAgent, "run_conversation"), (
-                "AIAgent.run_conversation 不存在（v0.17.0 重构可能移除了入口）"
-            )
-            return
-        except (ImportError, AttributeError):
-            pass
-        # AST fallback
-        tree = _parse_ast(hermes_src, "agent.conversation_loop")
-        if tree is not None:
-            assert _ast_module_has_function(tree, "run_conversation"), (
-                "agent.conversation_loop.run_conversation 不存在（AST 分析）"
-            )
-            return
-        pytest.skip("无法验证 run_conversation 可调用性")
+        from run_agent import AIAgent
+        assert hasattr(AIAgent, "run_conversation"), (
+            "AIAgent.run_conversation 不存在（v0.17.0 重构可能移除了入口）"
+        )
