@@ -1,3 +1,12 @@
+## v1.1.3 (2026-06-21)
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| 🐛 Bug Fix (P0) | CardKit 创建失败降级到 IM 卡片后内容全丢 | 降级代码设 `linear=False` + `unified_state=None`，导致 on_answer/on_thinking 直接跳过，内容从未写入卡片；_do_linear_complete 检查 `card_id=None` 直接返回 False | 降级时保留 `unified_state` 和 `linear=True`；新增 `_do_im_fallback_flush` 用 `update_card`（IM PATCH）全量更新内容；新增 `_do_im_fallback_seal` 用 `update_card` 封卡；_do_linear_complete 的 `card_id=None` 检查跳过 IM 降级模式 |
+| ✨ Feature | IM 降级测试覆盖 | 之前没有任何测试覆盖 CardKit 创建失败后的内容写入路径，`test_cardkit_failure_falls_back` 只验证降级设置（还断言 `unified_state is None` 验证了 bug 存在） | 新增 `TestIMFallbackPath` 5 个测试：保留 unified_state / on_answer 写入 / flush 用 update_card / 封卡用 update_card / on_thinking 写入 |
+
+---
+
 ## v1.1.2 (2026-06-20)
 
 | 类型 | 问题/功能 | 原因 | 修复/说明 |

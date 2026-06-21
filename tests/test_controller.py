@@ -280,6 +280,9 @@ def _make_session(msg_id: str = "msg_123", *, linear: bool = False) -> CardSessi
     if linear:
         session.linear = True
         session.unified_state = UnifiedLinearState()
+        # v1.1.3: CardKit 正常路径需要 use_cardkit=True
+        # 否则会被 _do_unified_flush 误判为 IM 降级
+        session.use_cardkit = True
     # v0.12.1: _card_ready must be set so _do_linear_complete doesn't
     # hang for 30 seconds. In production, this is set by
     # _do_create_linear_card (the non-linear _do_create_card was
@@ -476,10 +479,13 @@ class TestDoCreateLinearCard:
 
         await ctrl._do_create_linear_card(session)
 
-        assert session.linear is False
-        assert session.unified_state is None
+        # v1.1.3: IM 降级时保留 unified_state 和 linear=True
+        # 旧代码设 linear=False + unified_state=None 导致内容写入通道断裂
+        assert session.linear is True  # 不再设 False
+        assert session.unified_state is not None  # 不再设 None
         assert session.use_cardkit is False
         assert session.state == STREAMING
+        assert session.card_msg_id is not None  # IM 卡片发送成功
 
     @pytest.mark.asyncio
     async def test_generic_failure_marks_failed(self) -> None:
@@ -1350,3 +1356,120 @@ async def test_drain_300313_falls_back_without_tag() -> None:
             if action.get("action") == "partial_update_element":
                 partial = action.get("params", {}).get("partial_element", {})
                 assert "tag" not in partial, "partial_update_element 不应带 tag"
+
+
+# ── v1.1.3: IM 降级场景测试 ──
+
+
+class TestIMFallbackPath:
+    """v1.1.3: CardKit 创建失败降级到 IM 卡片的内容写入测试.
+
+    之前 IM 降级时 unified_state=None 导致内容全丢，
+    现在 IM 降级保留 unified_state，用 update_card 全量更新内容。
+    """
+
+    @pytest.mark.asyncio
+    async def test_im_fallback_preserves_unified_state(self) -> None:
+        """CardKit 创建失败后 unified_state 保留（不再设 None）."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._client.cardkit_create = AsyncMock(
+            side_effect=FeishuAPIError("fail", code=230099)
+        )
+        session = _make_session("msg_im1", linear=True)
+        ctrl._sessions["msg_im1"] = session
+
+        await ctrl._do_create_linear_card(session)
+
+        assert session.use_cardkit is False
+        assert session.linear is True  # 保留 linear=True
+        assert session.unified_state is not None  # 保留 unified_state
+        assert session.card_msg_id is not None  # IM 卡片发送了
+
+    @pytest.mark.asyncio
+    async def test_im_fallback_on_answer_writes_content(self) -> None:
+        """IM 降级后 on_answer 能写入 unified_state（不跳过）."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._client.cardkit_create = AsyncMock(
+            side_effect=FeishuAPIError("fail", code=230099)
+        )
+        session = _make_session("msg_im2", linear=True)
+        ctrl._sessions["msg_im2"] = session
+
+        await ctrl._do_create_linear_card(session)
+        # 模拟 AI 回答
+        ctrl.on_answer(message_id="msg_im2", text="Hello from AI")
+
+        assert session.unified_state is not None
+        assert "Hello from AI" in session.unified_state.answer_text
+        assert session.unified_state.answer_dirty is True
+
+    @pytest.mark.asyncio
+    async def test_im_fallback_flush_uses_update_card(self) -> None:
+        """IM 降级 flush 用 update_card（IM PATCH），不用 stream_element."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._client.cardkit_create = AsyncMock(
+            side_effect=FeishuAPIError("fail", code=230099)
+        )
+        session = _make_session("msg_im3", linear=True)
+        ctrl._sessions["msg_im3"] = session
+
+        await ctrl._do_create_linear_card(session)
+        ctrl.on_answer(message_id="msg_im3", text="Answer content")
+
+        # 手动触发 flush
+        await ctrl._do_unified_flush(session)
+
+        # update_card 应被调用（IM PATCH）
+        ctrl._client.update_card.assert_called_once()
+        # stream_element 不应被调用（IM 卡片不能用）
+        ctrl._client.cardkit_stream_element.assert_not_called()
+        # batch_update 不应被调用
+        ctrl._client.cardkit_batch_update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_im_fallback_complete_uses_update_card(self) -> None:
+        """IM 降级封卡用 update_card 写最终内容，不走 preservative_seal."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._client.cardkit_create = AsyncMock(
+            side_effect=FeishuAPIError("fail", code=230099)
+        )
+        ctrl._release_session_data = lambda s: None  # mock 掉释放
+        # 不预设 state=STREAMING，让 _do_create_linear_card 从 IDLE 开始
+        session = _make_session("msg_im4", linear=True)
+        ctrl._sessions["msg_im4"] = session
+
+        await ctrl._do_create_linear_card(session)
+        assert session.use_cardkit is False  # 确认走了 IM 降级
+        assert session.state == STREAMING
+
+        # 直接设置 answer_text（不走 on_answer 避免 dirty 标记）
+        session.unified_state.answer_text = "Final answer"
+        session.unified_state.answer_dirty = False  # 避免 drain 循环
+
+        result = await ctrl._do_linear_complete(session)
+
+        assert result is True  # 封卡成功
+        assert session.state == COMPLETED
+        # update_card 应被调用（IM PATCH 封卡）
+        assert ctrl._client.update_card.called
+        # close_streaming 不应被调用（IM 卡片没有流式模式）
+        ctrl._client.cardkit_close_streaming.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_im_fallback_on_thinking_writes_content(self) -> None:
+        """IM 降级后 on_thinking 能写入 unified_state."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._client.cardkit_create = AsyncMock(
+            side_effect=FeishuAPIError("fail", code=230099)
+        )
+        session = _make_session("msg_im5", linear=True)
+        ctrl._sessions["msg_im5"] = session
+
+        await ctrl._do_create_linear_card(session)
+        ctrl.on_thinking(message_id="msg_im5", text="Thinking about this...")
+
+        # on_thinking 可能被 split 成 reasoning 或 answer
+        assert session.unified_state is not None
+        # 至少有内容被写入（reasoning 或 answer）
+        state = session.unified_state
+        assert state.has_current_reasoning or state.answer_text or state.panel_dirty or state.answer_dirty

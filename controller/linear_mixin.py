@@ -241,13 +241,15 @@ class UnifiedControllerMixin:
                 session._creation_stages.discard("panel")  # Panel NOT in initial card
 
             except FeishuAPIError:
-                _logger.info("linear CardKit create failed, falling back to non-linear")
+                _logger.info("linear CardKit create failed, falling back to IM card")
                 card = build_im_fallback_card()
                 card_msg_id = await self._client.reply_card(reply_to, card)
                 session.card_msg_id = card_msg_id
                 session.use_cardkit = False
-                session.linear = False
-                session.unified_state = None
+                # v1.1.3: 保留 unified_state 和 linear=True
+                # 旧代码设 linear=False + unified_state=None 导致内容写入通道断裂
+                # 现在 IM 降级也走线性路径，用 update_card（IM PATCH）全量更新内容
+                session.linear = True
                 session.flush.set_throttle(PATCH_MS)
 
             session.flush.set_card_message_ready(True)
@@ -372,6 +374,81 @@ class UnifiedControllerMixin:
     # Unified flush
     # ===================================================================
 
+    async def _do_im_fallback_flush(self, session: CardSession) -> None:
+        """v1.1.3: IM 降级卡片的 flush——用 update_card（IM PATCH）全量更新。
+
+        当 CardKit 创建失败降级到 IM 卡片时，不能用 stream_element/batch_update
+        （那些需要 CardKit card_id）。改用 update_card（IM PATCH）全量替换卡片内容。
+
+        策略：每次 flush 用 build_gateway_card 构建完整卡片（含当前 answer_text），
+        调 update_card 全量替换。不是流式打字机效果，但内容完整。
+        """
+        state = session.unified_state
+        if state is None:
+            return
+        if not state.answer_dirty and not state.panel_dirty and not state.tool_steps_dirty:
+            return
+
+        assert self._client is not None
+        from ..cardkit.special import build_gateway_card
+
+        # 用当前累积的 answer_text 构建完整卡片
+        content = state.answer_text or "处理中..."
+        card = build_gateway_card(content)
+
+        try:
+            await self._client.update_card(session.card_msg_id, card)
+            state.answer_dirty = False
+            state.panel_dirty = False
+            state.tool_steps_dirty = False
+            _logger.info(
+                "HLS: IM fallback flush OK msg=%s len=%d",
+                (session.message_id or "?")[:12], len(content),
+            )
+        except Exception:
+            _logger.warning("HLS: IM fallback flush failed", exc_info=True)
+
+    async def _do_im_fallback_seal(
+        self,
+        session: CardSession,
+        *,
+        footer_data: dict | None = None,
+        is_error: bool = False,
+        is_aborted: bool = False,
+        error_message: str = "",
+    ) -> bool:
+        """v1.1.3: IM 降级卡片的封卡——用 update_card 写最终内容。
+
+        IM 卡片不需要 close_streaming（没有流式模式），直接用 update_card
+        全量替换为最终内容即可。
+        """
+        assert self._client is not None
+        state = session.unified_state
+
+        try:
+            from ..cardkit.special import build_gateway_card
+            from ..cardkit.md import optimize_markdown_style, _downgrade_tables
+
+            # 构建最终内容
+            if error_message:
+                content = error_message
+            elif state and state.answer_text:
+                content = _downgrade_tables(optimize_markdown_style(state.answer_text)) or state.answer_text
+            else:
+                content = "完成"
+
+            card = build_gateway_card(content)
+            await self._client.update_card(session.card_msg_id, card)
+
+            _logger.info(
+                "HLS: IM fallback seal OK msg=%s len=%d",
+                (session.message_id or "?")[:12], len(content),
+            )
+            return True
+        except Exception as e:
+            _logger.warning("HLS: IM fallback seal failed: %s", e, exc_info=True)
+            return False
+
     async def _do_unified_flush(self, session: CardSession) -> None:
         """Unified panel flush — max 2 API calls per flush cycle.
 
@@ -393,7 +470,14 @@ class UnifiedControllerMixin:
         Phase 4 (complete):
             Handled by ``_preservative_seal``.
         """
-        if session.is_terminal_phase or session.state == COMPLETING or not session.card_id:
+        if session.is_terminal_phase or session.state == COMPLETING:
+            return
+        # v1.1.3: IM 降级模式（use_cardkit=False 但 card_msg_id 有值）
+        # 用 update_card（IM PATCH）全量更新卡片内容
+        if not session.use_cardkit and session.card_msg_id:
+            await self._do_im_fallback_flush(session)
+            return
+        if not session.card_id:
             return
         state = session.unified_state
         if state is None:
@@ -1502,7 +1586,9 @@ class UnifiedControllerMixin:
         except asyncio.TimeoutError:
             _logger.warning("complete: card creation timed out: msg=%s", (session.message_id or "?")[:12])
 
-        if not session.card_id:
+        # v1.1.3: IM 降级模式 card_id 为 None 是正常的（只有 card_msg_id）
+        # 旧代码在这里直接返回 False，导致 IM 降级卡片永远走不到封卡
+        if not session.card_id and not (not session.use_cardkit and session.card_msg_id):
             session.state = CREATION_FAILED
             session.enter_terminal(
                 reason=TerminalReason.CREATION_FAILED,
@@ -1521,15 +1607,25 @@ class UnifiedControllerMixin:
         error_message = getattr(session, "error_message", "")
 
         # ── Step 5: Try preservative seal ──
-        seal_ok = await self._preservative_seal(
-            session,
-            footer_data=footer_data,
-            is_error=is_error,
-            is_aborted=is_aborted,
-            error_message=error_message,
-            footer_fields=self._cfg.footer_fields,
-            footer_show_label=self._cfg.footer_show_label,
-        )
+        # v1.1.3: IM 降级模式用 update_card 封卡（不走 _preservative_seal）
+        if not session.use_cardkit and session.card_msg_id:
+            seal_ok = await self._do_im_fallback_seal(
+                session,
+                footer_data=footer_data,
+                is_error=is_error,
+                is_aborted=is_aborted,
+                error_message=error_message,
+            )
+        else:
+            seal_ok = await self._preservative_seal(
+                session,
+                footer_data=footer_data,
+                is_error=is_error,
+                is_aborted=is_aborted,
+                error_message=error_message,
+                footer_fields=self._cfg.footer_fields,
+                footer_show_label=self._cfg.footer_show_label,
+            )
 
         # ── Summary is already updated in close_streaming ──
         # No separate cardkit_update is needed for summary sync.
