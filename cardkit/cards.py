@@ -285,6 +285,7 @@ def build_unified_complete_card(
     panel_events: list[tuple[str, int]] | None = None,
     max_tool_steps: int = 20,
     max_reasoning_rounds: int = 20,
+    card_trace_id: str = "",
 ) -> dict[str, Any]:
     """Unified panel complete card — single panel for reasoning+tools, plus answer.
 
@@ -362,6 +363,7 @@ def build_unified_complete_card(
     if error_message:
         elements.append(_build_error_panel(
             error_message, is_aborted=is_aborted, expanded=panel_expanded,
+            card_trace_id=card_trace_id,
         ))
 
     # ── Background review panel ──

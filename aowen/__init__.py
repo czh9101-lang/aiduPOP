@@ -55,6 +55,55 @@ _metrics: dict[str, Any] = {
 
 _error_codes: dict[int, int] = {}  # error_code → count
 
+# v1.2.0: 远程诊断——错误事件环形缓冲区（最近 _MAX_DIAGNOSTIC_EVENTS 条）
+# 只存结构化信息（时间、错误码、操作、trace_id），不存消息内容/用户ID/chatID/AI回答
+# 用户发 /aowen diagnose 时生成脱敏诊断报告，方便开发者远程定位问题
+from collections import deque
+_MAX_DIAGNOSTIC_EVENTS = 30
+_diagnostic_events: deque = deque(maxlen=_MAX_DIAGNOSTIC_EVENTS)
+
+
+def record_diagnostic_event(
+    event_type: str,
+    *,
+    code: int = 0,
+    operation: str = "",
+    trace_id: str = "",
+    detail: str = "",
+) -> None:
+    """记录一条诊断事件到环形缓冲区（自动脱敏）.
+
+    v1.2.0: 用于 /aowen diagnose 远程诊断。只存结构化信息，
+    不存消息内容/用户ID/chatID/AI回答文本。detail 字段会截断到 80 字符。
+
+    event_type: "api_error" / "card_failed" / "full_rebuild" / "seal_failed"
+    code: 飞书 API 错误码（如 300309）
+    operation: 飞书 API 操作名（如 "cardkit_stream_element"）
+    trace_id: 卡片 trace_id（msg_id 后6位），用于关联日志
+    detail: 简短描述（会截断，不要放敏感内容）
+    """
+    try:
+        _diagnostic_events.append({
+            "time": time.time(),
+            "type": event_type,
+            "code": code,
+            "operation": operation,
+            "trace": trace_id[:8] if trace_id else "",
+            "detail": detail[:80] if detail else "",
+        })
+    except Exception:
+        pass
+
+
+def get_diagnostic_events() -> list[dict[str, Any]]:
+    """获取诊断事件快照（拷贝，避免外部修改）."""
+    return list(_diagnostic_events)
+
+
+def clear_diagnostic_events() -> None:
+    """清空诊断事件（/aowen diagnose reset 用）."""
+    _diagnostic_events.clear()
+
 
 def record_card_created() -> None:
     _metrics["cards_created"] += 1
@@ -64,6 +113,7 @@ def record_card_completed() -> None:
 
 def record_card_failed() -> None:
     _metrics["cards_failed"] += 1
+    record_diagnostic_event("card_failed", detail="卡片封卡失败")
 
 def record_card_aborted() -> None:
     _metrics["cards_aborted"] += 1
@@ -80,9 +130,11 @@ def record_api_error(code: int, operation: str = "") -> None:
     _error_codes[code] = _error_codes.get(code, 0) + 1
     if operation == "cardkit_stream_element":
         _metrics["stream_element_failures"] += 1
+    record_diagnostic_event("api_error", code=code, operation=operation)
 
 def record_full_rebuild() -> None:
     _metrics["full_rebuilds"] += 1
+    record_diagnostic_event("full_rebuild", detail="封卡失败后全量重建")
 
 def set_active_sessions(count: int) -> None:
     _metrics["active_sessions"] = count
@@ -327,10 +379,12 @@ def build_help_card() -> dict[str, Any]:
         ("help", "显示本帮助信息", "info"),
         ("status", "查看插件状态与当前配置", "info"),
         ("monitor", "查看监控面板（卡片数、API 调用等）", "info"),
+        ("diagnose", "生成远程诊断报告（脱敏，发给开发者定位问题）", "info"),
     ]
     action_cmds = [
         ("monitor reset", "重置监控统计计数器", "warning"),
         ("config reload", "修改 config.yaml 后重新加载配置", "warning"),
+        ("diagnose reset", "清空诊断事件记录", "warning"),
     ]
 
     elements: list[dict] = [
@@ -588,6 +642,149 @@ def build_monitor_card() -> dict[str, Any]:
     }
 
 
+def build_diagnose_card() -> dict[str, Any]:
+    """v1.2.0: 构建远程诊断报告卡片.
+
+    用户发 /aowen diagnose 时生成，包含：
+    - 环境：插件版本/Hermes 版本/Python/运行时长
+    - 补丁状态：6 个补丁点
+    - 最近错误事件：环形缓冲区最近 30 条（脱敏，无消息内容/用户ID/chatID）
+    - 诊断 ID：本次诊断唯一 ID，用户报给开发者关联日志
+
+    隐私保护：所有 ID 截断，不含消息内容/AI回答/用户ID/chatID。
+    用户主动发命令才生成，不自动上报。
+    """
+    import sys as _sys
+    from ..patching import _patch_status
+    from .. import __version__
+
+    diag_id = f"diag_{int(time.time())}_{_diagnostic_id_counter()}"
+
+    # ── 环境信息 ──
+    env_elements = [
+        _two_col(
+            _metric_block("插件版本", f"v{__version__}", icon_key="info", color="blue"),
+            _metric_block("Python", _sys.version.split()[0], icon_key="info", color="default"),
+        ),
+    ]
+    # Hermes 版本（从 patch_status 取）
+    if _patch_status and "hermes_layout" in _patch_status:
+        hv = _patch_status["hermes_layout"].get("hermes_version", "?")
+        env_elements.append(_two_col(
+            _metric_block("Hermes 版本", hv, icon_key="info", color="default"),
+            _metric_block("运行时长", get_metrics()["uptime_human"], icon_key="warning", color="default"),
+        ))
+
+    # ── 补丁状态 ──
+    patch_elements: list[dict] = []
+    if _patch_status:
+        for key in ("GatewayRunner", "conversation_loop", "AIAgent", "cron", "background", "FeishuAdapter"):
+            val = _patch_status.get(key, "?")
+            if val == "✓" or val == "applied":
+                patch_elements.append(_icon_div("success", f"`{key}` ✓", icon_color="green", text_size="notation"))
+            elif "pending" in str(val):
+                patch_elements.append(_icon_div("warning", f"`{key}` ⚠ {val}", icon_color="orange", text_size="notation"))
+            else:
+                patch_elements.append(_icon_div("locked", f"`{key}` ✗ {val}", icon_color="red", text_size="notation"))
+    else:
+        patch_elements.append(_icon_div("warning", "补丁状态不可用（网关未启动）", icon_color="orange", text_size="notation"))
+
+    # ── 最近错误事件 ──
+    events = get_diagnostic_events()
+    m = get_metrics()
+    event_elements: list[dict] = []
+    if not events:
+        event_elements.append(_icon_div("success", "无近期错误事件", icon_color="green", text_size="notation"))
+    else:
+        # 倒序显示（最新在上）
+        for ev in reversed(events[-15:]):  # 只显示最近15条，避免卡片过长
+            t = time.strftime("%m-%d %H:%M:%S", time.localtime(ev["time"]))
+            etype = ev["type"]
+            code = ev["code"]
+            trace = ev["trace"]
+            detail = ev["detail"]
+            op = ev["operation"]
+            # 颜色：api_error 红 / card_failed 红 / full_rebuild 橙
+            color = "red" if etype in ("api_error", "card_failed", "seal_failed") else "orange"
+            icon = "locked" if color == "red" else "warning"
+            line = f"`{t}` {etype}"
+            if code:
+                line += f" code=`{code}`"
+            if op:
+                line += f" op=`{op}`"
+            if trace:
+                line += f" trace=`{trace}`"
+            if detail:
+                line += f"\n{detail}"
+            event_elements.append(_icon_div(icon, line, icon_color=color, text_size="notation"))
+
+    # ── 错误码分布 ──
+    error_codes = m.get("error_codes", {})
+    code_elements: list[dict] = []
+    if error_codes:
+        for code, count in sorted(error_codes.items(), key=lambda x: -x[1]):
+            code_elements.append(_icon_div(
+                "locked", f"code `{code}`: {count} 次", icon_color="red", text_size="notation",
+            ))
+
+    # ── 组装 ──
+    config_elements = [
+        _section_title("环境信息", color="blue"),
+        *env_elements,
+        {"tag": "hr"},
+        _section_title("补丁状态", color="grey"),
+        *patch_elements,
+        {"tag": "hr"},
+        _section_title(f"最近错误事件（共 {len(events)} 条，显示最近 {min(15, len(events))} 条）", color="blue"),
+        *event_elements,
+    ]
+    if code_elements:
+        config_elements.append({"tag": "hr"})
+        config_elements.append(_section_title("错误码分布", color="grey"))
+        config_elements.extend(code_elements)
+
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "远程诊断报告"},
+            "template": "orange",
+        },
+        "body": {
+            "elements": [
+                _three_col(
+                    _metric_block("诊断 ID", diag_id, icon_key="info", color="blue"),
+                    _metric_block("失败", m["cards_failed"], icon_key="locked",
+                                  color="error" if m["cards_failed"] > 0 else "default"),
+                    _metric_block("API 错误", m["api_errors"], icon_key="locked",
+                                  color="error" if m["api_errors"] > 0 else "default"),
+                ),
+                {"tag": "hr"},
+                *config_elements,
+                {"tag": "hr"},
+                _fold("如何使用此报告", [
+                    {"tag": "markdown", "content": (
+                        "1. 截图此卡片或复制**诊断 ID**发送给开发者\n"
+                        "2. 开发者凭诊断 ID 和 trace 关联日志定位问题\n"
+                        "3. 此报告已脱敏，不含消息内容/用户ID/聊天ID\n"
+                        "4. 如需清除记录：`/aowen diagnose reset`"
+                    )},
+                ], expanded=False),
+                _footer_note(
+                    f"生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')} · "
+                    f"发送 `/aowen diagnose` 刷新"
+                ),
+            ],
+        },
+    }
+
+
+def _diagnostic_id_counter() -> str:
+    """生成诊断 ID 的随机后缀（4位十六进制）."""
+    import random
+    return f"{random.randint(0, 0xFFFF):04x}"
+
+
 def build_reset_card() -> dict[str, Any]:
     """Build reset confirmation card — success banner + next-step hint."""
     return {
@@ -798,6 +995,25 @@ def handle_pre_gateway_dispatch(event: Any, gateway: Any = None, **kwargs) -> di
                 _send_card_async(chat_id, build_monitor_card(), "monitor")
                 return _skip("/aowen monitor handled")
 
+        elif subcommand == "diagnose":
+            if sub_arg == "reset":
+                # /aowen diagnose reset — 清空诊断事件
+                clear_diagnostic_events()
+                _send_card_async(chat_id, {
+                    "schema": "2.0",
+                    "config": {"update_multi": True},
+                    "header": {"title": {"tag": "plain_text", "content": "诊断记录已清空"}, "template": "green"},
+                    "body": {"elements": [
+                        _icon_div("success", "诊断事件记录已清空", icon_color="green"),
+                        _footer_note("发送 `/aowen diagnose` 查看诊断报告"),
+                    ]},
+                }, "diagnose_reset")
+                return _skip("/aowen diagnose reset handled")
+            else:
+                # /aowen diagnose
+                _send_card_async(chat_id, build_diagnose_card(), "diagnose")
+                return _skip("/aowen diagnose handled")
+
         else:
             # Unknown command
             _send_card_async(chat_id, _build_unknown_command_card(subcommand), "unknown")
@@ -867,12 +1083,16 @@ __all__ = [
     "record_api_call",
     "record_api_error",
     "record_full_rebuild",
+    "record_diagnostic_event",
+    "get_diagnostic_events",
+    "clear_diagnostic_events",
     "set_active_sessions",
     "get_metrics",
     "build_monitor_card",
     "build_status_card",
     "build_help_card",
     "build_reset_card",
+    "build_diagnose_card",
     "build_interrupt_hint_card",
     "handle_pre_gateway_dispatch",
 ]

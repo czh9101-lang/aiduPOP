@@ -1134,6 +1134,7 @@ class UnifiedControllerMixin:
                     footer_fields=footer_fields,
                     footer_show_label=footer_show_label,
                     existing_elements=session.existing_elements,
+                    card_trace_id=session.card_trace_id,
                 )
             )
 
@@ -1385,6 +1386,7 @@ class UnifiedControllerMixin:
                                 footer_fields=footer_fields,
                                 footer_show_label=footer_show_label,
                                 existing_elements=session.existing_elements,
+                                card_trace_id=session.card_trace_id,
                             )
                         )
                         # batch_update BEFORE close_streaming (same order as try block)
@@ -1784,6 +1786,7 @@ class UnifiedControllerMixin:
                     panel_events=state.panel_events if state else None,
                     max_tool_steps=self._cfg.max_tool_steps,
                     max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                    card_trace_id=session.card_trace_id,
                 )
                 session.sequence += 1
                 assert self._client is not None

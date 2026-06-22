@@ -803,6 +803,9 @@ def _build_error_panel(
         if card_trace_id:
             friendly_en += f"\n\nDebug ID: `{card_trace_id}`"
             friendly_zh += f"\n\n调试 ID: `{card_trace_id}`"
+        # v1.2.0: 提示用户发 /aowen diagnose 获取诊断报告
+        friendly_en += "\n\nSend `/aowen diagnose` to get a diagnostic report for the developer."
+        friendly_zh += "\n\n发送 `/aowen diagnose` 获取诊断报告，发给开发者定位问题。"
 
         tech_detail = error_message.strip() if error_message else ""
         if tech_detail:
@@ -919,6 +922,7 @@ def build_preservative_seal_actions(
     footer_fields: list[list[str]] | None = None,
     footer_show_label: bool = False,
     existing_elements: set[str] | None = None,
+    card_trace_id: str = "",
 ) -> list[dict]:
     """构建保留式封卡的 batch_update actions.
 
@@ -958,6 +962,7 @@ def build_preservative_seal_actions(
                 "target_element_id": _LOADING_ELEMENT_ID,
                 "elements": [_build_error_panel(
                     error_message, is_aborted=is_aborted, expanded=True,
+                    card_trace_id=card_trace_id,
                 )],
             },
         })
