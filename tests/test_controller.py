@@ -1812,3 +1812,41 @@ class TestIMFallbackHeader:
         assert session.state == COMPLETED
         assert "card" in captured
         assert captured["card"]["header"]["template"] == "red"
+
+    @pytest.mark.asyncio
+    async def test_b1_default_path_error_message_passes_is_error_to_seal(self) -> None:
+        """v1.2.0 B1 副作用（正向改善）: 默认路径（关 header）agent 报错时
+        _preservative_seal 收到 is_error=True，footer 显示"出错"而非"已完成".
+
+        v1.1.x: is_error 只看 state，agent 报错时 is_error=False -> footer"已完成"
+        v1.2.0: is_error 兼顾 error_message -> is_error=True -> footer"出错"（与 error panel 一致）
+        """
+        ctrl = _setup_ctrl(linear=True)
+        # header 关闭（默认）
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_b1d", linear=True)
+        ctrl._sessions["msg_b1d"] = session
+
+        await ctrl._do_create_linear_card(session)
+        session.unified_state.answer_text = ""
+        session.unified_state.answer_dirty = False
+        session.error_message = "rate limit"
+        from hermes_lark_streaming.controller.mixin import COMPLETING
+        session.state = COMPLETING
+
+        # 捕获 _preservative_seal 收到的 is_error 参数
+        captured_seal_args = {}
+
+        async def _capture_seal(session_arg, **kwargs):
+            captured_seal_args.update(kwargs)
+            return True  # 模拟封卡成功
+
+        ctrl._preservative_seal = _capture_seal  # type: ignore[method-assign]
+
+        await ctrl._do_linear_complete(session)
+
+        assert session.state == COMPLETED
+        # B1 核心：默认路径 agent 报错时，is_error 应为 True（v1.1.x 是 False）
+        assert captured_seal_args.get("is_error") is True, \
+            f"B1 副作用: 默认路径 agent 报错时 is_error 应为 True，实际: {captured_seal_args.get('is_error')}"
+        assert captured_seal_args.get("error_message") == "rate limit"
