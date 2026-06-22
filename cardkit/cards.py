@@ -242,8 +242,13 @@ def build_streaming_card_v2(
     return card
 
 
-def build_im_fallback_card() -> dict[str, Any]:
-    return {
+def build_im_fallback_card(*, header_enabled: bool = False) -> dict[str, Any]:
+    """IM 降级占位卡 — CardKit 创建失败时用 IM 消息卡片通道.
+
+    v1.2.0 H7: 支持 header（与 CardKit 通道视觉一致）。
+    开启时显示 streaming(蓝) 状态头部。
+    """
+    card: dict[str, Any] = {
         "config": {
             "update_multi": True,
             "locales": _LOCALES,
@@ -256,6 +261,9 @@ def build_im_fallback_card() -> dict[str, Any]:
             },
         ],
     }
+    if header_enabled:
+        card["header"] = _build_header("streaming")
+    return card
 
 
 def build_unified_complete_card(

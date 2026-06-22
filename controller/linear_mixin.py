@@ -242,7 +242,7 @@ class UnifiedControllerMixin:
 
             except FeishuAPIError:
                 _logger.info("linear CardKit create failed, falling back to IM card")
-                card = build_im_fallback_card()
+                card = build_im_fallback_card(header_enabled=self._cfg.header_enabled)
                 card_msg_id = await self._client.reply_card(reply_to, card)
                 session.card_msg_id = card_msg_id
                 session.use_cardkit = False
@@ -394,7 +394,11 @@ class UnifiedControllerMixin:
 
         # 用当前累积的 answer_text 构建完整卡片
         content = state.answer_text or "处理中..."
-        card = build_gateway_card(content)
+        card = build_gateway_card(
+            content,
+            header_enabled=self._cfg.header_enabled,
+            header_status="streaming" if self._cfg.header_enabled else "",
+        )
 
         try:
             await self._client.update_card(session.card_msg_id, card)
@@ -437,7 +441,15 @@ class UnifiedControllerMixin:
             else:
                 content = "完成"
 
-            card = build_gateway_card(content)
+            card = build_gateway_card(
+                content,
+                header_enabled=self._cfg.header_enabled,
+                header_status=(
+                    "error" if is_error
+                    else "stopped" if is_aborted
+                    else "completed"
+                ) if self._cfg.header_enabled else "",
+            )
             await self._client.update_card(session.card_msg_id, card)
 
             _logger.info(
@@ -584,10 +596,17 @@ class UnifiedControllerMixin:
                     state.tool_steps_dirty = False
                 except FeishuAPIError as e:
                     if e.code == CARDKIT_STREAMING_CLOSED:
-                        _logger.info(
-                            "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
-                            session.card_id[:12],
-                        )
+                        if session._streaming_closed_logged:
+                            _logger.debug(
+                                "unified flush phase2: streaming closed (already logged): card=%s",
+                                session.card_id[:12],
+                            )
+                        else:
+                            _logger.info(
+                                "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
+                                session.card_id[:12],
+                            )
+                            session._streaming_closed_logged = True
                         session._streaming_closed = True
                         return
                     if is_schema_error(e):
@@ -736,10 +755,17 @@ class UnifiedControllerMixin:
                     session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
             except FeishuAPIError as e:
                 if e.code == CARDKIT_STREAMING_CLOSED:
-                    _logger.info(
-                        "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
-                        session.card_id[:12],
-                    )
+                    if session._streaming_closed_logged:
+                        _logger.debug(
+                            "unified flush phase3: streaming closed (already logged): card=%s",
+                            session.card_id[:12],
+                        )
+                    else:
+                        _logger.info(
+                            "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
+                            session.card_id[:12],
+                        )
+                        session._streaming_closed_logged = True
                     session._streaming_closed = True
                     return
                 if is_schema_error(e):
@@ -781,10 +807,17 @@ class UnifiedControllerMixin:
                 state.answer_dirty = False
             except FeishuAPIError as e:
                 if e.code == CARDKIT_STREAMING_CLOSED:
-                    _logger.info(
-                        "HLS: unified stream — streaming closed, will be handled by TTL or seal: card=%s",
-                        session.card_id[:12],
-                    )
+                    if session._streaming_closed_logged:
+                        _logger.debug(
+                            "HLS: unified stream — streaming closed (already logged): card=%s",
+                            session.card_id[:12],
+                        )
+                    else:
+                        _logger.info(
+                            "HLS: unified stream — streaming closed, will be handled by TTL or seal: card=%s",
+                            session.card_id[:12],
+                        )
+                        session._streaming_closed_logged = True
                     session._streaming_closed = True
                     return
                 if is_element_not_found_error(e):
@@ -1616,6 +1649,21 @@ class UnifiedControllerMixin:
                 is_aborted=is_aborted,
                 error_message=error_message,
             )
+        elif self._cfg.header_enabled:
+            # v1.2.0 H6 方案B: 开启 header 时跳过增量封卡，直接走全量重建
+            # 原因：飞书 CardKit settings/batch_update 接口不支持更新 card-level
+            # header（官方文档求证），增量封卡后 header 永远停留在 "streaming"
+            # （蓝色"处理中"），无法变成 completed(绿)/error(红)/stopped(红)。
+            # 全量重建用 build_unified_complete_card(header_enabled=True) 生成
+            # 正确状态色的 header。代价：全量重建比增量封卡多传整张卡片 JSON，
+            # 但开了 header 的用户主动选择了"要头部"，性能代价可接受。
+            # 关闭时（默认）仍走 _preservative_seal，行为与 v1.1.x 一致。
+            _logger.info(
+                "HLS: header_enabled — skip preservative seal, go full rebuild "
+                "for correct header color card=%s trace=%s",
+                (session.card_id or "")[:12], session.card_trace_id,
+            )
+            seal_ok = False  # 触发下方全量重建 fallback
         else:
             seal_ok = await self._preservative_seal(
                 session,

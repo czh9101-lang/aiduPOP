@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Any
 
 from .i18n import _LOCALES, _T, _i18n, _t
+from .elements import _build_header
 from .md import (
     _MAX_CRON_TABLES,
     _downgrade_tables,
@@ -48,6 +49,8 @@ def build_gateway_card(
     category: str = "",
     status_label: str = "",
     status_emoji: str = "",
+    header_enabled: bool = False,
+    header_status: str = "",
 ) -> dict[str, Any]:
     """Gateway-internal message card — lightweight, static, no streaming.
 
@@ -65,6 +68,11 @@ def build_gateway_card(
         status_label: Optional status indicator text (e.g. "Reading",
             "Processing"). When set, shows a status line with emoji + label.
         status_emoji: Optional emoji for the status indicator.
+        header_enabled: v1.2.0 H7 — 当为 True 且 header_status 非空时，
+            添加 card-level header（用于 IM 降级路径与 CardKit 通道视觉一致）。
+            网关内部消息调用时不传此参数（默认 False，无 header）。
+        header_status: header 状态色，可选 "streaming"(蓝)/"completed"(绿)/
+            "error"(红)/"stopped"(红)。仅 header_enabled=True 时生效。
     """
     elements: list[dict] = []
 
@@ -94,6 +102,10 @@ def build_gateway_card(
     summary = content[:120].replace("\n", " ").replace("```", "").strip() if content.strip() else ""
     if summary:
         card["config"]["summary"] = {"content": summary}
+
+    # v1.2.0 H7: IM 降级路径 header 支持
+    if header_enabled and header_status:
+        card["header"] = _build_header(header_status)
 
     return card
 

@@ -1473,3 +1473,84 @@ class TestIMFallbackPath:
         # 至少有内容被写入（reasoning 或 answer）
         state = session.unified_state
         assert state.has_current_reasoning or state.answer_text or state.panel_dirty or state.answer_dirty
+
+
+class TestHeaderSealPath:
+    """v1.2.0 H6 方案B — header 开关决定封卡路径.
+
+    开了 header: _do_linear_complete Step 5 跳过 _preservative_seal，走全量重建
+    （cardkit_update），保证 header 颜色正确切换（蓝→绿/红）。
+    关了 header（默认）: 走 _preservative_seal（增量封卡），cardkit_update 不调用。
+    """
+
+    @pytest.mark.asyncio
+    async def test_header_disabled_uses_preservative_seal(self) -> None:
+        """关 header: _preservative_seal 被调用且成功，不触发全量重建."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_hdr1", linear=True)
+        ctrl._sessions["msg_hdr1"] = session
+
+        await ctrl._do_create_linear_card(session)
+        assert session.state == STREAMING
+        session.unified_state.answer_text = "answer"
+        session.unified_state.answer_dirty = False  # 避免 drain 循环
+
+        preservative_called = False
+
+        async def _fake_seal(*a, **kw):
+            nonlocal preservative_called
+            preservative_called = True
+            return True
+
+        ctrl._preservative_seal = _fake_seal  # type: ignore[method-assign]
+
+        result = await ctrl._do_linear_complete(session)
+
+        assert result is True
+        assert session.state == COMPLETED
+        # 关 header: _preservative_seal 被调用
+        assert preservative_called is True
+        # 不走全量重建: cardkit_update 不被调用
+        assert not ctrl._client.cardkit_update.called
+
+    @pytest.mark.asyncio
+    async def test_header_enabled_skips_preservative_seal(self) -> None:
+        """开 header: _preservative_seal 不被调用，走全量重建（cardkit_update）."""
+        ctrl = _setup_ctrl(linear=True)
+        # 开启 header
+        ctrl._cfg._raw = {
+            "hermes_lark_streaming": {
+                "enabled": True, "linear": True,
+                "header": {"enabled": True},
+            },
+            "feishu": {"app_id": "app", "app_secret": "secret"},
+        }
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_hdr2", linear=True)
+        ctrl._sessions["msg_hdr2"] = session
+
+        await ctrl._do_create_linear_card(session)
+        assert session.state == STREAMING
+        session.unified_state.answer_text = "answer"
+        session.unified_state.answer_dirty = False
+
+        preservative_called = False
+
+        async def _fake_seal(*a, **kw):
+            nonlocal preservative_called
+            preservative_called = True
+            return True
+
+        ctrl._preservative_seal = _fake_seal  # type: ignore[method-assign]
+
+        result = await ctrl._do_linear_complete(session)
+
+        assert result is True
+        assert session.state == COMPLETED
+        # 开 header: _preservative_seal 不被调用（跳过增量封卡）
+        assert preservative_called is False
+        # 走全量重建: cardkit_update 被调用
+        assert ctrl._client.cardkit_update.called
+        # close_streaming 也应被调用（全量重建分支先关流式）
+        assert ctrl._client.cardkit_close_streaming.called

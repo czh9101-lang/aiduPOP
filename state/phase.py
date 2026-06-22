@@ -63,19 +63,9 @@ class TerminalReason:
     CREATION_FAILED = "creation_failed"  # Card creation failed
 
 
-class CardVisualState:
-    """Visual appearance of a card — separate from lifecycle phase.
-
-    While CardPhase tracks the *lifecycle* (what operations are legal),
-    CardVisualState tracks the *appearance* (what the card looks like).
-    Multiple phases can map to the same visual state.
-    """
-
-    THINKING = "thinking"      # Yellow/neutral header, "Thinking..." text
-    STREAMING = "streaming"    # No header, streaming text, tool panel
-    COMPLETE = "complete"      # Green header, collapsible reasoning, footer
-    ERROR = "error"            # Red header, error notice
-    ABORTED = "aborted"        # Orange header, "Stopped" notice
+# v1.2.0 C1: 已删除 CardVisualState / PHASE_TO_VISUAL / get_visual_state。
+# 这些在 v1.0.3 引入但生产代码从未读取（卡片渲染实际用 session.state /
+# is_error / is_aborted 参数）。详见 docs/DESIGN-v1.2.0.md 第五章。
 
 
 # ── Legal phase transitions ──────────────────────────────────────────
@@ -109,19 +99,6 @@ TERMINAL_PHASES: frozenset[str] = frozenset({
 # Legacy alias — old code references _TERMINAL
 _TERMINAL = TERMINAL_PHASES
 
-# ── Phase → Visual State mapping ─────────────────────────────────────
-
-PHASE_TO_VISUAL: dict[str, str] = {
-    CardPhase.IDLE: CardVisualState.THINKING,
-    CardPhase.CREATING: CardVisualState.THINKING,
-    CardPhase.STREAMING: CardVisualState.STREAMING,
-    CardPhase.COMPLETING: CardVisualState.STREAMING,  # Still streaming during drain
-    CardPhase.COMPLETED: CardVisualState.COMPLETE,
-    CardPhase.CREATION_FAILED: CardVisualState.ERROR,
-    CardPhase.ABORTED: CardVisualState.ABORTED,
-    CardPhase.TERMINATED: CardVisualState.ERROR,
-}
-
 # ── Terminal reason → phase mapping ──────────────────────────────────
 
 TERMINAL_REASON_TO_PHASE: dict[str, str] = {
@@ -139,8 +116,3 @@ def is_legal_transition(from_phase: str, to_phase: str) -> bool:
         return True  # idempotent
     allowed = PHASE_TRANSITIONS.get(from_phase, frozenset())
     return to_phase in allowed
-
-
-def get_visual_state(phase: str) -> str:
-    """Get the visual state for a given phase."""
-    return PHASE_TO_VISUAL.get(phase, CardVisualState.THINKING)

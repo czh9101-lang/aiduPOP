@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | 1.1.3 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
+| 版本 | 1.2.0 (DEV) | 协议 | MIT | Python | ≥3.11 | 与上游 | ⚠️ **不兼容** |
 
 ---
 
@@ -63,7 +63,7 @@ Background: _run_background_task ── [Hook 1/2]
 | `└ linear_mixin.py` | 线性模式编排(主路径) | 统一面板更新、保留式封卡、卡片级安全网、TTL 延长、300313 fallback |
 | **state/** | **状态与数据子包** | |
 | `├ __init__.py` | 重导出门面 | CardSession + TextState + UnifiedLinearState + CardPhase |
-| `├ phase.py` | 卡片生命周期状态机 | `CardPhase`/`TerminalReason`/`CardVisualState` + `PHASE_TRANSITIONS` |
+| `├ phase.py` | 卡片生命周期状态机 | `CardPhase`/`TerminalReason` + `PHASE_TRANSITIONS` |
 | `├ session.py` | CardSession 数据类 | __slots__ + `_creation_stages` set (v1.1.0) + `card_trace_id` + `transition()`/`should_proceed()` |
 | `├ linear.py` | 统一面板状态 | `ReasoningRound` 数据类 + `UnifiedLinearState` 扁平管理 |
 | `├ text.py` | 文本增量追踪 | `<think|thinking|thought>` 标签拆分 |
@@ -152,28 +152,19 @@ IDLE ──────► CREATING ──────► STREAMING ────
 | `UNAVAILABLE` | TERMINATED | 源消息被删除/撤回 |
 | `CREATION_FAILED` | CREATION_FAILED | 卡片创建失败 |
 
-### 5.3 CardVisualState — 视觉外观与生命周期分离
-
-| CardVisualState | 对应阶段 | 卡片外观 |
-|---|---|---|
-| THINKING | IDLE, CREATING | 黄色/中性头部，"思考中..." |
-| STREAMING | STREAMING, COMPLETING | 无头部，流式文本，工具面板 |
-| COMPLETE | COMPLETED | 绿色头部，可折叠推理，页脚 |
-| ERROR | CREATION_FAILED, TERMINATED | 红色头部，错误通知 |
-| ABORTED | ABORTED | 橙色头部，"已停止"通知 |
-
-### 5.4 CardSession 关键方法
+### 5.3 CardSession 关键方法
 
 | 方法 | 说明 |
 |---|---|
 | `transition(to, source, reason)` | 验证转换合法性，自动设置 terminal_reason/terminal_source |
 | `should_proceed(source)` | 统一守卫：终端检查 + UnavailableGuard 检查 |
 | `is_terminal_phase` | 属性：是否在终端阶段 |
-| `visual_state` | 属性：当前视觉状态 |
 | `is_stale_create(epoch)` | Epoch 机制：检查创建回调是否过期 |
 | `enter_terminal(reason, source)` | 统一终端入口：设置原因、来源、递增 epoch |
 
-### 5.5 COMPLETING 过渡状态
+> v1.2.0：已删除 `CardVisualState`/`PHASE_TO_VISUAL`/`get_visual_state`/`session.visual_state`（生产代码从未读取，死代码）。卡片渲染实际用 `session.state`/`is_error`/`is_aborted` 参数。
+
+### 5.4 COMPLETING 过渡状态
 
 COMPLETING 不在 `_TERMINAL` 集合中——`on_answer`/`on_thinking` 在 COMPLETING 期间仍可更新 `unified_state`，避免晚到回调被静默丢弃。`_do_linear_complete()` 会先 drain 剩余脏数据，再 `mark_completed()` → close streaming → add footer。
 
@@ -250,6 +241,8 @@ hermes_lark_streaming:
   inject_time: false
   max_tool_steps: 20               # 范围 1~100
   max_reasoning_rounds: 20         # 范围 1~100
+  header:
+    enabled: false                  # v1.2.0：agent 卡片头部（蓝处理中→绿完成/红出错-停止）。默认关。开启后封卡走全量重建
   footer:
     show_label: false
     fields: [[status, elapsed, model, cost, compression_exhausted]]
@@ -361,4 +354,4 @@ hermes gateway restart
 
 ---
 
-*Last updated: 2026-06-21 | Version: 1.1.3*
+*Last updated: 2026-06-22 | Version: 1.2.0*
