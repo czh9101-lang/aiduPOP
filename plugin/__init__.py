@@ -50,6 +50,14 @@ _DEFAULT_STREAMING_CONFIG: dict[str, Any] = {
     "max_tool_steps": 20,
     "max_reasoning_rounds": 20,
     "inject_time": False,
+    # v1.2.0: agent 卡片头部（head）开关。默认关闭。
+    # 开启后，agent 回复卡片顶部显示状态头部：
+    #   流式中蓝色"处理中" → 完成绿色"已完成" / 出错红色"出错" / 中断红色"已停止"。
+    # 注意：开启后封卡走全量重建路径（保证头部颜色切换），关时走增量封卡（性能更优）。
+    # 仅影响 agent 流式卡片和完成态卡片；cron/gateway 卡片不受影响。
+    "header": {
+        "enabled": False,
+    },
     "footer": {
         "fields": [
             ["status", "elapsed", "model", "cost", "compression_exhausted"],
@@ -206,7 +214,8 @@ def register(ctx: "PluginContext") -> None:
             "hermes-lark-streaming v%s: config diagnostic — "
             "enabled=%s linear=%s gateway_cards=%s inject_time=%s "
             "panel_expanded=%s streaming_panel_expanded=%s print_strategy=%s "
-            "flush_interval=%sms card_ttl=%ss footer_fields=%s show_label=%s",
+            "flush_interval=%sms card_ttl=%ss header_enabled=%s "
+            "footer_fields=%s show_label=%s",
             __version__,
             _diag_cfg.enabled,
             _diag_cfg.linear,
@@ -217,6 +226,7 @@ def register(ctx: "PluginContext") -> None:
             _diag_cfg.print_strategy,
             _diag_cfg.flush_interval_ms,
             _diag_cfg.card_duration_sec,
+            _diag_cfg.header_enabled,
             _diag_cfg.footer_fields,
             _diag_cfg.footer_show_label,
         )

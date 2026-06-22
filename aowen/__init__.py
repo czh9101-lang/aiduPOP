@@ -452,6 +452,7 @@ def build_status_card() -> dict[str, Any]:
             f"`panel_expanded`: `{cfg.panel_expanded}`",
             f"`streaming_panel_expanded`: `{cfg.streaming_panel_expanded}`",
             f"`show_reasoning`: `{cfg.show_reasoning}`",
+            f"`header_enabled`: `{cfg.header_enabled}`",
         ]
         limit_cfg = [
             f"`max_tool_steps`: `{cfg.max_tool_steps}`",
@@ -585,6 +586,7 @@ def build_monitor_card() -> dict[str, Any]:
         "header": {"title": {"tag": "plain_text", "content": "插件监控面板"}, "template": "blue"},
         "body": {"elements": elements},
     }
+
 
 
 def build_reset_card() -> dict[str, Any]:

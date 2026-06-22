@@ -51,7 +51,7 @@ State & Data:
     __init__.py               Re-exports: CardSession, TextState, UnifiedLinearState, etc.
     session.py                CardSession (per-message state, _creation_stages set)
     linear.py                 UnifiedLinearState + ReasoningRound
-    phase.py                  CardPhase / TerminalReason / CardVisualState state machine
+    phase.py                  CardPhase / TerminalReason state machine
     text.py                   TextState (incremental text tracking)
     tooluse.py                ToolUseTracker (tool call visualization + redaction)
 

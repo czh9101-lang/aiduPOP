@@ -564,6 +564,12 @@ def build_unified_panel(
     panel's children (e.g. during streaming partial_update_element) can
     call :func:`build_panel_children` directly to skip header rebuild.
 
+    .. note::
+       v1.2.0: ``build_panel_header`` / ``build_panel_children`` 的单独
+       调用入口当前**仅由本函数内部使用**，生产代码尚未单独调用它们
+       （即"只重建 children 跳过 header"的性能优化预留未启用）。保留
+       入口供未来在 flush 性能成为瓶颈时实现该优化。
+
     Parameters
     ----------
     reasoning_rounds : list[ReasoningRound]
@@ -797,10 +803,16 @@ def _build_error_panel(
         if card_trace_id:
             friendly_en += f"\n\nDebug ID: `{card_trace_id}`"
             friendly_zh += f"\n\n调试 ID: `{card_trace_id}`"
+            # v1.2.0: 引导用户通过 issue 模板反馈（附调试 ID 帮开发者定位）
+            friendly_en += "\n\nIf this keeps happening, report the Debug ID to the developer."
+            friendly_zh += "\n\n如果反复出错，请把调试 ID 反馈给开发者。"
 
         tech_detail = error_message.strip() if error_message else ""
         if tech_detail:
-            body_content = f"{friendly_zh}\n\n<details><summary>技术详情</summary>\n\n```\n{tech_detail}\n```\n\n</details>"
+            # v1.2.0: 去掉 <details> HTML 标签（飞书 markdown 不支持 HTML 标签，
+            # 会显示成乱码）。外层 collapsible_panel 已提供折叠能力，
+            # 技术详情用分隔线 + 标题区分即可。
+            body_content = f"{friendly_zh}\n\n---\n**技术详情**\n```\n{tech_detail}\n```"
         else:
             body_content = friendly_zh
 
@@ -913,6 +925,7 @@ def build_preservative_seal_actions(
     footer_fields: list[list[str]] | None = None,
     footer_show_label: bool = False,
     existing_elements: set[str] | None = None,
+    card_trace_id: str = "",
 ) -> list[dict]:
     """构建保留式封卡的 batch_update actions.
 
@@ -952,6 +965,7 @@ def build_preservative_seal_actions(
                 "target_element_id": _LOADING_ELEMENT_ID,
                 "elements": [_build_error_panel(
                     error_message, is_aborted=is_aborted, expanded=True,
+                    card_trace_id=card_trace_id,
                 )],
             },
         })

@@ -242,8 +242,13 @@ def build_streaming_card_v2(
     return card
 
 
-def build_im_fallback_card() -> dict[str, Any]:
-    return {
+def build_im_fallback_card(*, header_enabled: bool = False) -> dict[str, Any]:
+    """IM 降级占位卡 — CardKit 创建失败时用 IM 消息卡片通道.
+
+    v1.2.0 H7: 支持 header（与 CardKit 通道视觉一致）。
+    开启时显示 streaming(蓝) 状态头部。
+    """
+    card: dict[str, Any] = {
         "config": {
             "update_multi": True,
             "locales": _LOCALES,
@@ -256,6 +261,9 @@ def build_im_fallback_card() -> dict[str, Any]:
             },
         ],
     }
+    if header_enabled:
+        card["header"] = _build_header("streaming")
+    return card
 
 
 def build_unified_complete_card(
@@ -277,6 +285,7 @@ def build_unified_complete_card(
     panel_events: list[tuple[str, int]] | None = None,
     max_tool_steps: int = 20,
     max_reasoning_rounds: int = 20,
+    card_trace_id: str = "",
 ) -> dict[str, Any]:
     """Unified panel complete card — single panel for reasoning+tools, plus answer.
 
@@ -354,6 +363,7 @@ def build_unified_complete_card(
     if error_message:
         elements.append(_build_error_panel(
             error_message, is_aborted=is_aborted, expanded=panel_expanded,
+            card_trace_id=card_trace_id,
         ))
 
     # ── Background review panel ──

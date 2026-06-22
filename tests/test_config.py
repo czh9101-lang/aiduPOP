@@ -536,5 +536,55 @@ class TestGetHermesConfigPath:
             "hermes_lark_streaming": {"enabled": True, "flush_interval_ms": 5000},
         }))
         with patch("hermes_lark_streaming.config.reader._get_hermes_config_path", return_value=config_path):
-            cfg2 = Config()
+            # v1.2.0: Config 单例后，需 reload 清缓存才能读新配置
+            cfg.reload()
+            cfg2 = Config()  # 单例，与 cfg 同一实例
             assert cfg2.flush_interval_ms == 2000.0  # clamped to max
+
+
+class TestConfigSingleton:
+    """v1.2.0: Config 单例模式 + /aowen config reload 全局生效."""
+
+    def test_singleton_same_instance(self) -> None:
+        """Config() 多次调用返回同一实例."""
+        from hermes_lark_streaming.config.reader import Config
+        cfg1 = Config()
+        cfg2 = Config()
+        assert cfg1 is cfg2
+
+    def test_reload_clears_cache_for_all_holders(self, tmp_path: object) -> None:
+        """v1.2.0 修复: /aowen config reload 后 controller 持有的实例缓存也清掉.
+
+        之前 Config() 每次新建实例，reload 只清新实例缓存，
+        controller 持有的旧实例缓存不清 → 改配置 + reload 后
+        header_enabled 等走 _plugin_sec() 的属性不生效。
+        单例后所有 Config() 共享实例，reload 全局生效。
+        """
+        import yaml
+        from pathlib import Path
+        from unittest.mock import patch
+        from hermes_lark_streaming.config.reader import Config
+
+        config_path = Path(str(tmp_path)) / "config.yaml"
+        config_path.write_text(yaml.dump({
+            "hermes_lark_streaming": {"enabled": True, "header": {"enabled": False}},
+        }))
+
+        with patch("hermes_lark_streaming.config.reader._get_hermes_config_path", return_value=config_path):
+            # controller 持有的实例（模拟 StreamCardController.__init__）
+            ctrl_cfg = Config()
+            assert ctrl_cfg.header_enabled is False
+
+        # 改配置文件
+        config_path.write_text(yaml.dump({
+            "hermes_lark_streaming": {"enabled": True, "header": {"enabled": True}},
+        }))
+
+        # 模拟 /aowen config reload（aowen 新建 Config 调 reload）
+        with patch("hermes_lark_streaming.config.reader._get_hermes_config_path", return_value=config_path):
+            reload_cfg = Config()  # 单例：与 ctrl_cfg 同一实例
+            reload_cfg.reload()
+
+            # controller 持有的实例现在应读到新值
+            assert ctrl_cfg.header_enabled is True, \
+                "reload 后 controller 持有实例的缓存应被清除，读到新配置"

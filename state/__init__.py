@@ -11,11 +11,8 @@ from .linear import UnifiedLinearState, ReasoningRound  # noqa: F401
 from .phase import (  # noqa: F401
     CardPhase,
     TerminalReason,
-    CardVisualState,
     TERMINAL_PHASES,
     _TERMINAL,
     PHASE_TRANSITIONS,
-    PHASE_TO_VISUAL,
     is_legal_transition,
-    get_visual_state,
 )

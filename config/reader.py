@@ -42,13 +42,30 @@ class Config:
     1. /aowen config reload — 立即清缓存重新读取
     2. 重启网关 — 下次启动自动加载
     不做自动 mtime 检测。
+
+    v1.2.0: 改为单例模式。所有 Config() 调用返回同一实例，
+    /aowen config reload 调 reload() 才能清掉 controller 持有实例的缓存。
+    之前 Config() 每次新建实例，reload 只清新实例缓存，controller 持有的
+    旧实例缓存不清 → 改配置 + reload 后 header_enabled 等走 _plugin_sec()
+    的属性不生效（必须重启网关）。
     """
 
+    _instance: "Config | None" = None
+
+    def __new__(cls) -> "Config":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self) -> None:
+        if getattr(self, "_initialized", False):
+            return
         self._raw: dict[str, Any] | None = None
         self._reload_cache: dict[str, Any] | None = None
         self._reload_cache_at: float = 0.0
         self._on_reload_callbacks: list[Callable[[], None]] = []
+        self._initialized = True
 
     # ── 配置刷新 ──
 

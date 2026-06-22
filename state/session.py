@@ -12,12 +12,9 @@ from typing import TYPE_CHECKING, Any
 from .phase import (
     CardPhase,
     TerminalReason,
-    CardVisualState,
     TERMINAL_PHASES,
     _TERMINAL,
     is_legal_transition,
-    get_visual_state,
-    PHASE_TO_VISUAL,
 )
 
 # Backward-compatible alias — old code imports IDLE from this module
@@ -47,6 +44,7 @@ class CardSession:
         "_loop",
         "_pending_flush",
         "_streaming_closed",
+        "_streaming_closed_logged",
         "_was_aborted",
         "anchor_id",
         "card_created_at",
@@ -136,6 +134,8 @@ class CardSession:
         self._first_answer_time: float = 0.0
         self._pending_flush: bool = False
         self._streaming_closed: bool = False
+        # v1.2.0 L1: "streaming closed" 日志去重——同一张卡第一次打 INFO，之后降 DEBUG
+        self._streaming_closed_logged: bool = False
         self._card_ready: asyncio.Event = asyncio.Event()
 
     # ------------------------------------------------------------------
@@ -201,11 +201,6 @@ class CardSession:
     def is_terminal_phase(self) -> bool:
         """Whether the session is in a terminal (absorbing) phase."""
         return self.state in TERMINAL_PHASES
-
-    @property
-    def visual_state(self) -> str:
-        """Current visual state derived from the lifecycle phase."""
-        return get_visual_state(self.state)
 
     def is_stale_create(self, epoch: int) -> bool:
         """Check if a creation callback is stale (epoch mismatch).
