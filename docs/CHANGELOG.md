@@ -14,7 +14,7 @@
 | 🏗️ Architecture | 删除 `CardVisualState` 死代码 | `CardVisualState`/`PHASE_TO_VISUAL`/`get_visual_state`/`session.visual_state` 在生产代码中从未被读取，卡片渲染实际用 `session.state`/`is_error`/`is_aborted` | 删除类、映射、函数、属性及相关导出和测试 |
 | 📝 Docs | CHANGELOG v1.1.0 P0-3 mtime 描述勘误 | v1.1.0 先加了 mtime 自动检测（P0-3），后于同一版本周期内提交 0d468cd 明确删除（有意设计：避免高频 stat 系统调用），但 CHANGELOG 未同步更新，仍写"移到 `_plugin_sec()`" | 补勘误说明：mtime 检测已被有意移除，配置刷新靠 `/aowen config reload` 或重启；仅 inject_time/show_reasoning/gateway_cards 走 60s TTL 缓存。v1.2.0 不补回 mtime（尊重原决策） |
 | 📝 Docs | panel 拆分函数现状说明 | v1.1.0 称 `build_panel_header`/`build_panel_children` 拆分支持"只重建 children"优化，但优化从未实现（两函数仅内部调用） | `build_unified_panel` docstring 补注释明确"单独入口当前仅内部使用，优化预留未启用"，避免维护者误解 |
-| 📝 Docs | 新增 PRD/DESIGN/ROADMAP 文档 | 历史迭代无独立规划文档，难以追踪"做了什么/没做什么/延后什么" | docs/ 新增 `PRD-v1.2.0.md`、`DESIGN-v1.2.0.md`、`ROADMAP.md`；从 v1.2.0 起每版本配套 PRD+DESIGN |
+| 📝 Docs | 新增 ROADMAP 文档 | 历史迭代无独立追踪文档，难以掌握"做了什么/没做什么/延后什么" | docs/ 新增 `ROADMAP.md`，回溯 v1.0.0~v1.1.3 历史并追踪 v1.2.0 计划与 v1.3.0 预告 |
 
 > **延后到 v1.3.0**：TextState 死方法精简（C3）、prune 日志显示更长 msg_id（M1）、on_completed 日志降级（M2）、`_sessions` 并发锁（M3）。详见 `docs/ROADMAP.md`。
 

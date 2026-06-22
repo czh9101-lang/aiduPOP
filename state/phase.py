@@ -65,7 +65,7 @@ class TerminalReason:
 
 # v1.2.0 C1: 已删除 CardVisualState / PHASE_TO_VISUAL / get_visual_state。
 # 这些在 v1.0.3 引入但生产代码从未读取（卡片渲染实际用 session.state /
-# is_error / is_aborted 参数）。详见 docs/DESIGN-v1.2.0.md 第五章。
+# is_error / is_aborted 参数）。
 
 
 # ── Legal phase transitions ──────────────────────────────────────────

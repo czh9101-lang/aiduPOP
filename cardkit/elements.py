@@ -568,8 +568,7 @@ def build_unified_panel(
        v1.2.0: ``build_panel_header`` / ``build_panel_children`` 的单独
        调用入口当前**仅由本函数内部使用**，生产代码尚未单独调用它们
        （即"只重建 children 跳过 header"的性能优化预留未启用）。保留
-       入口供未来在 flush 性能成为瓶颈时实现该优化。详见
-       ``docs/DESIGN-v1.2.0.md`` 第六章。
+       入口供未来在 flush 性能成为瓶颈时实现该优化。
 
     Parameters
     ----------

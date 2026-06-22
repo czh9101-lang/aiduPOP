@@ -167,7 +167,7 @@ When `header.enabled: true`, the plugin displays a status header at the top of a
 
 Default is `false` (off) — cards have no header, matching v1.1.x behavior.
 
-> **Note**: Due to a Feishu CardKit API limitation, the settings/batch_update interfaces **cannot update the card-level header** during streaming or incremental seal. Only a full card rebuild (`cardkit_update`) can change the header color. Therefore, **when `header.enabled` is on, the seal path switches to full card rebuild** (instead of the default incremental seal) so the header color transitions correctly (blue → green/red). When off, the default incremental seal is used (better performance). See `docs/DESIGN-v1.2.0.md` §2 for details.
+> **Note**: Due to a Feishu CardKit API limitation, the settings/batch_update interfaces **cannot update the card-level header** during streaming or incremental seal. Only a full card rebuild (`cardkit_update`) can change the header color. Therefore, **when `header.enabled` is on, the seal path switches to full card rebuild** (instead of the default incremental seal) so the header color transitions correctly (blue → green/red). When off, the default incremental seal is used (better performance).
 
 > **Scope**: `header.enabled` only affects agent streaming/completed cards. Cron push cards and gateway-internal message cards are unaffected. `/aowen` command cards always have their own banner-style header (part of the v1.1.0 design language) and are not controlled by this option.
 

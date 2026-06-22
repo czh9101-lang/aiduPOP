@@ -167,7 +167,7 @@ hermes_lark_streaming:
 
 默认 `false`（关闭）——卡片没有头部，与 v1.1.x 行为一致。
 
-> **注意**：受飞书 CardKit API 限制，settings/batch_update 接口在流式或增量封卡过程中**无法更新卡片级头部**，只有全量重建（`cardkit_update`）能改变头部颜色。因此**开启 `header.enabled` 后，封卡路径会改走全量重建**（而非默认的增量封卡），以保证头部颜色正确切换（蓝 → 绿/红）。关闭时使用默认增量封卡（性能更优）。详见 `docs/DESIGN-v1.2.0.md` 第二章。
+> **注意**：受飞书 CardKit API 限制，settings/batch_update 接口在流式或增量封卡过程中**无法更新卡片级头部**，只有全量重建（`cardkit_update`）能改变头部颜色。因此**开启 `header.enabled` 后，封卡路径会改走全量重建**（而非默认的增量封卡），以保证头部颜色正确切换（蓝 → 绿/红）。关闭时使用默认增量封卡（性能更优）。
 
 > **作用范围**：`header.enabled` 仅影响 agent 流式卡片和完成态卡片。Cron 推送卡片、网关内部消息卡片不受影响。`/aowen` 命令卡片始终有自己的 banner 风格头部（v1.1.0 设计语言的一部分），不受此配置控制。
 
