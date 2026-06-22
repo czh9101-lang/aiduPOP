@@ -1473,3 +1473,380 @@ class TestIMFallbackPath:
         # 至少有内容被写入（reasoning 或 answer）
         state = session.unified_state
         assert state.has_current_reasoning or state.answer_text or state.panel_dirty or state.answer_dirty
+
+
+class TestHeaderSealPath:
+    """v1.2.0 H6 方案B — header 开关决定封卡路径.
+
+    开了 header: _do_linear_complete Step 5 跳过 _preservative_seal，走全量重建
+    （cardkit_update），保证 header 颜色正确切换（蓝→绿/红）。
+    关了 header（默认）: 走 _preservative_seal（增量封卡），cardkit_update 不调用。
+    """
+
+    @pytest.mark.asyncio
+    async def test_header_disabled_uses_preservative_seal(self) -> None:
+        """关 header: _preservative_seal 被调用且成功，不触发全量重建."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_hdr1", linear=True)
+        ctrl._sessions["msg_hdr1"] = session
+
+        await ctrl._do_create_linear_card(session)
+        assert session.state == STREAMING
+        session.unified_state.answer_text = "answer"
+        session.unified_state.answer_dirty = False  # 避免 drain 循环
+
+        preservative_called = False
+
+        async def _fake_seal(*a, **kw):
+            nonlocal preservative_called
+            preservative_called = True
+            return True
+
+        ctrl._preservative_seal = _fake_seal  # type: ignore[method-assign]
+
+        result = await ctrl._do_linear_complete(session)
+
+        assert result is True
+        assert session.state == COMPLETED
+        # 关 header: _preservative_seal 被调用
+        assert preservative_called is True
+        # 不走全量重建: cardkit_update 不被调用
+        assert not ctrl._client.cardkit_update.called
+
+    @pytest.mark.asyncio
+    async def test_header_enabled_skips_preservative_seal(self) -> None:
+        """开 header: _preservative_seal 不被调用，走全量重建（cardkit_update）."""
+        ctrl = _setup_ctrl(linear=True)
+        # 开启 header
+        ctrl._cfg._raw = {
+            "hermes_lark_streaming": {
+                "enabled": True, "linear": True,
+                "header": {"enabled": True},
+            },
+            "feishu": {"app_id": "app", "app_secret": "secret"},
+        }
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_hdr2", linear=True)
+        ctrl._sessions["msg_hdr2"] = session
+
+        await ctrl._do_create_linear_card(session)
+        assert session.state == STREAMING
+        session.unified_state.answer_text = "answer"
+        session.unified_state.answer_dirty = False
+
+        preservative_called = False
+
+        async def _fake_seal(*a, **kw):
+            nonlocal preservative_called
+            preservative_called = True
+            return True
+
+        ctrl._preservative_seal = _fake_seal  # type: ignore[method-assign]
+
+        result = await ctrl._do_linear_complete(session)
+
+        assert result is True
+        assert session.state == COMPLETED
+        # 开 header: _preservative_seal 不被调用（跳过增量封卡）
+        assert preservative_called is False
+        # 走全量重建: cardkit_update 被调用
+        assert ctrl._client.cardkit_update.called
+        # close_streaming 也应被调用（全量重建分支先关流式）
+        assert ctrl._client.cardkit_close_streaming.called
+
+    @pytest.mark.asyncio
+    async def test_header_rebuild_does_not_pollute_full_rebuilds_metric(self) -> None:
+        """v1.2.0 Y1: header 主动重建不计入 full_rebuilds 指标.
+
+        开 header 走全量重建是设计行为（非失败），不应污染 /aowen monitor
+        的"全卡重建"计数（该指标用于监控真实降级）。
+        """
+        from hermes_lark_streaming.aowen import _metrics
+        _metrics["full_rebuilds"] = 0  # 重置
+
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._cfg._raw = {
+            "hermes_lark_streaming": {
+                "enabled": True, "linear": True,
+                "header": {"enabled": True},
+            },
+            "feishu": {"app_id": "app", "app_secret": "secret"},
+        }
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_y1", linear=True)
+        ctrl._sessions["msg_y1"] = session
+
+        await ctrl._do_create_linear_card(session)
+        session.unified_state.answer_text = "answer"
+        session.unified_state.answer_dirty = False
+
+        await ctrl._do_linear_complete(session)
+
+        assert session.state == COMPLETED
+        # Y1 核心：header 主动重建不增加 full_rebuilds 指标
+        assert _metrics["full_rebuilds"] == 0, \
+            f"header 主动重建不应计入 full_rebuilds，实际: {_metrics['full_rebuilds']}"
+
+    @pytest.mark.asyncio
+    async def test_real_failure_rebuild_counts_full_rebuilds(self) -> None:
+        """v1.2.0 Y1: 真实封卡失败走全量重建，应计入 full_rebuilds 指标."""
+        from hermes_lark_streaming.aowen import _metrics
+        _metrics["full_rebuilds"] = 0
+
+        ctrl = _setup_ctrl(linear=True)
+        # header 关闭，走 _preservative_seal，让它失败触发真实 fallback
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_y1b", linear=True)
+        ctrl._sessions["msg_y1b"] = session
+
+        await ctrl._do_create_linear_card(session)
+        session.unified_state.answer_text = "answer"
+        session.unified_state.answer_dirty = False
+
+        async def _failing_seal(*a, **kw):
+            return False  # 模拟封卡失败
+
+        ctrl._preservative_seal = _failing_seal  # type: ignore[method-assign]
+
+        await ctrl._do_linear_complete(session)
+
+        assert session.state == COMPLETED
+        # 真实失败重建应计入 full_rebuilds
+        assert _metrics["full_rebuilds"] == 1, \
+            f"真实失败重建应计入 full_rebuilds，实际: {_metrics['full_rebuilds']}"
+
+    @pytest.mark.asyncio
+    async def test_b1_error_message_with_header_uses_red(self) -> None:
+        """v1.2.0 B1: agent 报错(error_message) + 开 header → header 应为红色(error).
+
+        之前 is_error 只看 session.state，agent 报错时 state=COMPLETING(非error态)，
+        is_error=False → header 绿色"已完成"，但正文显示红色错误面板（视觉矛盾）。
+        修复后 is_error 兼顾 error_message，报错时 header 用红色。
+        """
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._cfg._raw = {
+            "hermes_lark_streaming": {
+                "enabled": True, "linear": True,
+                "header": {"enabled": True},
+            },
+            "feishu": {"app_id": "app", "app_secret": "secret"},
+        }
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_b1", linear=True)
+        ctrl._sessions["msg_b1"] = session
+
+        await ctrl._do_create_linear_card(session)
+        # 模拟 agent 报错：设 error_message，state 仍是 STREAMING（on_completed 会设 COMPLETING）
+        session.unified_state.answer_text = ""
+        session.unified_state.answer_dirty = False
+        session.error_message = "API rate limit exceeded"
+        # on_completed 会设 state=COMPLETING，这里直接模拟
+        from hermes_lark_streaming.controller.mixin import COMPLETING
+        session.state = COMPLETING
+
+        # 捕获 cardkit_update 传入的 card，验证 header.template
+        captured_card = {}
+
+        async def _capture_update(card_id, card, *, sequence=0):
+            captured_card["card"] = card
+
+        ctrl._client.cardkit_update = _capture_update  # type: ignore[method-assign]
+        ctrl._client.cardkit_close_streaming = AsyncMock()  # 避免 raise
+
+        await ctrl._do_linear_complete(session)
+
+        assert session.state == COMPLETED
+        assert "card" in captured_card, "应走全量重建（cardkit_update）"
+        card = captured_card["card"]
+        assert "header" in card, "开 header 后全量重建卡片应有 header"
+        assert card["header"]["template"] == "red", \
+            f"B1: agent 报错时 header 应为 red(error)，实际: {card['header']['template']}"
+
+
+class TestIMFallbackHeader:
+    """v1.2.0 H7: IM 降级路径 + header 的 controller 层测试.
+
+    补审计发现的测试盲区（Y4）：IM 降级 + header 完全未测。
+    """
+
+    @pytest.mark.asyncio
+    async def test_im_fallback_create_with_header(self) -> None:
+        """CardKit 创建失败 + 开 header → IM 降级占位卡带 blue header."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._cfg._raw = {
+            "hermes_lark_streaming": {
+                "enabled": True, "linear": True,
+                "header": {"enabled": True},
+            },
+            "feishu": {"app_id": "app", "app_secret": "secret"},
+        }
+        ctrl._client.cardkit_create = AsyncMock(
+            side_effect=FeishuAPIError("fail", code=230099)
+        )
+        # 捕获 reply_card 传入的 card
+        captured = {}
+
+        async def _capture_reply_card(mid, card):
+            captured["card"] = card
+            return "om_im_hdr1"
+
+        ctrl._client.reply_card = _capture_reply_card  # type: ignore[method-assign]
+
+        session = _make_session("msg_imh1", linear=True)
+        ctrl._sessions["msg_imh1"] = session
+
+        await ctrl._do_create_linear_card(session)
+
+        assert session.use_cardkit is False
+        assert "card" in captured
+        assert "header" in captured["card"]
+        assert captured["card"]["header"]["template"] == "blue"
+
+    @pytest.mark.asyncio
+    async def test_im_fallback_seal_completed_with_header(self) -> None:
+        """IM 降级封卡正常完成 → header completed(绿)."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._cfg._raw = {
+            "hermes_lark_streaming": {
+                "enabled": True, "linear": True,
+                "header": {"enabled": True},
+            },
+            "feishu": {"app_id": "app", "app_secret": "secret"},
+        }
+        ctrl._client.cardkit_create = AsyncMock(
+            side_effect=FeishuAPIError("fail", code=230099)
+        )
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_imh2", linear=True)
+        ctrl._sessions["msg_imh2"] = session
+
+        await ctrl._do_create_linear_card(session)
+        session.unified_state.answer_text = "final answer"
+        session.unified_state.answer_dirty = False
+
+        captured = {}
+
+        async def _capture_update(mid, card):
+            captured["card"] = card
+
+        ctrl._client.update_card = _capture_update  # type: ignore[method-assign]
+
+        await ctrl._do_linear_complete(session)
+
+        assert session.state == COMPLETED
+        assert "card" in captured
+        assert captured["card"]["header"]["template"] == "green"
+
+    @pytest.mark.asyncio
+    async def test_im_fallback_seal_error_with_header(self) -> None:
+        """IM 降级封卡 + error_message → header error(红). 验证 B1 修复在 IM 降级也生效."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._cfg._raw = {
+            "hermes_lark_streaming": {
+                "enabled": True, "linear": True,
+                "header": {"enabled": True},
+            },
+            "feishu": {"app_id": "app", "app_secret": "secret"},
+        }
+        ctrl._client.cardkit_create = AsyncMock(
+            side_effect=FeishuAPIError("fail", code=230099)
+        )
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_imh3", linear=True)
+        ctrl._sessions["msg_imh3"] = session
+
+        await ctrl._do_create_linear_card(session)
+        session.unified_state.answer_text = ""
+        session.unified_state.answer_dirty = False
+        session.error_message = "agent error"
+        from hermes_lark_streaming.controller.mixin import COMPLETING
+        session.state = COMPLETING
+
+        captured = {}
+
+        async def _capture_update(mid, card):
+            captured["card"] = card
+
+        ctrl._client.update_card = _capture_update  # type: ignore[method-assign]
+
+        await ctrl._do_linear_complete(session)
+
+        assert session.state == COMPLETED
+        assert "card" in captured
+        assert captured["card"]["header"]["template"] == "red", \
+            f"B1 IM降级: error_message 时 header 应为 red，实际: {captured['card']['header']['template']}"
+
+    @pytest.mark.asyncio
+    async def test_im_fallback_seal_aborted_with_header(self) -> None:
+        """IM 降级封卡 + 中断 → header stopped(红)."""
+        ctrl = _setup_ctrl(linear=True)
+        ctrl._cfg._raw = {
+            "hermes_lark_streaming": {
+                "enabled": True, "linear": True,
+                "header": {"enabled": True},
+            },
+            "feishu": {"app_id": "app", "app_secret": "secret"},
+        }
+        ctrl._client.cardkit_create = AsyncMock(
+            side_effect=FeishuAPIError("fail", code=230099)
+        )
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_imh4", linear=True)
+        ctrl._sessions["msg_imh4"] = session
+
+        await ctrl._do_create_linear_card(session)
+        session.unified_state.answer_text = "partial"
+        session.unified_state.answer_dirty = False
+        session._was_aborted = True
+
+        captured = {}
+
+        async def _capture_update(mid, card):
+            captured["card"] = card
+
+        ctrl._client.update_card = _capture_update  # type: ignore[method-assign]
+
+        await ctrl._do_linear_complete(session)
+
+        assert session.state == COMPLETED
+        assert "card" in captured
+        assert captured["card"]["header"]["template"] == "red"
+
+    @pytest.mark.asyncio
+    async def test_b1_default_path_error_message_passes_is_error_to_seal(self) -> None:
+        """v1.2.0 B1 副作用（正向改善）: 默认路径（关 header）agent 报错时
+        _preservative_seal 收到 is_error=True，footer 显示"出错"而非"已完成".
+
+        v1.1.x: is_error 只看 state，agent 报错时 is_error=False -> footer"已完成"
+        v1.2.0: is_error 兼顾 error_message -> is_error=True -> footer"出错"（与 error panel 一致）
+        """
+        ctrl = _setup_ctrl(linear=True)
+        # header 关闭（默认）
+        ctrl._release_session_data = lambda s: None
+        session = _make_session("msg_b1d", linear=True)
+        ctrl._sessions["msg_b1d"] = session
+
+        await ctrl._do_create_linear_card(session)
+        session.unified_state.answer_text = ""
+        session.unified_state.answer_dirty = False
+        session.error_message = "rate limit"
+        from hermes_lark_streaming.controller.mixin import COMPLETING
+        session.state = COMPLETING
+
+        # 捕获 _preservative_seal 收到的 is_error 参数
+        captured_seal_args = {}
+
+        async def _capture_seal(session_arg, **kwargs):
+            captured_seal_args.update(kwargs)
+            return True  # 模拟封卡成功
+
+        ctrl._preservative_seal = _capture_seal  # type: ignore[method-assign]
+
+        await ctrl._do_linear_complete(session)
+
+        assert session.state == COMPLETED
+        # B1 核心：默认路径 agent 报错时，is_error 应为 True（v1.1.x 是 False）
+        assert captured_seal_args.get("is_error") is True, \
+            f"B1 副作用: 默认路径 agent 报错时 is_error 应为 True，实际: {captured_seal_args.get('is_error')}"
+        assert captured_seal_args.get("error_message") == "rate limit"

@@ -1,12 +1,12 @@
 """state/phase.py + CardSession 状态机增强测试.
 
 覆盖:
-- CardPhase / TerminalReason / CardVisualState 常量
+- CardPhase / TerminalReason 常量
 - PHASE_TRANSITIONS 合法转换表
-- is_legal_transition() / get_visual_state()
+- is_legal_transition()
 - CardSession.transition() 验证转换
 - CardSession.should_proceed() 统一守卫
-- CardSession.is_terminal_phase / visual_state 属性
+- CardSession.is_terminal_phase 属性
 - CardSession.enter_terminal() / terminal_reason / terminal_source
 - CardSession.is_stale_create() epoch 机制
 - CardSession._on_guard_terminate() → TERMINATED
@@ -22,14 +22,11 @@ import pytest
 
 from hermes_lark_streaming.state.phase import (
     CardPhase,
-    CardVisualState,
     TERMINAL_PHASES,
     _TERMINAL,
     PHASE_TRANSITIONS,
-    PHASE_TO_VISUAL,
     TerminalReason,
     is_legal_transition,
-    get_visual_state,
 )
 from hermes_lark_streaming.state.session import CardSession
 
@@ -87,25 +84,6 @@ class TestTerminalReason:
 
     def test_creation_failed(self) -> None:
         assert TerminalReason.CREATION_FAILED == "creation_failed"
-
-
-class TestCardVisualState:
-    """CardVisualState string constants."""
-
-    def test_thinking(self) -> None:
-        assert CardVisualState.THINKING == "thinking"
-
-    def test_streaming(self) -> None:
-        assert CardVisualState.STREAMING == "streaming"
-
-    def test_complete(self) -> None:
-        assert CardVisualState.COMPLETE == "complete"
-
-    def test_error(self) -> None:
-        assert CardVisualState.ERROR == "error"
-
-    def test_aborted(self) -> None:
-        assert CardVisualState.ABORTED == "aborted"
 
 
 # ── PHASE_TRANSITIONS ────────────────────────────────────────────────
@@ -183,40 +161,6 @@ class TestPhaseTransitions:
     def test_terminal_alias(self) -> None:
         """_TERMINAL is a backward-compatible alias for TERMINAL_PHASES."""
         assert _TERMINAL is TERMINAL_PHASES
-
-
-# ── get_visual_state ─────────────────────────────────────────────────
-
-
-class TestGetVisualState:
-    """Phase → visual state mapping."""
-
-    def test_idle_maps_to_thinking(self) -> None:
-        assert get_visual_state("idle") == "thinking"
-
-    def test_creating_maps_to_thinking(self) -> None:
-        assert get_visual_state("creating") == "thinking"
-
-    def test_streaming_maps_to_streaming(self) -> None:
-        assert get_visual_state("streaming") == "streaming"
-
-    def test_completing_maps_to_streaming(self) -> None:
-        assert get_visual_state("completing") == "streaming"
-
-    def test_completed_maps_to_complete(self) -> None:
-        assert get_visual_state("completed") == "complete"
-
-    def test_creation_failed_maps_to_error(self) -> None:
-        assert get_visual_state("creation_failed") == "error"
-
-    def test_aborted_maps_to_aborted(self) -> None:
-        assert get_visual_state("aborted") == "aborted"
-
-    def test_terminated_maps_to_error(self) -> None:
-        assert get_visual_state("terminated") == "error"
-
-    def test_unknown_phase_defaults_to_thinking(self) -> None:
-        assert get_visual_state("unknown_phase") == "thinking"
 
 
 # ── CardSession.transition() ─────────────────────────────────────────
@@ -325,11 +269,11 @@ class TestCardSessionShouldProceed:
         assert s.should_proceed("test") is False
 
 
-# ── CardSession.is_terminal_phase / visual_state ─────────────────────
+# ── CardSession.is_terminal_phase ─────────────────────────
 
 
 class TestCardSessionProperties:
-    """is_terminal_phase and visual_state properties."""
+    """is_terminal_phase property."""
 
     def _make_session(self) -> CardSession:
         loop = asyncio.new_event_loop()
@@ -362,20 +306,6 @@ class TestCardSessionProperties:
         s = self._make_session()
         s.state = "terminated"
         assert s.is_terminal_phase is True
-
-    def test_visual_state_idle(self) -> None:
-        s = self._make_session()
-        assert s.visual_state == "thinking"
-
-    def test_visual_state_streaming(self) -> None:
-        s = self._make_session()
-        s.state = "streaming"
-        assert s.visual_state == "streaming"
-
-    def test_visual_state_completed(self) -> None:
-        s = self._make_session()
-        s.state = "completed"
-        assert s.visual_state == "complete"
 
 
 # ── CardSession.enter_terminal() ─────────────────────────────────────
@@ -594,9 +524,9 @@ class TestBackwardCompatibility:
     def test_state_package_reexports(self) -> None:
         """Phase types re-exported from state package."""
         from hermes_lark_streaming.state import (
-            CardPhase, TerminalReason, CardVisualState,
+            CardPhase, TerminalReason,
             TERMINAL_PHASES, _TERMINAL,
-            is_legal_transition, get_visual_state,
+            is_legal_transition,
         )
         assert CardPhase.CREATION_FAILED == "creation_failed"
         assert TerminalReason.UNAVAILABLE == "unavailable"

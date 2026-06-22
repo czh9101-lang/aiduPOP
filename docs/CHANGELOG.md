@@ -1,3 +1,26 @@
+## v1.2.0 (2026-06-22)
+
+| 类型 | 问题/功能 | 原因 | 修复/说明 |
+|------|-----------|------|-----------|
+| ✨ Feature (P0) | agent 卡片头部（head）可配置 | `header.enabled` 配置项与 builder/controller 接线在 v1.0.x 已存在但为"半成品"：无文档、无测试、封卡不变色、降级不覆盖，用户根本不知道有此功能 | 全面补全：① 文档化（README/README.zh-CN/SKILL/AGENT_GUIDE）；② 默认配置注入 `header: {enabled: false}`；③ `/aowen status` 展示 header 状态；④ 启动诊断日志加 header；⑤ 新增 header 测试覆盖 |
+| 🐛 Bug Fix (P0) | 开启 header 后封卡头部颜色不变 | 飞书 CardKit settings/batch_update 接口不支持更新 card-level header（官方文档求证），增量封卡后头部永远停留在"处理中"蓝色。只有全量重建（cardkit_update）能改 header | **方案 B**：`_do_linear_complete` Step 5 加分支——`header_enabled=True` 时跳过增量封卡 `_preservative_seal`，直接走全量重建 fallback，用 `build_unified_complete_card` 生成正确状态色 header（蓝→绿/红）。关闭时（默认）仍走增量封卡，性能不变 |
+| ✨ Feature | IM 降级卡片支持 header | `build_im_fallback_card`/`build_gateway_card` 不支持 header，开启 header 后降级会突然丢失头部 | **方案 A**：两个 builder 加 `header_enabled` 参数，降级调用点传 `self._cfg.header_enabled`，保持视觉一致 |
+| 🐛 Bug Fix (P0) | 开 header 后 agent 报错时头部颜色与正文矛盾 | `is_error` 仅基于 `session.state` 判断，但 agent 报错时 `on_completed(error_message=...)` 只存 error_message，state 设为 COMPLETING（非 error 态）→ `is_error=False` → header 绿色"已完成"，但正文显示红色错误面板 | `is_error` 兼顾 error_message：`session.state in (CREATION_FAILED, TERMINATED) or (bool(error_message) and not is_aborted)`。报错时 header 正确用红色。**副作用（正向改善）**：默认路径（未开 header）agent 报错时，footer 状态文本也从"已完成"改为"出错"（红字），与红色 error panel 视觉一致（v1.1.x 是 footer"已完成"+红色 error panel 的矛盾） |
+| 🔧 Fix | H6 header 主动重建污染"全卡重建"指标 + 误导性日志 | 开 header 正常完成走全量重建（设计行为），但复用 fallback 路径导致打"preservative seal failed"日志 + 调 `record_full_rebuild()`，/aowen monitor 的"全卡重建"计数被污染 | fallback 入口加 `_header_driven_rebuild` 标志区分"header 主动重建"vs"真实失败重建"：前者用专属日志"header rebuild succeeded"、不计入 full_rebuilds 指标；后者保持原日志+指标 |
+| 🐛 Bug Fix (P0) | `/aowen config reload` 对 `_plugin_sec()` 属性不生效 | Config 无单例机制，`Config()` 每次新建实例。aowen reload 新建 Config 调 `reload()` 只清新实例缓存，controller/patching 持有的旧实例缓存不清 → 改 `header.enabled`/`enabled`/`linear`/`flush_interval_ms` 等配置 + reload 后不生效，必须重启网关 | Config 改单例模式（`__new__` + `_instance`），所有 `Config()` 返回同一实例，`reload()` 全局生效。conftest 加 `_reset_config_singleton` fixture 保证测试隔离 |
+| 🔧 Fix | header 主动重建日志噪音 | 开 header 用户每次完成打 2 条 INFO 日志（skip + succeeded），生产中刷屏 | 两条日志降为 DEBUG（正常路径诊断信息） |
+| 🔧 Fix | L1 日志去重在 drain 循环中遗漏 | `_streaming_closed_logged` 只覆盖 `_do_unified_flush` 3 处，drain 循环（最多 8 轮）2 处 streaming closed INFO 日志未去重，最多 16 条重复 | drain 阶段 2 处也加 `_streaming_closed_logged` 检查（300313 仍每次打，非重复事件） |
+| 🔧 Fix | "streaming closed" 日志刷屏 | 生产中长对话末尾同一张卡 45 秒内打 15 条重复 INFO 日志 | `CardSession` 加 `_streaming_closed_logged` 标志，第一次打 INFO 后降为 DEBUG |
+| 🏗️ Architecture | 删除 `CardVisualState` 死代码 | `CardVisualState`/`PHASE_TO_VISUAL`/`get_visual_state`/`session.visual_state` 在生产代码中从未被读取，卡片渲染实际用 `session.state`/`is_error`/`is_aborted` | 删除类、映射、函数、属性及相关导出和测试 |
+| 📝 Docs | CHANGELOG v1.1.0 P0-3 mtime 描述勘误 | v1.1.0 先加了 mtime 自动检测（P0-3），后于同一版本周期内提交 0d468cd 明确删除（有意设计：避免高频 stat 系统调用），但 CHANGELOG 未同步更新，仍写"移到 `_plugin_sec()`" | 补勘误说明：mtime 检测已被有意移除，配置刷新靠 `/aowen config reload` 或重启；仅 inject_time/show_reasoning/gateway_cards 走 60s TTL 缓存。v1.2.0 不补回 mtime（尊重原决策） |
+| 📝 Docs | panel 拆分函数现状说明 | v1.1.0 称 `build_panel_header`/`build_panel_children` 拆分支持"只重建 children"优化，但优化从未实现（两函数仅内部调用） | `build_unified_panel` docstring 补注释明确"单独入口当前仅内部使用，优化预留未启用"，避免维护者误解 |
+| 🔧 Fix | 错误卡片未显示调试 ID | `_build_error_panel` 调用时未传 `card_trace_id`，错误卡片不显示调试 ID，用户报 issue 时无法提供 trace 关联日志 | `build_unified_complete_card`/`build_preservative_seal_actions` 加 `card_trace_id` 参数，传给 `_build_error_panel`。错误卡片显示"调试 ID: xxx"并提示"如果反复出错，请把调试 ID 反馈给开发者" |
+| 🔧 Fix | 错误卡片技术详情区显示 HTML 标签乱码 | v1.1.0 错误面板用 `<details><summary>` HTML 标签实现折叠，但飞书 markdown 组件不支持 HTML 标签，标签会显示成乱码文本 | 去掉 `<details>` 标签，技术详情用分隔线 + 标题区分。外层 `collapsible_panel` 已提供折叠能力，无需嵌套 HTML 标签 |
+
+> **延后到 v1.3.0**：TextState 死方法精简（C3）、prune 日志显示更长 msg_id（M1）、on_completed 日志降级（M2）、`_sessions` 并发锁（M3）、Config `on_reload()` dead code 清理、`patching._get_config()` 缓存简化。
+
+---
+
 ## v1.1.3 (2026-06-21)
 
 | 类型 | 问题/功能 | 原因 | 修复/说明 |
@@ -41,6 +64,8 @@
 | 🐛 Bug Fix (P0-1) | 并发限流调用 `on_message_interrupted` 方法不存在 | `controller/core.py` 在 `on_message_started` 并发限流分支中调用 `self.on_message_interrupted(...)`，但实际方法名为 `on_interrupted`，导致同一 chat_id 多消息场景抛 AttributeError，新消息也无法创建卡片 | 改为 `self.on_interrupted(...)`；并发限流正常触发旧卡 seal |
 | 🐛 Bug Fix (P0-2) | FeishuClient 自定义 `base_url` 不生效 | `feishu/client.py` `__init__` 只用 `app_id`/`app_secret` 构建 client，未调用 `.domain(config.base_url)`，导致自建飞书/Lark 海外域名用户无法访问 API（永远走默认 open.feishu.cn） | `__init__` 中追加 `builder = builder.domain(config.base_url)`，`feishu.base_url` 配置项真正生效 |
 | 🐛 Bug Fix (P0-3) | 部分配置属性 mtime 热更新失效 | `_check_mtime_and_invalidate()` 只在 `enabled` 属性中调用，其他属性（`linear`/`flush_interval_ms`/`max_tool_steps` 等）走 `_plugin_sec()` 不检测 mtime，改完配置文件后这些属性最多延迟 60s（TTL）才生效 | 将 mtime 检测从 `enabled` 属性移到 `_plugin_sec()`，所有走该方法的属性都检测文件变化 |
+
+> **勘误（v1.2.0 补）**：上述 mtime 自动检测机制已在 **v1.1.0 内部**（提交 `0d468cd`，2026-06-18）被**有意移除**——删除了 `_check_mtime_and_invalidate()` 方法和 `_config_mtime` 字段，`_plugin_sec()` 不再调 `stat()`。原因：流式输出期间高频读配置，每次 stat 系统调用开销不可接受。配置刷新方式改为：`/aowen config reload` 立即生效，或重启网关。仅 `inject_time`/`show_reasoning`/`gateway_cards` 三个属性走 60s TTL 缓存（`_reload_cached()`）。**此为有意设计，非 bug**，v1.2.0 不补回 mtime 检测。
 | ✨ Feature (P0-3) | `/aowen config reload` 命令 | 改完 config.yaml 后必须等最多 60 秒 mtime 检测才生效，调试不便 | `aowen/__init__.py` 新增 `/aowen config reload` 命令，立即清缓存并触发 `on_reload` 回调，配置秒级生效 |
 | 🐛 Bug Fix (P0-4) | pyproject.toml packages 列表遗漏 5 个子包 | `[tool.setuptools.packages.find].include` 只列了 controller/cardkit/patching/state，缺 feishu/config/monitor/plugin/flush，pip install 时这 5 个子包不会被打包，运行时 ImportError | packages 列表补全 9 个子包（含 `feishu*`/`config*`/`aowen*`/`plugin*`/`flush*`） |
 | 🐛 Bug Fix (P0-5) | `unregister()` 未清理活跃会话 | `plugin/__init__.py` `unregister()` 只清理 config，未清空 `ctrl._sessions`，卸载/重装后旧会话残留导致内存泄漏与潜在竞态 | `unregister()` 新增 `ctrl._sessions.clear()` 清空活跃会话 |

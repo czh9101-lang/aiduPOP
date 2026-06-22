@@ -104,6 +104,10 @@ class E2ETestRunner:
         self._real_msg_counter: int = 0
         # v1.1.1: 封卡前缓存数据（封卡后 unified_state 被释放）
         self._test_cache: dict[str, dict] = {}
+        # v1.2.0: 真飞书模式下捕获传入飞书的 card JSON（验证 header 等字段）
+        # mock 模式下用 mock_server.call_log 即可，不需要此捕获
+        self._captured_create_card: dict[str, Any] | None = None
+        self._captured_update_cards: list[dict[str, Any]] = []
 
     @property
     def is_real_mode(self) -> bool:
@@ -215,6 +219,10 @@ class E2ETestRunner:
                 f"请检查 bot 是否在群内且有发送权限。"
                 f"错误: {e}"
             ) from e
+
+        # v1.2.0: wrap cardkit_create / cardkit_update 捕获传入的 card JSON
+        # 用于真飞书模式下验证 header 等字段（真飞书无法回查卡片内容）
+        self._wrap_client_to_capture_cards(client)
 
     async def _send_anchor_message(self, client: Any, chat_id: str) -> str:
         """Send a text message to the test chat, return its message_id.
@@ -329,6 +337,66 @@ class E2ETestRunner:
         mock_client.reply_text = _reply_text
 
         return mock_client
+
+    def _wrap_client_to_capture_cards(self, client: Any) -> None:
+        """v1.2.0: 真飞书模式下 wrap cardkit_create / cardkit_update.
+
+        捕获传入飞书的 card JSON，用于验证 header 等字段。
+        真飞书无法回查卡片内容，只能靠捕获"我们发了什么"来验证。
+        """
+        import copy
+        orig_create = client.cardkit_create
+        orig_update = client.cardkit_update
+
+        async def _wrapped_create(card):
+            self._captured_create_card = copy.deepcopy(card)
+            return await orig_create(card)
+
+        async def _wrapped_update(card_id, card, *, sequence=0):
+            self._captured_update_cards.append(copy.deepcopy(card))
+            return await orig_update(card_id, card, sequence=sequence)
+
+        client.cardkit_create = _wrapped_create
+        client.cardkit_update = _wrapped_update
+
+    def enable_header(self) -> None:
+        """v1.2.0: 测试中开启 header_enabled（setup 后调用）."""
+        self._controller._cfg.header_enabled = True
+
+    def get_create_card_json(self) -> dict[str, Any] | None:
+        """v1.2.0: 获取 cardkit_create 传入的 card JSON.
+
+        mock 模式: 从 mock_server 取第一张卡的 card_json
+        真飞书模式: 取捕获的 _captured_create_card
+        """
+        if self._use_real_feishu:
+            return self._captured_create_card
+        # mock 模式: 取第一张卡
+        cards = self.mock_server.get_cards()
+        if not cards:
+            return None
+        first_card_id = next(iter(cards))
+        return cards[first_card_id].card_json
+
+    def get_update_card_jsons(self) -> list[dict[str, Any]]:
+        """v1.2.0: 获取 cardkit_update（全量重建）传入的 card JSON 列表.
+
+        mock 模式: 从 mock_server.call_log 取所有 cardkit_update 调用对应的 card
+        真飞书模式: 取捕获的 _captured_update_cards
+        """
+        if self._use_real_feishu:
+            return list(self._captured_update_cards)
+        # mock 模式: cardkit_update 会更新 card_json，取最后一张卡的当前 card_json
+        cards = self.mock_server.get_cards()
+        if not cards:
+            return []
+        # 统计 cardkit_update 调用次数
+        update_calls = [c for c in self.mock_server.call_log if c["op"] == "cardkit_update"]
+        if not update_calls:
+            return []
+        # mock 只保留最终 card_json，无法还原历史；返回最终状态
+        first_card_id = next(iter(cards))
+        return [cards[first_card_id].card_json]
 
     async def teardown(self) -> None:
         """Clean up patches and state."""

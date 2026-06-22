@@ -242,7 +242,7 @@ class UnifiedControllerMixin:
 
             except FeishuAPIError:
                 _logger.info("linear CardKit create failed, falling back to IM card")
-                card = build_im_fallback_card()
+                card = build_im_fallback_card(header_enabled=self._cfg.header_enabled)
                 card_msg_id = await self._client.reply_card(reply_to, card)
                 session.card_msg_id = card_msg_id
                 session.use_cardkit = False
@@ -394,7 +394,11 @@ class UnifiedControllerMixin:
 
         # 用当前累积的 answer_text 构建完整卡片
         content = state.answer_text or "处理中..."
-        card = build_gateway_card(content)
+        card = build_gateway_card(
+            content,
+            header_enabled=self._cfg.header_enabled,
+            header_status="streaming" if self._cfg.header_enabled else "",
+        )
 
         try:
             await self._client.update_card(session.card_msg_id, card)
@@ -437,7 +441,15 @@ class UnifiedControllerMixin:
             else:
                 content = "完成"
 
-            card = build_gateway_card(content)
+            card = build_gateway_card(
+                content,
+                header_enabled=self._cfg.header_enabled,
+                header_status=(
+                    "error" if is_error
+                    else "stopped" if is_aborted
+                    else "completed"
+                ) if self._cfg.header_enabled else "",
+            )
             await self._client.update_card(session.card_msg_id, card)
 
             _logger.info(
@@ -584,10 +596,17 @@ class UnifiedControllerMixin:
                     state.tool_steps_dirty = False
                 except FeishuAPIError as e:
                     if e.code == CARDKIT_STREAMING_CLOSED:
-                        _logger.info(
-                            "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
-                            session.card_id[:12],
-                        )
+                        if session._streaming_closed_logged:
+                            _logger.debug(
+                                "unified flush phase2: streaming closed (already logged): card=%s",
+                                session.card_id[:12],
+                            )
+                        else:
+                            _logger.info(
+                                "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
+                                session.card_id[:12],
+                            )
+                            session._streaming_closed_logged = True
                         session._streaming_closed = True
                         return
                     if is_schema_error(e):
@@ -736,10 +755,17 @@ class UnifiedControllerMixin:
                     session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
             except FeishuAPIError as e:
                 if e.code == CARDKIT_STREAMING_CLOSED:
-                    _logger.info(
-                        "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
-                        session.card_id[:12],
-                    )
+                    if session._streaming_closed_logged:
+                        _logger.debug(
+                            "unified flush phase3: streaming closed (already logged): card=%s",
+                            session.card_id[:12],
+                        )
+                    else:
+                        _logger.info(
+                            "unified flush: streaming closed, will be handled by TTL or seal: card=%s",
+                            session.card_id[:12],
+                        )
+                        session._streaming_closed_logged = True
                     session._streaming_closed = True
                     return
                 if is_schema_error(e):
@@ -781,10 +807,17 @@ class UnifiedControllerMixin:
                 state.answer_dirty = False
             except FeishuAPIError as e:
                 if e.code == CARDKIT_STREAMING_CLOSED:
-                    _logger.info(
-                        "HLS: unified stream — streaming closed, will be handled by TTL or seal: card=%s",
-                        session.card_id[:12],
-                    )
+                    if session._streaming_closed_logged:
+                        _logger.debug(
+                            "HLS: unified stream — streaming closed (already logged): card=%s",
+                            session.card_id[:12],
+                        )
+                    else:
+                        _logger.info(
+                            "HLS: unified stream — streaming closed, will be handled by TTL or seal: card=%s",
+                            session.card_id[:12],
+                        )
+                        session._streaming_closed_logged = True
                     session._streaming_closed = True
                     return
                 if is_element_not_found_error(e):
@@ -1101,6 +1134,7 @@ class UnifiedControllerMixin:
                     footer_fields=footer_fields,
                     footer_show_label=footer_show_label,
                     existing_elements=session.existing_elements,
+                    card_trace_id=session.card_trace_id,
                 )
             )
 
@@ -1352,6 +1386,7 @@ class UnifiedControllerMixin:
                                 footer_fields=footer_fields,
                                 footer_show_label=footer_show_label,
                                 existing_elements=session.existing_elements,
+                                card_trace_id=session.card_trace_id,
                             )
                         )
                         # batch_update BEFORE close_streaming (same order as try block)
@@ -1506,7 +1541,12 @@ class UnifiedControllerMixin:
                     state.tool_steps_dirty = False
                 except FeishuAPIError as e:
                     if e.code == CARDKIT_STREAMING_CLOSED:
-                        _logger.info("drain: streaming already closed, skipping")
+                        # v1.2.0 Y3: drain 阶段也用 _streaming_closed_logged 去重
+                        if session._streaming_closed_logged:
+                            _logger.debug("drain: streaming already closed (already logged)")
+                        else:
+                            _logger.info("drain: streaming already closed, skipping")
+                            session._streaming_closed_logged = True
                         session._streaming_closed = True
                     elif is_schema_error(e):
                         _logger.error("drain SCHEMA ERROR: %s — detail: %s", e, e.extract_schema_detail())
@@ -1535,11 +1575,20 @@ class UnifiedControllerMixin:
                     if e.code == CARDKIT_STREAMING_CLOSED or is_element_not_found_error(e):
                         if e.code == CARDKIT_STREAMING_CLOSED:
                             session._streaming_closed = True
-                        _logger.info(
-                            "HLS: drain answer — %s, falling back to partial_update_element msg=%s",
-                            "streaming closed" if e.code == CARDKIT_STREAMING_CLOSED else "300313",
-                            (session.message_id or "?")[:12],
-                        )
+                        # v1.2.0 Y3: streaming closed 日志去重；300313 仍每次打（非重复事件）
+                        if e.code == CARDKIT_STREAMING_CLOSED and session._streaming_closed_logged:
+                            _logger.debug(
+                                "HLS: drain answer — streaming closed (already logged) msg=%s",
+                                (session.message_id or "?")[:12],
+                            )
+                        else:
+                            _logger.info(
+                                "HLS: drain answer — %s, falling back to partial_update_element msg=%s",
+                                "streaming closed" if e.code == CARDKIT_STREAMING_CLOSED else "300313",
+                                (session.message_id or "?")[:12],
+                            )
+                            if e.code == CARDKIT_STREAMING_CLOSED:
+                                session._streaming_closed_logged = True
                         session.sequence += 1
                         ok = await _fallback_write_answer(
                             self._client, session.card_id, content,
@@ -1602,12 +1651,22 @@ class UnifiedControllerMixin:
 
         # ── Build footer data ──
         footer_data = session.footer
-        is_error = session.state in (CREATION_FAILED, TERMINATED)
         is_aborted = getattr(session, "_was_aborted", False) or session.state == ABORTED
         error_message = getattr(session, "error_message", "")
+        # v1.2.0 B1 fix: is_error 必须兼顾 error_message。
+        # agent 报错时 on_completed(error_message=...) 只存 error_message 到 session，
+        # state 设为 COMPLETING（非 error 态）。若仅靠 state 判断，开了 header 后
+        # 报错卡片会显示绿色"已完成"头部 + 红色错误正文（视觉矛盾）。
+        # 故：有 error_message 且非中断 → 视为 error，header 用红色。
+        is_error = (
+            session.state in (CREATION_FAILED, TERMINATED)
+            or (bool(error_message) and not is_aborted)
+        )
 
         # ── Step 5: Try preservative seal ──
         # v1.1.3: IM 降级模式用 update_card 封卡（不走 _preservative_seal）
+        # v1.2.0 Y1 fix: header 主动重建走独立标志，不复用"failed"日志/指标
+        _header_driven_rebuild = False  # True = header 主动全量重建（非失败）
         if not session.use_cardkit and session.card_msg_id:
             seal_ok = await self._do_im_fallback_seal(
                 session,
@@ -1616,6 +1675,22 @@ class UnifiedControllerMixin:
                 is_aborted=is_aborted,
                 error_message=error_message,
             )
+        elif self._cfg.header_enabled:
+            # v1.2.0 H6 方案B: 开启 header 时跳过增量封卡，直接走全量重建
+            # 原因：飞书 CardKit settings/batch_update 接口不支持更新 card-level
+            # header（官方文档求证），增量封卡后 header 永远停留在 "streaming"
+            # （蓝色"处理中"），无法变成 completed(绿)/error(红)/stopped(红)。
+            # 全量重建用 build_unified_complete_card(header_enabled=True) 生成
+            # 正确状态色的 header。代价：全量重建比增量封卡多传整张卡片 JSON，
+            # 但开了 header 的用户主动选择了"要头部"，性能代价可接受。
+            # 关闭时（默认）仍走 _preservative_seal，行为与 v1.1.x 一致。
+            _logger.debug(
+                "HLS: header_enabled — skip preservative seal, go full rebuild "
+                "for correct header color card=%s trace=%s",
+                (session.card_id or "")[:12], session.card_trace_id,
+            )
+            _header_driven_rebuild = True  # 主动重建，非失败
+            seal_ok = False  # 触发下方全量重建 fallback
         else:
             seal_ok = await self._preservative_seal(
                 session,
@@ -1636,10 +1711,12 @@ class UnifiedControllerMixin:
 
         if not seal_ok:
             # ── Fallback: full card rebuild ──
-            _logger.info(
-                "preservative seal failed, falling back to full rebuild: card=%s",
-                (session.card_id or "")[:12],
-            )
+            # v1.2.0 Y1: 区分 header 主动重建 vs 真实失败重建
+            if not _header_driven_rebuild:
+                _logger.info(
+                    "preservative seal failed, falling back to full rebuild: card=%s",
+                    (session.card_id or "")[:12],
+                )
             try:
                 # Close streaming first (may already be closed by the failed seal attempt)
                 # Also update summary for the conversation list.
@@ -1709,22 +1786,31 @@ class UnifiedControllerMixin:
                     panel_events=state.panel_events if state else None,
                     max_tool_steps=self._cfg.max_tool_steps,
                     max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                    card_trace_id=session.card_trace_id,
                 )
                 session.sequence += 1
                 assert self._client is not None
                 await self._client.cardkit_update(session.card_id, complete_card, sequence=session.sequence)
                 seal_ok = True
-                _logger.info(
-                    "HLS: full rebuild succeeded card=%s trace=%s",
-                    session.card_id[:12],
-                    session.card_trace_id,
-                )
-                # v1.1.0: Record metrics
-                try:
-                    from ..aowen import record_full_rebuild
-                    record_full_rebuild()
-                except Exception:
-                    pass
+                if _header_driven_rebuild:
+                    # v1.2.0 Y1: header 主动重建，用专属 DEBUG 日志（正常路径，不刷屏）
+                    _logger.debug(
+                        "HLS: header rebuild succeeded (header color switch) card=%s trace=%s",
+                        session.card_id[:12],
+                        session.card_trace_id,
+                    )
+                else:
+                    _logger.info(
+                        "HLS: full rebuild succeeded card=%s trace=%s",
+                        session.card_id[:12],
+                        session.card_trace_id,
+                    )
+                    # v1.1.0: Record metrics — 仅真实失败重建计入 full_rebuilds
+                    try:
+                        from ..aowen import record_full_rebuild
+                        record_full_rebuild()
+                    except Exception:
+                        pass
             except Exception:
                 _logger.warning(
                     "full rebuild also failed: card=%s",
