@@ -179,8 +179,6 @@ display:
 | `/aowen status` | 查看插件状态 + 当前配置（折叠面板展示） |
 | `/aowen monitor` | 查看监控面板（卡片创建数、API 调用数、错误码分布等） |
 | `/aowen monitor reset` | 重置监控统计计数器 |
-| `/aowen diagnose` | 生成远程诊断报告（脱敏，发给开发者定位问题） |
-| `/aowen diagnose reset` | 清空诊断事件记录 |
 | `/aowen config reload` | 修改 config.yaml 后重新加载配置立即生效 |
 | `/aowen` | 同 `/aowen help` |
 

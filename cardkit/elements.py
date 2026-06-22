@@ -803,9 +803,9 @@ def _build_error_panel(
         if card_trace_id:
             friendly_en += f"\n\nDebug ID: `{card_trace_id}`"
             friendly_zh += f"\n\n调试 ID: `{card_trace_id}`"
-        # v1.2.0: 提示用户发 /aowen diagnose 获取诊断报告
-        friendly_en += "\n\nSend `/aowen diagnose` to get a diagnostic report for the developer."
-        friendly_zh += "\n\n发送 `/aowen diagnose` 获取诊断报告，发给开发者定位问题。"
+            # v1.2.0: 引导用户通过 issue 模板反馈（附调试 ID 帮开发者定位）
+            friendly_en += "\n\nIf this keeps happening, report the Debug ID to the developer."
+            friendly_zh += "\n\n如果反复出错，请把调试 ID 反馈给开发者。"
 
         tech_detail = error_message.strip() if error_message else ""
         if tech_detail:

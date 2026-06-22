@@ -2,8 +2,6 @@
 
 | 类型 | 问题/功能 | 原因 | 修复/说明 |
 |------|-----------|------|-----------|
-| ✨ Feature (P0) | `/aowen diagnose` 远程诊断命令 | 用户生产环境遇问题报 issue 时表述不清，开发者难以远程定位。需要不涉及用户数据隐私的方式获取日志数据 | 新增 `/aowen diagnose` 命令：生成脱敏诊断报告卡片（环境信息+补丁状态+最近30条错误事件+错误码分布+诊断ID）。错误事件环形缓冲区只存结构化信息（时间/错误码/操作/trace_id），不含消息内容/用户ID/chatID/AI回答。用户主动发命令才生成，不自动上报。`/aowen diagnose reset` 清空记录 |
-| ✨ Feature | 错误卡片显示调试 ID + 诊断提示 | `_build_error_panel` 调用时未传 `card_trace_id`，错误卡片不显示调试 ID；用户不知道遇错后如何反馈 | `build_unified_complete_card`/`build_preservative_seal_actions` 加 `card_trace_id` 参数，传给 `_build_error_panel`。错误卡片显示"调试 ID: xxx"并提示"发送 /aowen diagnose 获取诊断报告" |
 | ✨ Feature (P0) | agent 卡片头部（head）可配置 | `header.enabled` 配置项与 builder/controller 接线在 v1.0.x 已存在但为"半成品"：无文档、无测试、封卡不变色、降级不覆盖，用户根本不知道有此功能 | 全面补全：① 文档化（README/README.zh-CN/SKILL/AGENT_GUIDE）；② 默认配置注入 `header: {enabled: false}`；③ `/aowen status` 展示 header 状态；④ 启动诊断日志加 header；⑤ 新增 header 测试覆盖 |
 | 🐛 Bug Fix (P0) | 开启 header 后封卡头部颜色不变 | 飞书 CardKit settings/batch_update 接口不支持更新 card-level header（官方文档求证），增量封卡后头部永远停留在"处理中"蓝色。只有全量重建（cardkit_update）能改 header | **方案 B**：`_do_linear_complete` Step 5 加分支——`header_enabled=True` 时跳过增量封卡 `_preservative_seal`，直接走全量重建 fallback，用 `build_unified_complete_card` 生成正确状态色 header（蓝→绿/红）。关闭时（默认）仍走增量封卡，性能不变 |
 | ✨ Feature | IM 降级卡片支持 header | `build_im_fallback_card`/`build_gateway_card` 不支持 header，开启 header 后降级会突然丢失头部 | **方案 A**：两个 builder 加 `header_enabled` 参数，降级调用点传 `self._cfg.header_enabled`，保持视觉一致 |
@@ -16,7 +14,7 @@
 | 🏗️ Architecture | 删除 `CardVisualState` 死代码 | `CardVisualState`/`PHASE_TO_VISUAL`/`get_visual_state`/`session.visual_state` 在生产代码中从未被读取，卡片渲染实际用 `session.state`/`is_error`/`is_aborted` | 删除类、映射、函数、属性及相关导出和测试 |
 | 📝 Docs | CHANGELOG v1.1.0 P0-3 mtime 描述勘误 | v1.1.0 先加了 mtime 自动检测（P0-3），后于同一版本周期内提交 0d468cd 明确删除（有意设计：避免高频 stat 系统调用），但 CHANGELOG 未同步更新，仍写"移到 `_plugin_sec()`" | 补勘误说明：mtime 检测已被有意移除，配置刷新靠 `/aowen config reload` 或重启；仅 inject_time/show_reasoning/gateway_cards 走 60s TTL 缓存。v1.2.0 不补回 mtime（尊重原决策） |
 | 📝 Docs | panel 拆分函数现状说明 | v1.1.0 称 `build_panel_header`/`build_panel_children` 拆分支持"只重建 children"优化，但优化从未实现（两函数仅内部调用） | `build_unified_panel` docstring 补注释明确"单独入口当前仅内部使用，优化预留未启用"，避免维护者误解 |
-| 📝 Docs | 新增 ROADMAP 文档 | 历史迭代无独立追踪文档，难以掌握"做了什么/没做什么/延后什么" | docs/ 新增 `ROADMAP.md`，回溯 v1.0.0~v1.1.3 历史并追踪 v1.2.0 计划与 v1.3.0 预告 |
+| 🔧 Fix | 错误卡片未显示调试 ID | `_build_error_panel` 调用时未传 `card_trace_id`，错误卡片不显示调试 ID，用户报 issue 时无法提供 trace 关联日志 | `build_unified_complete_card`/`build_preservative_seal_actions` 加 `card_trace_id` 参数，传给 `_build_error_panel`。错误卡片显示"调试 ID: xxx"并提示"如果反复出错，请把调试 ID 反馈给开发者" |
 
 > **延后到 v1.3.0**：TextState 死方法精简（C3）、prune 日志显示更长 msg_id（M1）、on_completed 日志降级（M2）、`_sessions` 并发锁（M3）、Config `on_reload()` dead code 清理、`patching._get_config()` 缓存简化。
 
