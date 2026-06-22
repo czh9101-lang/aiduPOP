@@ -116,3 +116,17 @@ def _cleanup_event_loops():
             pass
         finally:
             loop.close()
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_singleton():
+    """v1.2.0: 每个 test 重置 Config 单例，避免测试间状态泄漏.
+
+    Config 改单例后，controller/patching/aowen 持有同一实例。
+    测试若修改 _raw/_reload_cache 会影响后续测试。此 fixture 在
+    每个 test 前清掉单例，保证隔离。
+    """
+    from hermes_lark_streaming.config.reader import Config
+    Config._instance = None
+    yield
+    Config._instance = None

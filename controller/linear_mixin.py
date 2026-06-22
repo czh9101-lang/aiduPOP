@@ -1682,7 +1682,7 @@ class UnifiedControllerMixin:
             # 正确状态色的 header。代价：全量重建比增量封卡多传整张卡片 JSON，
             # 但开了 header 的用户主动选择了"要头部"，性能代价可接受。
             # 关闭时（默认）仍走 _preservative_seal，行为与 v1.1.x 一致。
-            _logger.info(
+            _logger.debug(
                 "HLS: header_enabled — skip preservative seal, go full rebuild "
                 "for correct header color card=%s trace=%s",
                 (session.card_id or "")[:12], session.card_trace_id,
@@ -1790,8 +1790,8 @@ class UnifiedControllerMixin:
                 await self._client.cardkit_update(session.card_id, complete_card, sequence=session.sequence)
                 seal_ok = True
                 if _header_driven_rebuild:
-                    # v1.2.0 Y1: header 主动重建，用专属日志，不计入 full_rebuilds 指标
-                    _logger.info(
+                    # v1.2.0 Y1: header 主动重建，用专属 DEBUG 日志（正常路径，不刷屏）
+                    _logger.debug(
                         "HLS: header rebuild succeeded (header color switch) card=%s trace=%s",
                         session.card_id[:12],
                         session.card_trace_id,
