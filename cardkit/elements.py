@@ -809,7 +809,10 @@ def _build_error_panel(
 
         tech_detail = error_message.strip() if error_message else ""
         if tech_detail:
-            body_content = f"{friendly_zh}\n\n<details><summary>技术详情</summary>\n\n```\n{tech_detail}\n```\n\n</details>"
+            # v1.2.0: 去掉 <details> HTML 标签（飞书 markdown 不支持 HTML 标签，
+            # 会显示成乱码）。外层 collapsible_panel 已提供折叠能力，
+            # 技术详情用分隔线 + 标题区分即可。
+            body_content = f"{friendly_zh}\n\n---\n**技术详情**\n```\n{tech_detail}\n```"
         else:
             body_content = friendly_zh
 
