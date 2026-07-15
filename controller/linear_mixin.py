@@ -45,6 +45,7 @@ from .mixin import (
     TERMINATED,
 )
 from ..state.phase import TerminalReason
+from ..patching import _msg_ctx, _thread_local_ctx, _model_cache, _get_event_message_id
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -63,6 +64,32 @@ def _build_seal_summary(state: UnifiedLinearState | None) -> str:
     if summary_text:
         return summary_text[:120].replace("\n", " ").replace("```", "").strip()
     return ""
+
+
+def _get_model_from_ctx() -> str | None:
+    """【嘟嘟定制 v22.2 根治】获取当前 model 名，卡片 Phase 2 起可用。
+
+    优先 _model_cache（模块级 dict，进程内全局可靠），
+    回退 ctx dict 里的 _agent_ref.model（同 task 内有效）。
+    升级时 grep 此标记找回定制点。"""
+    # 主路径：模块全局缓存 — 跨所有 asyncio task / 线程都可靠
+    eid = _get_event_message_id()
+    if eid and eid in _model_cache:
+        return _model_cache[eid]
+    model_str = _model_cache.get("current")
+    if model_str:
+        return model_str
+
+    # 回退：ctx dict 里的 agent 对象引用（_agent_model 字符串不可靠，已淘汰）
+    ctx = _msg_ctx.get()
+    if ctx is None:
+        ctx = getattr(_thread_local_ctx, "data", None)
+    if ctx is None:
+        return None
+    agent_ref = ctx.get("_agent_ref")
+    if agent_ref is not None:
+        return getattr(agent_ref, "model", None)
+    return None
 
 async def _fallback_write_answer(
     client: Any,
@@ -121,28 +148,62 @@ class UnifiedControllerMixin:
             assert self._client is not None
 
             try:
-                reply_to = session.anchor_id or session.message_id
                 card = build_streaming_card_v2(
                     include_unified_panel=False,   # Panel added on first token
                     include_answer_element=False,   # Answer element added with panel
-                    include_loading_hint=True,      # "正在加载上下文..."
+                    include_loading_hint=False,      # 嘟嘟定制: 不显示 loading 提示
                     streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                     print_strategy=self._cfg.print_strategy,
                     print_step=self._cfg.print_step,
                 )
-                card_id = await self._client.cardkit_create(card)
-                card_msg_id = await self._client.reply_card_by_id(reply_to, card_id)
+                # 嘟嘟定制: send 失败时重建卡片重试（重启风暴后飞书 card 缓存失效常见）
+                _SEND_MAX_RETRIES = 2
+                for _send_attempt in range(_SEND_MAX_RETRIES + 1):
+                    card_id = await self._client.cardkit_create(card)
+                    try:
+                        card_msg_id = await self._client.send_card_by_id_to_chat(
+                            session.chat_id, card_id,
+                        )
+                        break  # 发送成功
+                    except FeishuAPIError as send_err:
+                        # 终端错误码(消息被删/撤回)不重试，直接抛出
+                        if is_terminal_api_code(send_err.code):
+                            raise
+                        if _send_attempt >= _SEND_MAX_RETRIES:
+                            raise
+                        _logger.info(
+                            "linear send retry (cardid cache invalidation?): "
+                            "attempt=%d/%d code=%s sub=%s msg=%s",
+                            _send_attempt + 1, _SEND_MAX_RETRIES + 1,
+                            send_err.code, send_err.extract_sub_code(),
+                            str(send_err)[:120],
+                        )
+                        # 重建卡片（获取新鲜 card template）再试
+                        card = build_streaming_card_v2(
+                            include_unified_panel=False,
+                            include_answer_element=False,
+                            include_loading_hint=False,
+                            streaming_panel_expanded=self._cfg.streaming_panel_expanded,
+                            print_strategy=self._cfg.print_strategy,
+                            print_step=self._cfg.print_step,
+                        )
+                        continue
 
-                session.card_id = card_id
-                session.card_msg_id = card_msg_id
+                session.card_id = card_id  # type: ignore[reportPossiblyUnboundVariable]
+                session.card_msg_id = card_msg_id  # type: ignore[reportPossiblyUnboundVariable]
                 session.card_created_at = _time.time()
                 session.flush.set_throttle(self._cfg.flush_interval_sec)
 
-                # Track existing elements — only 2 are pre-allocated
+                # Track existing elements — 【嘟嘟定制 v22.3】
+                # include_loading_hint=False 时 hint 不在初始卡片中，
+                # existing_elements 不能包含不存在的元素，否则 Phase 2
+                # 会尝试 delete 不存在的 hint → 300314 → 原子回滚 →
+                # answer/panel 永远创建不了。
                 session.existing_elements = {
-                    _LOADING_HINT_ELEMENT_ID,
                     _LOADING_ELEMENT_ID,
                 }
+                # 只有真正包含 hint 的卡片才追踪它
+                # （当前嘟嘟定制 include_loading_hint=False，所以不加）
                 session._creation_stages.discard("panel")  # Panel NOT in initial card
 
             except FeishuAPIError as e:
@@ -255,8 +316,12 @@ class UnifiedControllerMixin:
         if "answer" not in session._creation_stages and (state.panel_visible or state.answer_dirty or state.answer_text):
             new_elements: list[dict[str, Any]] = []
 
-            # ── Path A: Has reasoning or tools → add unified panel ──
-            if state.panel_visible:
+            # ── Path A & B: Always add answer streaming element FIRST ──
+            # 嘟嘟定制: answer在上面流式输出
+            new_elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
+
+            # ── Path A: Always add unified panel AFTER answer (嘟嘟定制: panel放底部) ──
+            if True:
                 all_tool_steps = session.tool_use.build_display_steps()
                 panel = build_unified_panel(
                     reasoning_rounds=state.reasoning_rounds,
@@ -268,18 +333,16 @@ class UnifiedControllerMixin:
                     panel_events=state.panel_events,
                     max_tool_steps=self._cfg.max_tool_steps,
                     max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                    model=_get_model_from_ctx(),
                 )
                 new_elements.append(panel)
 
-            # ── Path A & B: Always add answer streaming element ──
-            new_elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
-
-            # Add new elements before loading hint
+            # Add new elements before loading spinner (嘟嘟定制: 用 _LOADING_ELEMENT_ID 替代 _LOADING_HINT_ELEMENT_ID)
             actions.append({
                 "action": "add_elements",
                 "params": {
                     "type": "insert_before",
-                    "target_element_id": _LOADING_HINT_ELEMENT_ID,
+                    "target_element_id": _LOADING_ELEMENT_ID,
                     "elements": new_elements,
                 },
             })
@@ -333,13 +396,18 @@ class UnifiedControllerMixin:
                         return
                     elif is_element_not_found_error(e):
                         _logger.warning(
-                            "unified flush phase 2 element not found (non-fatal): %s card=%s",
+                            "unified flush phase 2 element not found (non-fatal): %s — "
+                            "batch was atomic (rollback), discarding stale hint, "
+                            "scheduling retry without delete, card=%s",
                             e, session.card_id[:12],
                         )
+                        # 300314: hint already gone on Feishu side
+                        # batch_update is ATOMIC → delete failure rolled back add_elements too
+                        # Discard stale hint tracking so next attempt won't include delete
                         session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
-                        state.panel_dirty = False
-                        state.answer_dirty = False
-                        state.tool_steps_dirty = False
+                        # Reset first_flush so next schedule triggers immediate retry
+                        session._first_flush_done = False
+                        # Do NOT clear dirty flags — elements still need creation
                         return
                     else:
                         # v1.3.3 fix (P0): transient API error (rate limit, auth
@@ -399,6 +467,7 @@ class UnifiedControllerMixin:
                     panel_events=state.panel_events,
                     max_tool_steps=self._cfg.max_tool_steps,
                     max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                    model=_get_model_from_ctx(),
                 )
                 actions.append({
                     "action": "partial_update_element",
@@ -407,6 +476,7 @@ class UnifiedControllerMixin:
                         "partial_element": {
                             "header": panel["header"],
                             "elements": panel["elements"],
+                            "border": panel["border"],
                         },
                     },
                 })
@@ -423,11 +493,12 @@ class UnifiedControllerMixin:
                     panel_events=state.panel_events,
                     max_tool_steps=self._cfg.max_tool_steps,
                     max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                    model=_get_model_from_ctx(),
                 )
                 actions.append({
                     "action": "add_elements",
                     "params": {
-                        "type": "insert_before",
+                        "type": "insert_after",
                         "target_element_id": ANSWER_ELEMENT_ID,
                         "elements": [panel],
                     },
@@ -459,9 +530,37 @@ class UnifiedControllerMixin:
                     session._creation_stages.add("hint_removed")
                     session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
                 # ── Track late-arriving panel creation ──
-                if "panel" not in session._creation_stages and state.panel_visible:
+                if "panel" not in session._creation_stages:
+                    # 嘟嘟定制：纯对话无 tool/reasoning 也补 panel，边框绿色，显示 0
                     session._creation_stages.add("panel")
                     session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
+                    # 构建空 panel 并发送
+                    empty_panel = build_unified_panel(
+                        reasoning_rounds=[],
+                        current_reasoning_text="",
+                        tool_steps=[],
+                        tool_elapsed_ms=session.tool_use.elapsed_ms,
+                        show_reasoning=self._cfg.show_reasoning,
+                        expanded=self._cfg.streaming_panel_expanded,
+                        border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
+                        model=_get_model_from_ctx(),
+                    )
+                    try:
+                        session.sequence += 1
+                        await self._client.cardkit_batch_update(
+                            session.card_id,
+                            [{
+                                "action": "add_elements",
+                                "params": {
+                                    "type": "insert_before",
+                                    "target_element_id": _LOADING_ELEMENT_ID,
+                                    "elements": [empty_panel],
+                                },
+                            }],
+                            sequence=session.sequence,
+                        )
+                    except Exception:
+                        pass
             except FeishuAPIError as e:
                 if e.code == CARDKIT_STREAMING_CLOSED:
                     if session._streaming_closed_logged:
@@ -595,6 +694,87 @@ class UnifiedControllerMixin:
                     state.answer_dirty, state.panel_dirty, state.tool_steps_dirty,
                     card_id[:12],
                 )
+
+                # ── 【嘟嘟定制 v22.3】Phase 2 回滚补救 ──
+                # 如果 answer 不在 _creation_stages（Phase 2 原子回滚了），
+                # 在 seal 里补做一次 Phase 2 创建，否则 answer/panel 元素
+                # 从未创建，大叔只能看到空卡片。
+                if "answer" not in session._creation_stages and (state.answer_dirty or state.answer_text):
+                    _logger.warning(
+                        "preservative seal: answer not in _creation_stages "
+                        "(Phase 2 rollback), retrying element creation card=%s",
+                        card_id[:12],
+                    )
+                    retry_new_elements: list[dict[str, Any]] = []
+                    retry_new_elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
+                    all_tool_steps_retry = session.tool_use.build_display_steps()
+                    panel_retry = build_unified_panel(
+                        reasoning_rounds=state.reasoning_rounds,
+                        current_reasoning_text=state.current_reasoning_text,
+                        tool_steps=all_tool_steps_retry,
+                        tool_elapsed_ms=session.tool_use.elapsed_ms,
+                        show_reasoning=self._cfg.show_reasoning,
+                        expanded=self._cfg.streaming_panel_expanded,
+                        panel_events=state.panel_events,
+                        max_tool_steps=self._cfg.max_tool_steps,
+                        max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                        border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
+                        model=_get_model_from_ctx() or (footer_data.get("model") if footer_data else None),
+                    )
+                    retry_new_elements.append(panel_retry)
+                    retry_actions_p2: list[dict[str, Any]] = []
+                    # 不用 insert_before，直接 add_elements 到末尾（loading 元素可能也不在了）
+                    if _LOADING_ELEMENT_ID in session.existing_elements:
+                        retry_actions_p2.append({
+                            "action": "add_elements",
+                            "params": {
+                                "type": "insert_before",
+                                "target_element_id": _LOADING_ELEMENT_ID,
+                                "elements": retry_new_elements,
+                            },
+                        })
+                    else:
+                        retry_actions_p2.append({
+                            "action": "add_elements",
+                            "params": {
+                                "elements": retry_new_elements,
+                            },
+                        })
+                    # 不再 delete hint（上次就是因为 delete hint 失败回滚的）
+                    try:
+                        session.sequence += 1
+                        await self._client.cardkit_batch_update(
+                            session.card_id, retry_actions_p2, sequence=session.sequence,
+                        )
+                        session._creation_stages.add("answer")
+                        session._creation_stages.add("panel")
+                        session._creation_stages.add("hint_removed")
+                        session.existing_elements.add(ANSWER_ELEMENT_ID)
+                        session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
+                        session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
+                        state.panel_dirty = False
+                        state.tool_steps_dirty = False
+                        _logger.info(
+                            "preservative seal: Phase 2 retry succeeded card=%s",
+                            card_id[:12],
+                        )
+                    except FeishuAPIError as e2:
+                        _logger.warning(
+                            "preservative seal: Phase 2 retry failed: %s card=%s — "
+                            "answer will only appear in summary",
+                            e2, card_id[:12],
+                        )
+                        # 标记不再 dirty，避免下面条件分支再走死路
+                        state.panel_dirty = False
+                        state.tool_steps_dirty = False
+                    except Exception as e2:
+                        _logger.warning(
+                            "preservative seal: Phase 2 retry non-API error: %s card=%s",
+                            e2, card_id[:12], exc_info=True,
+                        )
+                        state.panel_dirty = False
+                        state.tool_steps_dirty = False
+
                 # ── Flush remaining panel content ──
                 if (state.panel_dirty or state.tool_steps_dirty) and "panel" in session._creation_stages:
                     all_tool_steps = session.tool_use.build_display_steps()
@@ -608,6 +788,8 @@ class UnifiedControllerMixin:
                         panel_events=state.panel_events,
                         max_tool_steps=self._cfg.max_tool_steps,
                         max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                        border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
+                        model=_get_model_from_ctx() or (footer_data.get("model") if footer_data else None),
                     )
                     try:
                         session.sequence += 1
@@ -620,6 +802,7 @@ class UnifiedControllerMixin:
                                     "partial_element": {
                                         "header": panel["header"],
                                         "elements": panel["elements"],
+                                        "border": panel["border"],
                                     },
                                 },
                             }],
@@ -689,6 +872,8 @@ class UnifiedControllerMixin:
                         panel_events=state.panel_events,
                         max_tool_steps=self._cfg.max_tool_steps,
                         max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                        border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
+                        model=_get_model_from_ctx() or (footer_data.get("model") if footer_data else None),
                     )
                     seal_actions.append({
                         "action": "partial_update_element",
@@ -697,6 +882,7 @@ class UnifiedControllerMixin:
                             "partial_element": {
                                 "header": panel["header"],
                                 "elements": panel["elements"],
+                                "border": panel["border"],
                             },
                         },
                     })
@@ -892,6 +1078,8 @@ class UnifiedControllerMixin:
                                     panel_events=state.panel_events,
                                     max_tool_steps=self._cfg.max_tool_steps,
                                     max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                                    border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
+                                    model=_get_model_from_ctx() or (footer_data.get("model") if footer_data else None),
                                 )
                                 retry_actions.append({
                                     "action": "partial_update_element",
@@ -900,6 +1088,7 @@ class UnifiedControllerMixin:
                                         "partial_element": {
                                             "header": retry_panel["header"],
                                             "elements": retry_panel["elements"],
+                                            "border": retry_panel["border"],
                                         },
                                     },
                                 })
@@ -1015,6 +1204,7 @@ class UnifiedControllerMixin:
                     panel_events=state.panel_events,
                     max_tool_steps=self._cfg.max_tool_steps,
                     max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                    model=_get_model_from_ctx(),
                 )
                 drain_actions: list[dict[str, Any]] = [{
                     "action": "partial_update_element",
@@ -1023,6 +1213,7 @@ class UnifiedControllerMixin:
                         "partial_element": {
                             "header": panel["header"],
                             "elements": panel["elements"],
+                            "border": panel["border"],
                         },
                     },
                 }]

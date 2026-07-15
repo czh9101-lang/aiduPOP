@@ -188,46 +188,34 @@ def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
     panel["element_id"] = UNIFIED_PANEL_ELEMENT_ID
     return panel
 
-def build_panel_header(*, reasoning_rounds: list, current_reasoning_text: str = "", tool_steps: list[dict], tool_elapsed_ms: float = 0, show_reasoning: bool = True) -> dict:
-    """Build header dict for unified panel. Title computed from state (rounds/tools/elapsed)."""
-    en_title, zh_title = _T["agent_process"]
-    en_parts: list[str] = [en_title]
-    zh_parts: list[str] = [zh_title]
+def build_panel_header(
+    *,
+    reasoning_rounds: list,
+    current_reasoning_text: str = "",
+    tool_steps: list[dict],
+    tool_elapsed_ms: float = 0,
+    show_reasoning: bool = True,
+    model: str | None = None,
+) -> dict:
+    """Build header dict for unified panel — 嘟嘟定制: 纯统计，无状态文字."""
+    rounds_count = len(reasoning_rounds) + (1 if current_reasoning_text else 0)
+    tools_count = len(tool_steps)
+    elapsed_str = _format_elapsed(tool_elapsed_ms)
 
-    has_reasoning = show_reasoning and (
-        reasoning_rounds or current_reasoning_text
-    )
-    num_rounds = len(reasoning_rounds) + (1 if current_reasoning_text else 0)
-
-    if has_reasoning and num_rounds > 0:
-        en_rounds, zh_rounds = _T["rounds"]
-        en_parts.append(en_rounds.format(num_rounds))
-        zh_parts.append(zh_rounds.format(num_rounds))
-
-    if tool_steps:
-        en_tools, zh_tools = _T["tools_count"]
-        en_parts.append(en_tools.format(len(tool_steps)))
-        zh_parts.append(zh_tools.format(len(tool_steps)))
-
-    reasoning_elapsed_ms = sum(r.elapsed_ms for r in reasoning_rounds)
-    total_elapsed_ms = reasoning_elapsed_ms + tool_elapsed_ms
-    if total_elapsed_ms > 0 and (has_reasoning or tool_steps):
-        elapsed_str = _format_elapsed(total_elapsed_ms)
-        en_parts.append(elapsed_str)
-        zh_parts.append(elapsed_str)
-
-    en_full = " · ".join(en_parts)
-    zh_full = " · ".join(zh_parts)
+    # 组装: ⚕model · 💭N · 🛠️N · ⏱elapsed
+    parts: list[str] = []
+    if model:
+        parts.append(f"⚕{model}")
+    parts.extend([f"💭{rounds_count}", f"🛠️{tools_count}", f"⏱{elapsed_str}"])
+    stats = " · ".join(parts)
 
     title_el = {
         "tag": "plain_text",
-        "content": en_full,
-        "i18n_content": _i18n(en_full, zh_full),
+        "content": stats,
         "text_color": "grey",
         "text_size": "notation",
     }
 
-    # Header structure (matches _collapsible_panel; icon_position=right → grey).
     icon_el = {
         "tag": "standard_icon",
         "token": "down-small-ccm_outlined",
@@ -389,14 +377,15 @@ def build_panel_children(*, reasoning_rounds: list, current_reasoning_text: str 
 
     return children
 
-def build_unified_panel(*, reasoning_rounds: list, current_reasoning_text: str = "", tool_steps: list[dict], tool_elapsed_ms: float = 0, show_reasoning: bool = True, expanded: bool = False, element_id: str | None = None, panel_events: list[tuple[str, int]] | None = None, max_tool_steps: int = 20, max_reasoning_rounds: int = 20) -> dict:
-    """Build full unified panel. Thin assembler over build_panel_header/children."""
+def build_unified_panel(*, reasoning_rounds: list, current_reasoning_text: str = "", tool_steps: list[dict], tool_elapsed_ms: float = 0, show_reasoning: bool = True, expanded: bool = False, element_id: str | None = None, panel_events: list[tuple[str, int]] | None = None, max_tool_steps: int = 20, max_reasoning_rounds: int = 20, border_color: str = "grey", model: str | None = None) -> dict:
+    """Build full unified panel — 嘟嘟定制: border_color + model 参数."""
     header = build_panel_header(
         reasoning_rounds=reasoning_rounds,
         current_reasoning_text=current_reasoning_text,
         tool_steps=tool_steps,
         tool_elapsed_ms=tool_elapsed_ms,
         show_reasoning=show_reasoning,
+        model=model,
     )
     children = build_panel_children(
         reasoning_rounds=reasoning_rounds,
@@ -411,7 +400,7 @@ def build_unified_panel(*, reasoning_rounds: list, current_reasoning_text: str =
         "tag": "collapsible_panel",
         "expanded": expanded,
         "header": header,
-        "border": {"color": "grey", "corner_radius": "5px"},
+        "border": {"color": border_color, "corner_radius": "5px"},
         "vertical_spacing": "4px",
         "padding": "8px 8px 8px 8px",
         "elements": children,
@@ -628,7 +617,7 @@ def _build_footer_elements(
     show_label: bool = False,
 ) -> list[dict]:
     if fields is None:
-        fields = [["status", "elapsed", "context", "model"]]
+        fields = [["model"]]
 
     data = footer_data or {}
     en_lines: list[str] = []
@@ -784,6 +773,8 @@ def _render_footer_field(
 
     if name == "model":
         v = data.get("model") or None
+        if v:
+            v = f"⚕{v}"
         return v, v
 
     if name == "tokens":
