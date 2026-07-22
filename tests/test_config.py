@@ -44,7 +44,7 @@ class TestEnabled:
 
 
 class TestFooterFields:
-    _DEFAULT_FIELDS = [["status", "elapsed", "model", "cost", "compression_exhausted"]]
+    _DEFAULT_FIELDS: list[list[str]] = []  # 嘟嘟定制：model 移入 panel header，默认 footer 取消
 
     def test_normal_2d_fields(self) -> None:
         cfg = _make_config({"hermes_lark_streaming": {"footer": {"fields": [["a", "b"], ["c"]]}}})
@@ -315,15 +315,25 @@ class TestGetHermesConfigPath:
         assert str(path_b).startswith("/path/b")
 
 
-    def test_flush_interval_ms_default(self) -> None:
-        """flush_interval_ms 默认 200ms (v1.3.1: 恢复 v1.2.1 P1-01 的默认值)."""
-        cfg = Config()
-        assert cfg.flush_interval_ms == 200.0
+    def test_flush_interval_ms_default(self, tmp_path: object) -> None:
+        """flush_interval_ms 默认 200ms (v1.3.1)；隔离真实 config.yaml，避免读到运行环境 70ms。"""
+        import yaml
+        from pathlib import Path
+        config_path = Path(str(tmp_path)) / "config.yaml"
+        config_path.write_text(yaml.dump({"hermes_lark_streaming": {"enabled": True}}))
+        with patch("hermes_lark_streaming.config.reader._get_hermes_config_path", return_value=config_path):
+            cfg = Config()
+            assert cfg.flush_interval_ms == 200.0
 
-    def test_flush_interval_sec_default(self) -> None:
-        """flush_interval_sec 默认 0.2 秒 (v1.3.1)."""
-        cfg = Config()
-        assert cfg.flush_interval_sec == 0.2
+    def test_flush_interval_sec_default(self, tmp_path: object) -> None:
+        """flush_interval_sec 默认 0.2 秒 (v1.3.1)；隔离真实 config.yaml。"""
+        import yaml
+        from pathlib import Path
+        config_path = Path(str(tmp_path)) / "config.yaml"
+        config_path.write_text(yaml.dump({"hermes_lark_streaming": {"enabled": True}}))
+        with patch("hermes_lark_streaming.config.reader._get_hermes_config_path", return_value=config_path):
+            cfg = Config()
+            assert cfg.flush_interval_sec == 0.2
 
     def test_flush_interval_ms_custom(self, tmp_path: object) -> None:
         """flush_interval_ms 可配置."""

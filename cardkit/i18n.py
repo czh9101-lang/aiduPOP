@@ -17,7 +17,7 @@ _T: dict[str, tuple[str, str]] = {
     "status_stopped": ("Stopped", "已停止"),
     "elapsed": ("Elapsed {}", "耗时 {}"),
     "context": ("Context {}", "上下文 {}"),
-    "processing": ("⚕ Hermesing…", "⚕ Hermesing…"),
+    "processing": ("⚕Hermesing…", "⚕Hermesing…"),  # ⚕紧贴无空格，对齐 panel header model
     "processing_prefix": ("💭 Processing...", "💭 处理中..."),
     "thought": ("Thought", "思考"),
     "thinking_panel": ("Thinking", "思考中"),

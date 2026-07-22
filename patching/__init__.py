@@ -198,12 +198,15 @@ def _wrap_authorization_adapter(orig: Callable) -> Callable:
             # _apply_feishu_adapter_patches is idempotent and safe —
             # call unconditionally to catch any class identity the gateway resolves.
             try:
+                # 已 patch 的 class 走 debug，避免每条消息刷 INFO
+                already = cls_id in _patched_feishu_classes
                 _apply_feishu_adapter_patches(cls, is_repatch=True)
-                _logger.info(
-                    "hermes-lark-streaming: FeishuAdapter auto-patched via "
-                    "_authorization_adapter hook (class_id=%s)",
-                    cls_id,
-                )
+                if not already:
+                    _logger.info(
+                        "hermes-lark-streaming: FeishuAdapter auto-patched via "
+                        "_authorization_adapter hook (class_id=%s)",
+                        cls_id,
+                    )
             except Exception:
                 _logger.debug(
                     "hermes-lark-streaming: _authorization_adapter hook "
@@ -443,22 +446,14 @@ def _apply_feishu_adapter_patches(FeishuAdapter, *, is_repatch: bool = False) ->
 
     cls_id = id(FeishuAdapter)
     if cls_id in _patched_feishu_classes:
+        # 嘟嘟 2026-07-17 血训：is_repatch 时若再 wrap 已 wrap 的 send_clarify，
+        # 会每 200ms 套一层（_authorization_adapter 高频调用），导致 clarify 卡死、
+        # 日志刷屏、wrapper 链爆炸。已在集合里 = 已成功挂过补丁，直接返回。
         if is_repatch:
-            # Always re-patch send_clarify on repath — the class may have been
-            # marked "patched" despite a silent AttributeError on first attempt.
-            try:
-                FeishuAdapter.send_clarify = _wrap_feishu_adapter_send_clarify(
-                    FeishuAdapter.send_clarify
-                )
-                _logger.info(
-                    "hermes-lark-streaming: FeishuAdapter.send_clarify "
-                    "repatched ✓ (class_id=%s)", cls_id,
-                )
-            except AttributeError:
-                _logger.debug(
-                    "hermes-lark-streaming: FeishuAdapter.send_clarify "
-                    "repatch failed (class_id=%s)", cls_id,
-                )
+            _logger.debug(
+                "hermes-lark-streaming: FeishuAdapter already patched, "
+                "skip re-wrap (class_id=%s)", cls_id,
+            )
         return True
 
     try:

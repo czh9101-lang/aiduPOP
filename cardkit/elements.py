@@ -188,6 +188,29 @@ def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
     panel["element_id"] = UNIFIED_PANEL_ELEMENT_ID
     return panel
 
+
+def _format_model_display(model: str | None) -> str | None:
+    """嘟嘟定制：模型名显示美化（更干净，不挤）。
+
+    - 去 provider 路径前缀（a/b/model → model）
+    - 去日期尾巴（-20250514 / -2025-05-14）
+    - 过长截断，避免 panel 标题被长 ID 撑丑
+    - 前缀用单字符 ⚕（U+2695，无 VS16），飞书 notation 字号下比 ⚕️ 更利落
+    """
+    if not model:
+        return None
+    name = str(model).strip()
+    if not name:
+        return None
+    if "/" in name:
+        name = name.rsplit("/", 1)[-1]
+    name = re.sub(r"-\d{8}$", "", name)
+    name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", name)
+    if len(name) > 28:
+        name = name[:27] + "…"
+    return name
+
+
 def build_panel_header(
     *,
     reasoning_rounds: list,
@@ -202,10 +225,11 @@ def build_panel_header(
     tools_count = len(tool_steps)
     elapsed_str = _format_elapsed(tool_elapsed_ms)
 
-    # 组装: ⚕model · 💭N · 🛠️N · ⏱elapsed
+    # 组装: ⚕model · 💭N · 🛠️N · ⏱elapsed（⚕紧贴 model，无空格；用单字符更清爽）
     parts: list[str] = []
-    if model:
-        parts.append(f"⚕{model}")
+    model_disp = _format_model_display(model)
+    if model_disp:
+        parts.append(f"⚕{model_disp}")
     parts.extend([f"💭{rounds_count}", f"🛠️{tools_count}", f"⏱{elapsed_str}"])
     stats = " · ".join(parts)
 
@@ -616,8 +640,9 @@ def _build_footer_elements(
     fields: list[list[str]] | None = None,
     show_label: bool = False,
 ) -> list[dict]:
+    # 嘟嘟定制: model 已移入 panel header；默认不渲染 footer（与 reader._default_footer_fields 一致）
     if fields is None:
-        fields = [["model"]]
+        fields = []
 
     data = footer_data or {}
     en_lines: list[str] = []
@@ -772,9 +797,9 @@ def _render_footer_field(
         return None, None
 
     if name == "model":
-        v = data.get("model") or None
+        v = _format_model_display(data.get("model") or None)
         if v:
-            v = f"⚕{v}"
+            v = f"⚕{v}"  # 单字符 ⚕ 紧贴 model，无空格（飞书小字号更美观）
         return v, v
 
     if name == "tokens":

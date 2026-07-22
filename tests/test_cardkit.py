@@ -171,22 +171,24 @@ _STEP_SUCCESS = {**_STEP_RUNNING, "status": "success", "output": "ok", "elapsed_
 
 class TestBuildFooterElements:
     def test_empty_data_renders_default_status(self) -> None:
-        # 默认字段包含 "status"，总是会渲染
+        # 嘟嘟定制：默认 footer 取消；显式传 status 才渲染
         result = _build_footer_elements({})
+        assert result == []
+        result = _build_footer_elements({}, fields=[["status"]])
         assert len(result) >= 2
         assert "Completed" in result[1]["content"]
 
     def test_status_completed(self) -> None:
-        result = _build_footer_elements({"duration": 5})
+        result = _build_footer_elements({"duration": 5}, fields=[["status"]])
         assert len(result) >= 2  # hr + markdown 元素
         assert "Completed" in result[1]["content"]
 
     def test_status_error(self) -> None:
-        result = _build_footer_elements({}, is_error=True)
+        result = _build_footer_elements({}, is_error=True, fields=[["status"]])
         assert "red" in result[1]["content"]
 
     def test_status_aborted(self) -> None:
-        result = _build_footer_elements({}, is_aborted=True)
+        result = _build_footer_elements({}, is_aborted=True, fields=[["status"]])
         assert "Stopped" in result[1]["content"]
 
     def test_elapsed_displayed(self) -> None:
@@ -229,7 +231,9 @@ class TestBuildFooterElements:
         assert "\n" in result[1]["content"]
 
     def test_none_footer_data_renders_status(self) -> None:
-        result = _build_footer_elements(None)
+        # 嘟嘟定制：默认无 footer；显式 status 才渲染
+        assert _build_footer_elements(None) == []
+        result = _build_footer_elements(None, fields=[["status"]])
         assert len(result) >= 2
 
     def test_no_matching_fields(self) -> None:
