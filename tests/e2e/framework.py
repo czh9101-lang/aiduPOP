@@ -301,6 +301,8 @@ class E2ETestRunner:
             return await srv.cardkit_create(card)
         async def _reply_card_by_id(mid, cid):
             return await srv.reply_card_by_id(mid, cid)
+        async def _send_card_by_id_to_chat(chat_id, card_id):
+            return await srv.send_card_by_id_to_chat(chat_id, card_id)
         async def _reply_card(mid, card):
             return await srv.reply_card(mid, card)
         async def _cardkit_stream_element(cid, eid, content, *, sequence=0):
@@ -322,6 +324,7 @@ class E2ETestRunner:
 
         mock_client.cardkit_create = _cardkit_create
         mock_client.reply_card_by_id = _reply_card_by_id
+        mock_client.send_card_by_id_to_chat = _send_card_by_id_to_chat
         mock_client.reply_card = _reply_card
         mock_client.cardkit_stream_element = _cardkit_stream_element
         mock_client.cardkit_batch_update = _cardkit_batch_update

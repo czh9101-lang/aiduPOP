@@ -237,7 +237,7 @@ class TestCardStructure:
         session = await runner.start_message("test")
         card = runner.get_card(session)
         assert card is not None, "卡片未创建"
-        assert _LOADING_HINT_ELEMENT_ID in card.elements, "初始卡片应包含加载提示"
+        assert _LOADING_HINT_ELEMENT_ID not in card.elements, "定制初始卡片不应显示加载提示"
 
         await runner.feed_answer(session, "Answer text")
         await asyncio.sleep(0.2)

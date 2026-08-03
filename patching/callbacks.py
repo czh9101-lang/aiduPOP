@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from . import (
@@ -25,10 +26,23 @@ def _maybe_wrap_callbacks(agent) -> None:
 
     # ── 【嘟嘟定制 v22.2 根治】模块级全局缓存 ──
     # _model_cache 是普通 Python dict，不依赖 contextvar/thread-local/asyncio task 边界。
-    # 同一进程内任何线程/task 都能读到。升级时 grep 此标记找回所有定制点。
+    # 同一进程内 any 线程/task 都能读到。升级时 grep 此标记找回所有定制点。
+    #
+    # 【嘟嘟定制 v22.4 修复】辅助 agent 禁止污染 _model_cache。
+    # 症状：后台复盘 fork（auxiliary.background_review 走 aux 模型）在独立线程里
+    # 调 _maybe_wrap_callbacks，拿不到 event_message_id，只写了 _model_cache["current"]。
+    # 主卡片封版渲染 panel 时若 eid 未命中，fallback 读 "current"，
+    # 就把 aux 模型名（如 Grok-4.5）印到大叔的卡片上。
+    # 判定依据：background_review.py 给 fork 打了 _memory_write_origin /
+    # _persist_disabled 标记；正常主 agent 不带这些。
     ctx = _msg_ctx.get()
     model_val = getattr(agent, "model", None)
-    if model_val:
+    _is_aux_fork = (
+        getattr(agent, "_memory_write_origin", None) == "background_review"
+        or getattr(agent, "_memory_write_context", None) == "background_review"
+        or getattr(agent, "_persist_disabled", False) is True
+    )
+    if model_val and not _is_aux_fork:
         _model_cache["current"] = model_val
         eid = (ctx.get("event_message_id") if ctx else None) or _get_event_message_id()
         if eid:
@@ -37,7 +51,11 @@ def _maybe_wrap_callbacks(agent) -> None:
                     if k != "current":
                         del _model_cache[k]
             _model_cache[eid] = model_val
-    if ctx is not None:
+    elif _is_aux_fork:
+        _logger.debug(
+            "HLS: skip _model_cache write for aux fork model=%s", model_val
+        )
+    if ctx is not None and not _is_aux_fork:
         ctx["_agent_ref"] = agent
         ctx["_agent_model"] = model_val or ""
         _thread_local_ctx.data = dict(ctx)
@@ -47,43 +65,21 @@ def _maybe_wrap_callbacks(agent) -> None:
         _logger.debug("HLS: skip — no event_message_id in ctx")
         return  # Not in a hermes-lark-streaming context — skip
 
-    _current_stream = getattr(agent, "stream_delta_callback", None)
-    _current_interim = getattr(agent, "interim_assistant_callback", None)
-    _any_wrapped = (
-        (_current_stream and getattr(_current_stream, "_hls_wrapper", False))
-        or (_current_interim and getattr(_current_interim, "_hls_wrapper", False))
-    )
-    if _any_wrapped:
-        # ── Late-arriving reasoning_callback fix ──
-        _late_reasoning = getattr(agent, "reasoning_callback", None)
-        if _late_reasoning and not getattr(_late_reasoning, "_hls_wrapper", False):
-            _orig_late = _late_reasoning
+    # ── 【嘟嘟定制：细粒度回调包装】 ──
+    # 不再因为 "任何一个已被包装" 就整体跳过，而是每个 callback 独立按需包装，
+    # 彻底解决切换模型后部分 callback 被重置导致未能包装的 Bug。
 
-            def _late_reasoning_wrapper(text, *args, **kwargs):
-                _eid = _resolve_eid(eid)
-                try:
-                    from .hooks import on_reasoning_delta
-                    if text and _eid:
-                        on_reasoning_delta(message_id=_eid, text=text)
-                except Exception:
-                    _logger.debug("HLS: suppressed exception", exc_info=True)
-                # again with a stale eid, duplicating reasoning text.
-                if not getattr(_orig_late, "_hls_wrapper", False):
-                    return _orig_late(text, *args, **kwargs)
-
-            agent.reasoning_callback = _late_reasoning_wrapper
-            setattr(agent.reasoning_callback, "_hls_wrapper", True)
-        return
-
-    # v1.3.2 fix (P3-02): _stream_consumed_len is cleaned up when the thinking
+    # 共享流式去重状态
     _stream_consumed_len: dict[str, int] = {}
 
     def _cleanup_consumed_len(_eid: str) -> None:
         """Remove consumed-length tracking for a completed message."""
         _stream_consumed_len.pop(_eid, None)
 
-    if getattr(agent, "stream_delta_callback", None):
-        _orig_stream = agent.stream_delta_callback
+    # 1. 包装 stream_delta_callback
+    _current_stream = getattr(agent, "stream_delta_callback", None)
+    if _current_stream and not getattr(_current_stream, "_hls_wrapper", False):
+        _orig_stream = _current_stream
 
         def _answer_wrapper(text, *args, **kwargs):
             _eid = _resolve_eid(eid)
@@ -101,12 +97,11 @@ def _maybe_wrap_callbacks(agent) -> None:
             return _orig_stream(text, *args, **kwargs)
 
         agent.stream_delta_callback = _answer_wrapper
+        setattr(agent.stream_delta_callback, "_hls_wrapper", True)
         _logger.debug("HLS: _maybe_wrap_callbacks stream_delta_callback wrapped")
-    else:
+    elif not _current_stream:
         # Fix: Create our own stream_delta_callback that routes answer tokens to
         def _answer_wrapper_synthetic(text, *args, **kwargs):
-            # Handle None — stream boundary signal from conversation_loop
-            # (tool boundary flush / end-of-stream). Just ignore it.
             if text is None:
                 return
             _eid = _resolve_eid(eid)
@@ -120,33 +115,35 @@ def _maybe_wrap_callbacks(agent) -> None:
                     return
             except Exception:
                 _logger.debug("HLS: answer_wrapper_synthetic exception", exc_info=True)
-            # No original callback to call — Hermes didn't provide one
 
         agent.stream_delta_callback = _answer_wrapper_synthetic
         setattr(agent.stream_delta_callback, "_hls_wrapper", True)
 
-    if getattr(agent, "interim_assistant_callback", None):
-        _orig_interim = agent.interim_assistant_callback
+    # 2. 包装 interim_assistant_callback
+    _current_interim = getattr(agent, "interim_assistant_callback", None)
+    if not _current_interim or not getattr(_current_interim, "_hls_wrapper", False):
+        _orig_interim = _current_interim if _current_interim else None
 
         def _thinking_wrapper(text, *args, **kwargs):
             _eid = _resolve_eid(eid)
             if not _eid:
-                return _orig_interim(text, *args, **kwargs)
+                if _orig_interim:
+                    return _orig_interim(text, *args, **kwargs)
+                return
             try:
-                # ── already_streamed passthrough (Hermes hint) ──
                 already_streamed = kwargs.get("already_streamed", False)
                 if already_streamed:
-                    # v1.3.2 fix (P3-02): clean up consumed-length tracking for
                     _cleanup_consumed_len(_eid)
-                    return _orig_interim(text, *args, **kwargs)
+                    if _orig_interim:
+                        return _orig_interim(text, *args, **kwargs)
+                    return
 
-                # ── Length-based dedup ──
                 consumed_len = _stream_consumed_len.get(_eid, 0)
                 if text and consumed_len > 0 and len(text) <= consumed_len:
-                    # v1.3.2 fix (P3-02): same cleanup — text fully consumed,
-                    # message streaming is done.
                     _cleanup_consumed_len(_eid)
-                    return _orig_interim(text, *args, **kwargs)
+                    if _orig_interim:
+                        return _orig_interim(text, *args, **kwargs)
+                    return
 
                 if text:
                     from .hooks import on_thinking_delta
@@ -155,22 +152,24 @@ def _maybe_wrap_callbacks(agent) -> None:
                         return
             except Exception:
                 _logger.debug("HLS: thinking_wrapper exception", exc_info=True)
-            return _orig_interim(text, *args, **kwargs)
+            if _orig_interim:
+                return _orig_interim(text, *args, **kwargs)
 
         agent.interim_assistant_callback = _thinking_wrapper
         setattr(agent.interim_assistant_callback, "_hls_wrapper", True)
         _logger.debug("HLS: _maybe_wrap_callbacks interim_assistant_callback wrapped")
-    else:
-        _logger.debug("HLS: _maybe_wrap_callbacks NO interim_assistant_callback on agent")
 
-    # ── TOOL: wrap tool_progress_callback ──
-    if getattr(agent, "tool_progress_callback", None):
-        _orig_tool = agent.tool_progress_callback
+    # 3. 包装 tool_progress_callback
+    _current_tool = getattr(agent, "tool_progress_callback", None)
+    if not _current_tool or not getattr(_current_tool, "_hls_wrapper", False):
+        _orig_tool = _current_tool if _current_tool else None
 
         def _tool_wrapper(event_type, tool_name=None, preview=None, *args, **kwargs):
             _eid = _resolve_eid(eid)
             if not _eid:
-                return _orig_tool(event_type, tool_name, preview, *args, **kwargs)
+                if _orig_tool:
+                    return _orig_tool(event_type, tool_name, preview, *args, **kwargs)
+                return
             try:
                 from .hooks import on_tool_updated
 
@@ -184,48 +183,47 @@ def _maybe_wrap_callbacks(agent) -> None:
                         return
             except Exception:
                 _logger.debug("HLS: tool_wrapper exception", exc_info=True)
-            return _orig_tool(event_type, tool_name, preview, *args, **kwargs)
+            if _orig_tool:
+                return _orig_tool(event_type, tool_name, preview, *args, **kwargs)
 
         agent.tool_progress_callback = _tool_wrapper
-
-    # Mark wrapper functions so guard can detect them next time
-    if getattr(agent, "stream_delta_callback", None):
-        setattr(agent.stream_delta_callback, "_hls_wrapper", True)
-    # interim_assistant_callback is already marked above (in its wrapper block)
-    if getattr(agent, "tool_progress_callback", None):
         setattr(agent.tool_progress_callback, "_hls_wrapper", True)
 
-    # ── REASONING: wrap reasoning_callback ──
-    _orig_reasoning = getattr(agent, "reasoning_callback", None)
+    # 4. 包装 reasoning_callback
+    _current_reasoning = getattr(agent, "reasoning_callback", None)
+    if not _current_reasoning or not getattr(_current_reasoning, "_hls_wrapper", False):
+        _orig_reasoning = _current_reasoning if _current_reasoning else None
 
-    def _reasoning_wrapper(text, *args, **kwargs):
-        _eid = _resolve_eid(eid)
-        if not _eid:
-            # No ctx — call original if present
+        def _reasoning_wrapper(text, *args, **kwargs):
+            _eid = _resolve_eid(eid)
+            if not _eid:
+                if _orig_reasoning and not getattr(_orig_reasoning, "_hls_wrapper", False):
+                    return _orig_reasoning(text, *args, **kwargs)
+                return
+            try:
+                from .hooks import on_reasoning_delta
+
+                if text:
+                    on_reasoning_delta(message_id=_eid, text=text)
+            except Exception:
+                _logger.debug("HLS: reasoning_wrapper exception", exc_info=True)
             if _orig_reasoning and not getattr(_orig_reasoning, "_hls_wrapper", False):
                 return _orig_reasoning(text, *args, **kwargs)
-            return
-        try:
-            from .hooks import on_reasoning_delta
 
-            if text:
-                on_reasoning_delta(message_id=_eid, text=text)
-        except Exception:
-            _logger.debug("HLS: reasoning_wrapper exception", exc_info=True)
-        if _orig_reasoning and not getattr(_orig_reasoning, "_hls_wrapper", False):
-            return _orig_reasoning(text, *args, **kwargs)
+        agent.reasoning_callback = _reasoning_wrapper
+        setattr(agent.reasoning_callback, "_hls_wrapper", True)
 
-    agent.reasoning_callback = _reasoning_wrapper
-    setattr(agent.reasoning_callback, "_hls_wrapper", True)
-
-    # ── BACKGROUND_REVIEW: wrap background_review_callback ──
-    if getattr(agent, "background_review_callback", None):
-        _orig_bg = agent.background_review_callback
+    # 5. 包装 background_review_callback
+    _current_bg = getattr(agent, "background_review_callback", None)
+    if not _current_bg or not getattr(_current_bg, "_hls_wrapper", False):
+        _orig_bg = _current_bg if _current_bg else None
 
         def _bg_wrapper(message, *args, **kwargs):
             _eid = _resolve_eid(eid)
             if not _eid:
-                return _orig_bg(message, *args, **kwargs)
+                if _orig_bg:
+                    return _orig_bg(message, *args, **kwargs)
+                return
             try:
                 from .hooks import on_background_review_message
 
@@ -238,10 +236,8 @@ def _maybe_wrap_callbacks(agent) -> None:
                     return
             except Exception:
                 _logger.debug("HLS: bg_wrapper exception", exc_info=True)
-            return _orig_bg(message, *args, **kwargs)
+            if _orig_bg:
+                return _orig_bg(message, *args, **kwargs)
 
         agent.background_review_callback = _bg_wrapper
-
-    # Mark background_review_callback wrapper (already marked above for others)
-    if getattr(agent, "background_review_callback", None):
         setattr(agent.background_review_callback, "_hls_wrapper", True)

@@ -297,6 +297,7 @@ def _mock_client() -> AsyncMock:
     client = AsyncMock(spec=FeishuClient)
     client.cardkit_create = AsyncMock(return_value="card_id_abc")
     client.reply_card_by_id = AsyncMock(return_value="msg_id_reply")
+    client.send_card_by_id_to_chat = AsyncMock(return_value="msg_id_send")
     client.reply_card = AsyncMock(return_value="msg_id_reply")
     client.cardkit_batch_update = AsyncMock()
     client.cardkit_stream_element = AsyncMock()
@@ -316,14 +317,11 @@ def _setup_ctrl(*, linear: bool = False) -> StreamCardController:
 
 
 @pytest.mark.asyncio
-async def test_create_linear_card_replies_to_anchor_id() -> None:
-    """Anchor alias support: the linear card creator replies to ``anchor_id``
-    when set.
+async def test_create_linear_card_sends_independent_card() -> None:
+    """Customized card creation sends an independent chat card.
 
-    v1.1.0: the legacy non-linear ``_do_create_card`` was removed; this
-    test was rewritten to drive the linear ``_do_create_linear_card``
-    path (the only creation path that remains). The behaviour under
-    test — replying to ``anchor_id`` when present — is unchanged.
+    ``anchor_id`` remains session metadata, but must not turn the response
+    into a threaded reply.
     """
     ctrl = _setup_ctrl(linear=True)
     session = _make_session("msg", linear=True)
@@ -332,8 +330,10 @@ async def test_create_linear_card_replies_to_anchor_id() -> None:
 
     await ctrl._do_create_linear_card(session)
 
-    ctrl._client.reply_card_by_id.assert_called_once()
-    assert ctrl._client.reply_card_by_id.call_args.args[0] == "quoted"
+    ctrl._client.send_card_by_id_to_chat.assert_called_once_with(
+        "chat_456", "card_id_abc"
+    )
+    ctrl._client.reply_card_by_id.assert_not_called()
 
 
 def _capture_split_calls(
@@ -533,8 +533,8 @@ class TestDoCreateLinearCard:
 
         await ctrl._do_create_linear_card(session)
 
-        # existing_elements should contain only 2 pre-allocated elements
-        assert len(session.existing_elements) == 2
+        # 嘟嘟定制隐藏 loading hint，只预分配 loading icon。
+        assert session.existing_elements == {_LOADING_ELEMENT_ID}
         assert "panel" not in session._creation_stages
 
     @pytest.mark.asyncio

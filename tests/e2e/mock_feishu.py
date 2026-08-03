@@ -87,6 +87,17 @@ class MockFeishuServer:
         self._call_log.append({"op": "reply_card_by_id", "message_id": message_id, "card_id": card_id, "msg_id": msg_id})
         return msg_id
 
+    async def send_card_by_id_to_chat(self, chat_id: str, card_id: str) -> str:
+        msg_id = f"om_mock_{self._next_msg_id}"
+        self._next_msg_id += 1
+        self._call_log.append({
+            "op": "send_card_by_id_to_chat",
+            "chat_id": chat_id,
+            "card_id": card_id,
+            "msg_id": msg_id,
+        })
+        return msg_id
+
     async def reply_card(self, message_id: str, card: dict[str, Any]) -> str:
         msg_id = f"om_mock_{self._next_msg_id}"
         self._next_msg_id += 1

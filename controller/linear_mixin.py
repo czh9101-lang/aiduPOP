@@ -28,6 +28,7 @@ from ..feishu import (
     CARDKIT_SEQUENCE_CONFLICT,
     CARDKIT_STREAMING_CLOSED,
     FeishuAPIError,
+    is_duplicate_id_error,
     is_element_not_found_error,
     is_schema_error,
     is_terminal_api_code,
@@ -90,6 +91,43 @@ def _get_model_from_ctx() -> str | None:
     if agent_ref is not None:
         return getattr(agent_ref, "model", None)
     return None
+
+
+def _build_session_panel(
+    session: CardSession,
+    state: UnifiedLinearState,
+    cfg: Config,
+    *,
+    expanded: bool,
+    reasoning_text: str | None = None,
+    border_color: str | None = None,
+    fallback_model: str | None = None,
+) -> dict[str, Any]:
+    """Build the customized bottom panel from one canonical argument set.
+
+    Keeping model resolution and common fields here prevents the streaming,
+    retry, and seal paths from drifting apart visually.
+    """
+    panel_kwargs: dict[str, Any] = {
+        "reasoning_rounds": state.reasoning_rounds,
+        "current_reasoning_text": (
+            state.current_reasoning_text
+            if reasoning_text is None
+            else reasoning_text
+        ),
+        "tool_steps": session.tool_use.build_display_steps(),
+        "tool_elapsed_ms": session.tool_use.elapsed_ms,
+        "show_reasoning": cfg.show_reasoning,
+        "expanded": expanded,
+        "panel_events": state.panel_events,
+        "max_tool_steps": cfg.max_tool_steps,
+        "max_reasoning_rounds": cfg.max_reasoning_rounds,
+        "model": _get_model_from_ctx() or fallback_model,
+    }
+    if border_color is not None:
+        panel_kwargs["border_color"] = border_color
+    return build_unified_panel(**panel_kwargs)
+
 
 async def _fallback_write_answer(
     client: Any,
@@ -320,22 +358,13 @@ class UnifiedControllerMixin:
             # 嘟嘟定制: answer在上面流式输出
             new_elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
 
-            # ── Path A: Always add unified panel AFTER answer (嘟嘟定制: panel放底部) ──
-            if True:
-                all_tool_steps = session.tool_use.build_display_steps()
-                panel = build_unified_panel(
-                    reasoning_rounds=state.reasoning_rounds,
-                    current_reasoning_text=state.current_reasoning_text,
-                    tool_steps=all_tool_steps,
-                    tool_elapsed_ms=session.tool_use.elapsed_ms,
-                    show_reasoning=self._cfg.show_reasoning,
-                    expanded=self._cfg.streaming_panel_expanded,
-                    panel_events=state.panel_events,
-                    max_tool_steps=self._cfg.max_tool_steps,
-                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
-                    model=_get_model_from_ctx(),
-                )
-                new_elements.append(panel)
+            # ── Always add unified panel AFTER answer (嘟嘟定制: panel放底部) ──
+            new_elements.append(_build_session_panel(
+                session,
+                state,
+                self._cfg,
+                expanded=self._cfg.streaming_panel_expanded,
+            ))
 
             # Add new elements before loading spinner (嘟嘟定制: 用 _LOADING_ELEMENT_ID 替代 _LOADING_HINT_ELEMENT_ID)
             actions.append({
@@ -356,7 +385,8 @@ class UnifiedControllerMixin:
 
             # ── Execute Phase 2 batch_update ──
             if actions:
-                _has_panel = state.panel_visible
+                # 嘟嘟定制始终创建 panel；tracking 必须与实际 payload 一致。
+                _has_panel = True
                 session.sequence += 1
                 try:
                     await self._client.cardkit_batch_update(
@@ -409,6 +439,21 @@ class UnifiedControllerMixin:
                         session._first_flush_done = False
                         # Do NOT clear dirty flags — elements still need creation
                         return
+                    elif is_duplicate_id_error(e):
+                        # v1.6.1 fix: 300301 Duplicate ID — panel already exists on Feishu side
+                        # but local _creation_stages is out of sync. This is permanent:
+                        # don't retry, sync tracking to stop the loop.
+                        _logger.warning(
+                            "unified flush phase 2 DUPLICATE ID (permanent): %s — "
+                            "syncing _creation_stages, clearing dirty flags, card=%s",
+                            e, session.card_id[:12],
+                        )
+                        session._creation_stages.add("panel")
+                        session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
+                        state.panel_dirty = False
+                        state.answer_dirty = False
+                        state.tool_steps_dirty = False
+                        return
                     else:
                         # v1.3.3 fix (P0): transient API error (rate limit, auth
                         _logger.warning(
@@ -456,18 +501,11 @@ class UnifiedControllerMixin:
         if state.panel_dirty:
             if "panel" in session._creation_stages:
                 # Panel exists — update its content
-                all_tool_steps = session.tool_use.build_display_steps()
-                panel = build_unified_panel(
-                    reasoning_rounds=state.reasoning_rounds,
-                    current_reasoning_text=state.current_reasoning_text,
-                    tool_steps=all_tool_steps,
-                    tool_elapsed_ms=session.tool_use.elapsed_ms,
-                    show_reasoning=self._cfg.show_reasoning,
+                panel = _build_session_panel(
+                    session,
+                    state,
+                    self._cfg,
                     expanded=self._cfg.streaming_panel_expanded,
-                    panel_events=state.panel_events,
-                    max_tool_steps=self._cfg.max_tool_steps,
-                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
-                    model=_get_model_from_ctx(),
                 )
                 actions.append({
                     "action": "partial_update_element",
@@ -482,18 +520,11 @@ class UnifiedControllerMixin:
                 })
             elif "answer" in session._creation_stages:
                 # ── Bug fix (v1.0.5): Late-arriving reasoning/tools ──
-                all_tool_steps = session.tool_use.build_display_steps()
-                panel = build_unified_panel(
-                    reasoning_rounds=state.reasoning_rounds,
-                    current_reasoning_text=state.current_reasoning_text,
-                    tool_steps=all_tool_steps,
-                    tool_elapsed_ms=session.tool_use.elapsed_ms,
-                    show_reasoning=self._cfg.show_reasoning,
+                panel = _build_session_panel(
+                    session,
+                    state,
+                    self._cfg,
                     expanded=self._cfg.streaming_panel_expanded,
-                    panel_events=state.panel_events,
-                    max_tool_steps=self._cfg.max_tool_steps,
-                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
-                    model=_get_model_from_ctx(),
                 )
                 actions.append({
                     "action": "add_elements",
@@ -529,38 +560,10 @@ class UnifiedControllerMixin:
                 if _hint_delete_in_batch:
                     session._creation_stages.add("hint_removed")
                     session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
-                # ── Track late-arriving panel creation ──
+                # ── Track late-arriving panel creation (ONLY after API success) ──
                 if "panel" not in session._creation_stages:
-                    # 嘟嘟定制：纯对话无 tool/reasoning 也补 panel，边框绿色，显示 0
                     session._creation_stages.add("panel")
                     session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
-                    # 构建空 panel 并发送
-                    empty_panel = build_unified_panel(
-                        reasoning_rounds=[],
-                        current_reasoning_text="",
-                        tool_steps=[],
-                        tool_elapsed_ms=session.tool_use.elapsed_ms,
-                        show_reasoning=self._cfg.show_reasoning,
-                        expanded=self._cfg.streaming_panel_expanded,
-                        border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
-                        model=_get_model_from_ctx(),
-                    )
-                    try:
-                        session.sequence += 1
-                        await self._client.cardkit_batch_update(
-                            session.card_id,
-                            [{
-                                "action": "add_elements",
-                                "params": {
-                                    "type": "insert_before",
-                                    "target_element_id": _LOADING_ELEMENT_ID,
-                                    "elements": [empty_panel],
-                                },
-                            }],
-                            sequence=session.sequence,
-                        )
-                    except Exception:
-                        pass
             except FeishuAPIError as e:
                 if e.code == CARDKIT_STREAMING_CLOSED:
                     if session._streaming_closed_logged:
@@ -596,6 +599,19 @@ class UnifiedControllerMixin:
                     session._creation_stages.add("hint_removed")
                     session.existing_elements.discard(_LOADING_HINT_ELEMENT_ID)
                     # 保留 panel_dirty / tool_steps_dirty 以便下轮 flush 重试
+                    return
+                if is_duplicate_id_error(e):
+                    # v1.6.1 fix: 300301 Duplicate ID — panel already exists on Feishu side
+                    # but local _creation_stages is out of sync. Permanent: sync + clear.
+                    _logger.warning(
+                        "unified flush phase 3 DUPLICATE ID (permanent): %s — "
+                        "syncing _creation_stages, clearing dirty flags, card=%s",
+                        e, session.card_id[:12],
+                    )
+                    session._creation_stages.add("panel")
+                    session.existing_elements.add(UNIFIED_PANEL_ELEMENT_ID)
+                    state.panel_dirty = False
+                    state.tool_steps_dirty = False
                     return
                 _logger.warning("unified flush batch_update failed: %s", e)
                 return
@@ -707,19 +723,13 @@ class UnifiedControllerMixin:
                     )
                     retry_new_elements: list[dict[str, Any]] = []
                     retry_new_elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
-                    all_tool_steps_retry = session.tool_use.build_display_steps()
-                    panel_retry = build_unified_panel(
-                        reasoning_rounds=state.reasoning_rounds,
-                        current_reasoning_text=state.current_reasoning_text,
-                        tool_steps=all_tool_steps_retry,
-                        tool_elapsed_ms=session.tool_use.elapsed_ms,
-                        show_reasoning=self._cfg.show_reasoning,
+                    panel_retry = _build_session_panel(
+                        session,
+                        state,
+                        self._cfg,
                         expanded=self._cfg.streaming_panel_expanded,
-                        panel_events=state.panel_events,
-                        max_tool_steps=self._cfg.max_tool_steps,
-                        max_reasoning_rounds=self._cfg.max_reasoning_rounds,
                         border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
-                        model=_get_model_from_ctx() or (footer_data.get("model") if footer_data else None),
+                        fallback_model=footer_data.get("model") if footer_data else None,
                     )
                     retry_new_elements.append(panel_retry)
                     retry_actions_p2: list[dict[str, Any]] = []
@@ -777,19 +787,13 @@ class UnifiedControllerMixin:
 
                 # ── Flush remaining panel content ──
                 if (state.panel_dirty or state.tool_steps_dirty) and "panel" in session._creation_stages:
-                    all_tool_steps = session.tool_use.build_display_steps()
-                    panel = build_unified_panel(
-                        reasoning_rounds=state.reasoning_rounds,
-                        current_reasoning_text=state.current_reasoning_text,
-                        tool_steps=all_tool_steps,
-                        tool_elapsed_ms=session.tool_use.elapsed_ms,
-                        show_reasoning=self._cfg.show_reasoning,
+                    panel = _build_session_panel(
+                        session,
+                        state,
+                        self._cfg,
                         expanded=self._cfg.streaming_panel_expanded,
-                        panel_events=state.panel_events,
-                        max_tool_steps=self._cfg.max_tool_steps,
-                        max_reasoning_rounds=self._cfg.max_reasoning_rounds,
                         border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
-                        model=_get_model_from_ctx() or (footer_data.get("model") if footer_data else None),
+                        fallback_model=footer_data.get("model") if footer_data else None,
                     )
                     try:
                         session.sequence += 1
@@ -861,19 +865,14 @@ class UnifiedControllerMixin:
 
                 # ── Bug fix (v1.0.5): Only update panel if it was created ──
                 if "panel" in session._creation_stages:
-                    all_tool_steps = session.tool_use.build_display_steps()
-                    panel = build_unified_panel(
-                        reasoning_rounds=state.reasoning_rounds,
-                        current_reasoning_text="",
-                        tool_steps=all_tool_steps,
-                        tool_elapsed_ms=session.tool_use.elapsed_ms,
-                        show_reasoning=self._cfg.show_reasoning,
+                    panel = _build_session_panel(
+                        session,
+                        state,
+                        self._cfg,
                         expanded=self._cfg.panel_expanded,
-                        panel_events=state.panel_events,
-                        max_tool_steps=self._cfg.max_tool_steps,
-                        max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                        reasoning_text="",
                         border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
-                        model=_get_model_from_ctx() or (footer_data.get("model") if footer_data else None),
+                        fallback_model=footer_data.get("model") if footer_data else None,
                     )
                     seal_actions.append({
                         "action": "partial_update_element",
@@ -1067,19 +1066,14 @@ class UnifiedControllerMixin:
                         if state is not None:
                             # ── Bug fix (v1.0.5): Only update panel if it was created ──
                             if "panel" in session._creation_stages:
-                                all_tool_steps = session.tool_use.build_display_steps()
-                                retry_panel = build_unified_panel(
-                                    reasoning_rounds=state.reasoning_rounds,
-                                    current_reasoning_text="",
-                                    tool_steps=all_tool_steps,
-                                    tool_elapsed_ms=session.tool_use.elapsed_ms,
-                                    show_reasoning=self._cfg.show_reasoning,
+                                retry_panel = _build_session_panel(
+                                    session,
+                                    state,
+                                    self._cfg,
                                     expanded=self._cfg.panel_expanded,
-                                    panel_events=state.panel_events,
-                                    max_tool_steps=self._cfg.max_tool_steps,
-                                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
+                                    reasoning_text="",
                                     border_color="green" if not is_error and not is_aborted else ("red" if is_error else "yellow"),
-                                    model=_get_model_from_ctx() or (footer_data.get("model") if footer_data else None),
+                                    fallback_model=footer_data.get("model") if footer_data else None,
                                 )
                                 retry_actions.append({
                                     "action": "partial_update_element",
@@ -1193,18 +1187,11 @@ class UnifiedControllerMixin:
 
             # ── Drain panel content ──
             if state.panel_dirty and "panel" in session._creation_stages:
-                all_tool_steps = session.tool_use.build_display_steps()
-                panel = build_unified_panel(
-                    reasoning_rounds=state.reasoning_rounds,
-                    current_reasoning_text=state.current_reasoning_text,
-                    tool_steps=all_tool_steps,
-                    tool_elapsed_ms=session.tool_use.elapsed_ms,
-                    show_reasoning=self._cfg.show_reasoning,
+                panel = _build_session_panel(
+                    session,
+                    state,
+                    self._cfg,
                     expanded=self._cfg.streaming_panel_expanded,
-                    panel_events=state.panel_events,
-                    max_tool_steps=self._cfg.max_tool_steps,
-                    max_reasoning_rounds=self._cfg.max_reasoning_rounds,
-                    model=_get_model_from_ctx(),
                 )
                 drain_actions: list[dict[str, Any]] = [{
                     "action": "partial_update_element",

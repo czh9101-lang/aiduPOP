@@ -108,6 +108,7 @@ CARDKIT_STREAMING_CLOSED = 300309  # 卡片流式模式已关闭
 CARDKIT_SEQUENCE_CONFLICT = 300317  # sequence 冲突
 CARDKIT_ELEMENT_NOT_FOUND = 300313  # 元素不存在（add_elements 后服务端尚未持久化时的竞态）
 CARDKIT_ELEMENT_NOT_FOUND_ALT = 300314  # delete_elements 不存在的元素
+CARDKIT_DUPLICATE_ID = 300301  # Duplicate ID：重复添加已存在的元素
 MSG_NOT_FOUND = 1000023  # 消息不存在/已删除
 
 # v1.3.1 fix: 300315 错误码有两种含义：
@@ -155,6 +156,15 @@ def is_element_not_found_error(e: "FeishuAPIError") -> bool:
     if e.code == CARDKIT_SCHEMA_ERROR and _RE_ELEMENT_NOT_FOUND.search(str(e)):
         return True
     return False
+
+def is_duplicate_id_error(e: "FeishuAPIError") -> bool:
+    """判断 FeishuAPIError 是否为 Duplicate ID 错误（300301）。
+
+    发生在 Phase 2/3 尝试 add_elements 一个已存在的 panel 时。
+    这是永久错误：飞书侧已有该元素，本地 _creation_stages 不同步。
+    应清除 dirty flag 停止重试，而非无限循环。
+    """
+    return e.code == CARDKIT_DUPLICATE_ID
 
 @dataclass(frozen=True)
 class FeishuClientConfig:
