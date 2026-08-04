@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-1.6.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.0.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -52,7 +52,7 @@
 > ```
 > 帮我安装飞书敖式卡片：
 > - Gitee：https://gitee.com/Aowen-Nowor/hermes-lark-streaming/raw/github_sync/docs/AGENT_GUIDE.md
-> - GitHub：https://raw.githubusercontent.com/Aowen-Nowor/hermes-lark-streaming/github_sync/docs/AGENT_GUIDE.md
+> - GitHub：https://raw.githubusercontent.com/Aowen-Nowor/hermes-lark-streaming/master/docs/AGENT_GUIDE.md
 > ```
 
 > 插件会自动读取 `HERMES_HOME` 环境变量定位安装路径（默认 `~/.hermes`），非默认路径下无需额外操作。
@@ -124,14 +124,16 @@ $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
 
 ```yaml
 hermes_lark_streaming:
+  enabled: true                    # 启用流式卡片
+  linear: true                     # 线性模式：单卡片原地更新（统一面板架构）
   panel_expanded: false            # 完成态卡片中面板是否保持展开
   streaming_panel_expanded: false  # 流式态卡片中面板是否保持展开
   print_strategy: delay            # "fast"（即时）或 "delay"（更丝滑打字机，默认）
-  print_step: 4                    # 打字机每次渲染字符数（默认4，范围1~10，需飞书7.23+）
-  flush_interval_ms: 200           # 插件发送间隔（毫秒，70~2000，默认200）
+  flush_interval_ms: 100           # 卡片刷新间隔（毫秒，70~2000，默认 100）
   card_ttl_sec: 600               # 卡片存活检测超时（秒）
   max_tool_steps: 20               # 统一面板最多显示的工具步骤数（默认20，范围1~100）
   max_reasoning_rounds: 20         # 统一面板最多显示的推理轮次数（默认20，范围1~100）
+  inject_time: false               # 时间感知模式（详见下方说明）
 
   footer:
     show_label: false              # 是否显示字段标签
@@ -151,6 +153,10 @@ hermes_lark_streaming:
       #   history_offset — 对话历史偏移量；值越大对话越长，值突然变小说明发生了上下文压缩
       # 每个内层列表为页脚的一行，字段仅在有值时显示
 ```
+
+### 时间感知模式（`inject_time`）
+
+开启 `inject_time: true` 后，插件在每条用户消息前添加 `<time>HH:MM:SS</time>` 时间前缀，让 AI 无需调用 `date` 工具即可感知当前时间。使用 XML 标签是因为 LLM 普遍将其理解为结构化元数据，不会在回复中模仿。Prefix Cache 安全（每条约 6 tokens）。详见 [SKILL.md](docs/SKILL.md)。
 
 ### 推理面板显示
 
@@ -241,4 +247,4 @@ FEISHU_DOMAIN=feishu          # feishu=国内版, lark=国际版
 
 ## 致谢
 
-<a href="https://github.com/joshcheng820222"><img src="https://avatars.githubusercontent.com/u/26886147?v=4&s=66" alt="joshcheng820222" width="66" height="66"></a> <a href="https://github.com/xuu1998"><img src="https://avatars.githubusercontent.com/u/40609659?v=4&s=66" alt="xuu1998" width="66" height="66"></a> <a href="https://gitee.com/joshchengjoshcheng"><img src="assets/avatars/joshchengjoshcheng.png" alt="joshchengjoshcheng" width="66" height="66"></a> <a href="https://github.com/hmhmdcy"><img src="https://avatars.githubusercontent.com/u/163143682?v=4" alt="hmhmdcy" width="66" height="66"></a>
+[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222) [![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998) [![joshchengjoshcheng](assets/avatars/joshchengjoshcheng.png)](https://gitee.com/joshchengjoshcheng)
