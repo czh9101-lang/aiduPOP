@@ -86,10 +86,22 @@ def on_feishu_normalize(
         source.thread_id = None
         event.source = source
 
-@_safe_hook()
-def on_message_started(*, ctrl: Any, message_id: str, chat_id: str, anchor_id: str | None = None) -> None:
+def on_message_started(
+    *,
+    message_id: str = "",
+    chat_id: str = "",
+    anchor_id: str | None = None,
+    session_key: str | None = None,
+    **kwargs: Any,
+) -> None:
     """[注入点 1] 函数开头 — message.started."""
-    ctrl.on_message_started(message_id=message_id, chat_id=chat_id, anchor_id=anchor_id)
+    try:
+        ctrl = get_controller()
+        if not ctrl.enabled:
+            return
+        ctrl.on_message_started(message_id=message_id, chat_id=chat_id, anchor_id=anchor_id)
+    except Exception as exc:
+        _logger.warning("on_message_started error: %s", exc, exc_info=True)
 
 @_safe_hook(default_return=False)
 def on_message_completed(
@@ -199,6 +211,30 @@ def on_message_interrupted(
         chat_id=chat_id,
         anchor_id=anchor_id,
     )
+
+async def on_session_aborted(*, session_key: str = "", **kwargs: Any) -> None:
+    """Session terminated via /stop or reset."""
+    _logger.info("on_session_aborted called for session_key=%s", session_key)
+
+async def on_message_completed_wait(*, message_id: str, **kwargs: Any) -> bool:
+    """Wait for card completion."""
+    return False
+
+def on_message_needs_text_fallback(*, message_id: str, **kwargs: Any) -> bool:
+    """Check if text fallback needed."""
+    return False
+
+async def on_background_deliver(*, chat_id: str, preview: str = "", content: str = "", reply_to_message_id: str | None = None, **kwargs: Any) -> bool:
+    """Deliver background task result."""
+    return False
+
+async def on_queued_followup_boundary(*, message_id: str = "", result: Any = None, **kwargs: Any) -> bool:
+    """Handle followup boundary."""
+    return False
+
+def on_queued_followup_result(*, message_id: str = "", followup_result: Any = None, **kwargs: Any) -> None:
+    """Handle followup result."""
+    pass
 
 async def on_cron_deliver(
     *,
