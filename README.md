@@ -1,249 +1,213 @@
-<h1 align="center">hermes-lark-streaming</h1>
+# 💎 aiduPOP — Hermes爱嘟流式卡片
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Project-Vibe%20Coding-ff69b4" alt="Vibe Coding">
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-2.0.0-ff9800.svg" alt="Version">
-</p>
-
-<p align="center">
-<a href="mailto:zhengyu.pu@petalmail.com"><img src="https://img.shields.io/badge/Email-zhengyu.pu%40petalmail.com-9C27B0?logo=gmail&logoColor=white" alt="Email"></a>
-<a href="https://applink.feishu.cn/client/message/link/open?token=AmoQJk5dwczIahKlW78ADLU%3D"><img src="https://img.shields.io/badge/The_Only_Official_Group-China-red" alt="The Only Official Group"></a>
-<a href="https://larkcommunity.feishu.cn/wiki/DKkpwgMcJiglIhk88N4cqJEan5f?from=from_copylink"><img src="https://img.shields.io/badge/docs-Knowledge_Base-3370FF?logo=feishu&logoColor=white" alt="Knowledge Base"></a>
-</p>
-
-<p align="center">
-English | <a href="README.zh-CN.md">中文版</a>
-</p>
-
-Feishu/Lark CardKit v2.0 streaming cards plugin for Hermes Agent — real-time AI response display with typing effect, unified collapsible panel, chronological reasoning/tool display, and more.
-
-> Based on [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0, with extensive refactoring and optimizations
+> **水晶与蓝宝石理念——够简洁，够透明，够美**
 >
-> ⚠️ **Incompatible with the upstream plugin** — if you have the original `Cheerwhy/hermes-lark-streaming` installed, please uninstall it first before installing this version.
+> **不只是卡片 — 是对话本身。**
+
+```
+简洁不是少放东西，而是每一个元素都有存在的理由；
+透明不是打印日志，而是让你看清 AI 每一步在想什么；
+美不是装饰，而是信息该在的位置，刚好在那里。
+```
+
+[![Version](https://img.shields.io/badge/version-2.0.0%20·%20Sapphire·蓝宝石-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
+[![Built on hermes-lark-streaming](https://img.shields.io/badge/built%20on-hermes--lark--streaming-orange.svg)](https://gitee.com/Aowen-Nowor/hermes-lark-streaming)
+[![Aidu](https://img.shields.io/badge/爱嘟-流式卡片-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
+
+**中文** | **[📖 English](README_EN.md)**
 
 ---
 
-## Effect Preview
+## aiduPOP 是什么？
 
-<table align="center">
-  <tr>
-    <td><img src="assets/screenshots/img1.png" width="200px" /></td>
-    <td><img src="assets/screenshots/img2.png" width="200px" /></td>
-    <td><img src="assets/screenshots/img3.png" width="200px" /></td>
-    <td><img src="assets/screenshots/img4.png" width="200px" /></td>
-  </tr>
-</table>
+**aiduPOP**（爱嘟流式卡片 / 蓝宝石）是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书流式卡片插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
 
----
+基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduSTR 在其之上做了一套完整的**水晶化改造**：
 
-## Quick Start
+| 层级 | 做什么 | 核心特性 |
+|------|--------|----------|
+| ⚡ **即时** | 第一个 token 就见卡片 | 无「正在输入」提示，无「回复：」狗皮膏药 |
+| 🎨 **水晶** | 每个元素都有理由 | Answer 在上、Panel 在下，footer 默认清空 |
+| 🚦 **状态** | 一眼看清结果 | 绿色完成 / 红色中止 / 黄色报错，颜色编码 |
+| 🔍 **透明** | 看清 AI 每一步 | 可展开面板：思考轮次、工具调用、时间戳 |
+| 🃏 **交互** | 卡片里直接回答 | 原生 Cardsuit 2.0 clarify 选项卡 + 回调 |
+| 🛡️ **韧性** | 失败不掉回纯文本 | Phase 2 原子回滚补救、卡片重建自动重试 |
 
-### Prerequisites
-
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent) (running, with Feishu platform configured)
-- Hermes CLI with plugin system support (`hermes plugins` command available)
-
-### Installation
-
-> **💡 Smart Install Prompt**: Copy the following prompt to Hermes Agent, and it will automatically complete the installation:
-> 
-> ```
-> Help me install Feishu Ao-style Cards:
-> - Gitee: https://gitee.com/Aowen-Nowor/hermes-lark-streaming/raw/github_sync/docs/AGENT_GUIDE.md
-> - GitHub: https://raw.githubusercontent.com/Aowen-Nowor/hermes-lark-streaming/master/docs/AGENT_GUIDE.md
-> ```
-
-> The plugin automatically reads the `HERMES_HOME` environment variable to locate the installation path (`~/.hermes` by default). No extra steps are needed for non-default paths.
-
-**Gitee**
-> Choose either SSH or HTTPS:
-```bash
-# Gitee (SSH)
-hermes plugins install git@gitee.com:Aowen-Nowor/hermes-lark-streaming.git
-# Gitee (HTTPS)
-hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
-```
-**GitHub**
-> Choose either SSH or HTTPS:
-```bash
-# GitHub (SSH)
-hermes plugins install git@github.com:Aowen-Nowor/hermes-lark-streaming.git
-# GitHub (HTTPS)
-hermes plugins install https://github.com/Aowen-Nowor/hermes-lark-streaming
-```
-
-Enter `Y` when prompted to enable the plugin, then restart the gateway:
-
-```bash
-hermes gateway restart
-```
-
-### Update
-
-```bash
-hermes plugins update hermes-lark-streaming
-hermes gateway restart
-```
-
-### Uninstallation
-
-```bash
-# 1. Clean up injected config (while plugin code is still available)
-# Auto-detect Hermes Python path:
-HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
-$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py cleanup
-
-# 2. Remove plugin
-hermes plugins uninstall hermes-lark-streaming
-
-# 3. Restart gateway
-hermes gateway restart
-```
-
-### Verify Installation
-
-```bash
-hermes plugins list
-grep hermes_lark_streaming ~/.hermes/logs/agent.log
-# Auto-detect Hermes Python path:
-HERMES_PYTHON=$(python3 ~/.hermes/plugins/hermes-lark-streaming/__main__.py python)
-$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py status
-$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py verify
-$HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
-```
-
-> **Troubleshooting**: If no card effect appears, check: (1) `hermes plugins list` shows enabled; (2) no `*.bak` directories under `~/.hermes/plugins/`; (3) Feishu credentials are configured. The `doctor` command provides a one-stop diagnostic covering plugin version, Python environment, config, Feishu credentials, patch status, and log paths.
+> Crystal — 爱嘟宝石系列的第一颗 💎
 
 ---
 
-## Configuration
+## 架构
 
-All settings go under the `hermes_lark_streaming:` section in `~/.hermes/config.yaml`. The plugin auto-injects defaults on first load; run `cleanup` before uninstalling to remove them.
-
-```yaml
-hermes_lark_streaming:
-  enabled: true                    # Enable streaming cards
-  linear: true                     # Single-card in-place update (unified panel architecture)
-  panel_expanded: false            # Keep panels expanded in completed cards
-  streaming_panel_expanded: false  # Keep panels expanded during streaming
-  print_strategy: delay            # "fast" (instant) or "delay" (smoother typewriter, default)
-  flush_interval_ms: 100           # Card refresh interval in ms (70–2000, default 100)
-  card_ttl_sec: 600               # Card alive detection timeout (seconds)
-  max_tool_steps: 20               # Max tool steps shown in panel (default 20, range 1–100)
-  max_reasoning_rounds: 20         # Max reasoning rounds shown in panel (default 20, range 1–100)
-  inject_time: false               # Time awareness mode (see below)
-
-  footer:
-    show_label: false              # Show field labels
-    fields:
-      - [status, elapsed, model, cost, compression_exhausted]
-      # Available fields:
-      #   status      — Reply status (Completed / Error / Stopped)
-      #   elapsed     — AI response elapsed time
-      #   model       — Model name used
-      #   cost        — Estimated cost with trust indicator ($0.023 est. / $0.023 actual / Free)
-      #   compression_exhausted — Context window is full (⚠ Context Full)
-      # Fields below are not shown by default — add them to the fields list to enable:
-      #   cache       — Cache hit rate (cache_read/total_input hit%)
-      #   tokens      — Token usage (↑ input ↓ output 💭 reasoning)
-      #   context     — Context window usage (used/total percentage)
-      #   api_calls   — Number of API calls in this session
-      #   history_offset — Conversation history offset; larger = longer history, sudden decrease = context compression
-      # Each inner list is one row in the footer; fields only shown when they have values
+```
+┌──────────────────────────────────────────────────┐
+│      💎 aiduSTR — Hermes爱嘟流式卡片             │
+│         Feishu Cardsuit 2.0 Streaming            │
+├──────────────────────────────────────────────────┤
+│  cardkit/     → 卡片渲染引擎（元素、模板）        │
+│  controller/  → 线性控制器 + card_id 追踪         │
+│  patching/    → 爱嘟定制（模型显示、Phase 2）     │
+│  state/       → 流式状态机                        │
+│  flush/       → 节流刷新与批量更新                │
+│  feishu/      → 飞书 API 客户端                   │
+├──────────────────────────────────────────────────┤
+│  Hermes Agent 插件钩子（platform_registry）       │
+│  aiduMEM 持久记忆（消除上下文焦虑）               │
+└──────────────────────────────────────────────────┘
 ```
 
-### Time Awareness Mode (`inject_time`)
+---
 
-When `inject_time: true`, the plugin prepends `<time>HH:MM:SS</time>` to each user message so the AI can perceive the current time without calling `date`. XML tags are used because LLMs understand them as metadata and won't mimic them in output. Prefix-cache safe (~6 tokens/message). See [SKILL.md](docs/SKILL.md) for full details.
+## 🖼️ 效果展示
 
-### Reasoning Panel Display
+### 1. 即时响应
 
-```yaml
-display:
-  show_reasoning: true  # Show reasoning content in the unified panel
-```
+<p align="center">
+  <img src="assets/screenshots/01-instant-response.png" width="600" alt="即时响应">
+</p>
 
-### Unified Panel Overflow Compression
+> **没有「正在输入...」提示，没有「回复：...」狗皮膏药。** 流式卡片即时出现，从第一个 token 开始实时渲染。没有飞书的 UI 噪音，只有纯粹的对话。
 
-Feishu Card 2.0 has a **hard limit of 200 elements/components** per card. Exceeding it triggers error `300305 (element exceeds the limit)`, which causes card sealing to fail and triggers a plain-text fallback — resulting in duplicate content visible to users.
+---
 
-> **Element counting rule**: Every JSON object with a `tag` property counts as 1 element, including deeply nested ones like `standard_icon`, `plain_text`, `lark_md`, etc.
+### 2. 完成状态 — 绿色面板
 
-#### Element Cost Breakdown
+<p align="center">
+  <img src="assets/screenshots/02-panel-completed.png" width="600" alt="完成状态">
+</p>
 
-| Component | Elements | Notes |
-|-----------|----------|-------|
-| Panel container | 1 | `collapsible_panel` |
-| Panel title | 2 | `plain_text` + `standard_icon` |
-| Each reasoning round (max) | 4 | Title row `div`+`standard_icon`+`lark_md` + reasoning text `markdown` |
-| Each tool step (max) | 7 | Title row `div`+`standard_icon`+`lark_md` + detail row `div`+`plain_text` + result row `div`+`lark_md` |
-| Fold hint (when triggered) | 1 | 1 `markdown` element |
-| Answer text | 1–3 | `markdown`; long text may be split |
-| Footer | 2 | `hr` + `markdown` |
-| Card header (when enabled) | ~3 | `plain_text` + `standard_icon` |
-| Error panel (when present) | ~4 | `collapsible_panel` + inner elements |
+> **Answer 在上，Panel 在下。** 绿色边框的面板一目了然：模型名称、思考轮次、工具调用、耗时。简洁、美观、信息明确。由 **aiduMEM** 持久记忆加持，消除上下文焦虑。面板支持完全自定义。
 
-**Example calculation**: 20 reasoning rounds + 20 tool steps = 20×4 + 20×7 + fixed overhead ≈ 223 (exceeds 200)
+---
 
-Hence the defaults `max_tool_steps=20` + `max_reasoning_rounds=20`, combined with a fold mechanism, ensure most scenarios stay within limits. Even if a higher config value or an extreme case still exceeds the cap, a built-in **card-level element safety net** kicks in — at seal time all elements are known (panel + answer + footer + error), the actual tag object count is recursively computed, and if it exceeds 195 (200 − 5 buffer), the oldest panel children are trimmed first. This guarantees the card never exceeds 200 elements. Answer, footer, and error panel are never trimmed.
+### 3. 中止/报错状态 — 红色面板
 
-#### Configuration
+<p align="center">
+  <img src="assets/screenshots/03-panel-stopped.png" width="600" alt="中止状态">
+</p>
 
-```yaml
-hermes_lark_streaming:
-  max_tool_steps: 20           # Max tool steps shown in unified panel (default 20, range 1–100)
-  max_reasoning_rounds: 20     # Max reasoning rounds shown in unified panel (default 20, range 1–100)
-```
+> **颜色编码状态。** 当生成被中止或出错时，面板边框自动变色 — **红色=中止**，**黄色=报错**。一眼就知道状态，无需阅读小字。
 
-When the limit is exceeded, early items are collapsed into a single summary line, e.g.: `⚡ 10 early reasoning rounds, 5 early tool steps collapsed`
+---
 
-The panel title always shows the **actual total** (e.g. "3 rounds · 44 tools"); the fold hint only affects what is displayed inside the panel.
+### 4. 展开面板 — 完整追踪
 
-### /aowen Commands
+<p align="center">
+  <img src="assets/screenshots/04-panel-expanded.png" width="600" alt="展开面板">
+</p>
 
-Send `/aowen` commands in Feishu, the plugin replies with cards directly (bypassing Hermes AI):
+> **点击展开。** 查看完整的推理追踪 — 每一轮思考、每一次工具调用，附带时间戳。透明是设计原则。没有隐藏的魔法，没有多余的 footer。只在你需要时，提供你需要的信息。
 
-| Command | Description |
-|---------|-------------|
-| `/aowen help` | Show all available commands |
-| `/aowen status` | Show plugin status + current config (collapsible panel) |
-| `/aowen monitor` | Show metrics dashboard (cards created, API calls, error codes, etc.) |
-| `/aowen monitor reset` | Reset metrics counters |
-| `/aowen config reload` | After modifying `~/.hermes/config.yaml`, send this command in Feishu to apply immediately, or restart the gateway |
-| `/aowen` | Same as `/aowen help` |
+---
 
-> `/aowen` is the plugin's command prefix; all `/aowen` commands are handled by the plugin, not Hermes.
+### 5. Clarify — 交互式选项卡（Cardkit 2.0）
 
-### Feishu Credentials
+<p align="center">
+  <img src="assets/screenshots/05-clarify-options.png" width="600" alt="Clarify 选项">
+</p>
 
-The plugin reuses Hermes's existing Feishu credentials — no separate configuration needed. Hermes already configures these in `~/.hermes/.env` during installation:
+> **原生飞书 Cardkit 2.0 集成。** 当 AI 需要澄清时，直接在对话中呈现交互式选项卡。从下拉菜单选择或输入答案 — 无需切换上下文。
+
+---
+
+### 6. Clarify — 回调与继续
+
+<p align="center">
+  <img src="assets/screenshots/06-clarify-callback.png" width="600" alt="Clarify 回调">
+</p>
+
+> **无缝回调。** 选择完成后，Agent 收到回调并继续工作。Clarify 卡片更新显示你的选择和确认徽章。简洁、快速、原生。
+
+---
+
+## 🚀 快速开始
+
+### 前置要求
+
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent) 已安装
+- 飞书（Lark）机器人已配置
+- Python 3.10+
+
+### 安装
 
 ```bash
-# ~/.hermes/.env (configured by Hermes, reused by plugin)
-FEISHU_APP_ID=cli_xxxxxx
-FEISHU_APP_SECRET=xxxxxx
-FEISHU_DOMAIN=feishu          # feishu=China, lark=International
+# 克隆仓库
+git clone https://github.com/monkey2jack/aiduSTR.git
+
+# 复制到 Hermes 插件目录
+cp -r aiduSTR ~/.hermes/plugins/hermes-lark-streaming
+
+# 重启 Hermes Agent
+hermes restart
 ```
 
-> The plugin automatically reads Hermes's Feishu credentials and domain settings. If the Hermes Feishu channel works, the plugin works too.
+### 配置
+
+插件使用与上游 `hermes-lark-streaming` 相同的配置。爱嘟定制部分详见 [CUSTOMIZATIONS.md](CUSTOMIZATIONS.md)。
+
+版本号唯一来源是 `plugin.yaml` 的 `version` 字段，`setup.py` / `__init__.py` 动态读取，不会出现多处版本不一致。
 
 ---
 
-## Developer Guide & Changelog
+## 🔧 定制说明
 
-> 📖 **[SKILL.md](docs/SKILL.md)** — LLM quick-start guide. Architecture, key design decisions, efficient code modification guide.
+相对上游 v1.6.0 的完整定制清单详见 [CUSTOMIZATIONS.md](CUSTOMIZATIONS.md)，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
-> For the full version history, see [CHANGELOG.md](docs/CHANGELOG.md)
+### 核心特性
 
-> ⚠️ **Important Notice:** If upgrading from v1.0.1 or below, please follow the uninstallation process to remove the old version and freshly install the new one. Do NOT upgrade via the update command!
+- **🎨 水晶设计** — 简洁美观，没有多余元素
+- **⚡ 即时响应** — 没有「正在输入」提示，卡片即时出现
+- **🚦 颜色编码面板** — 绿色（完成）、红色（中止）、黄色（报错）
+- **🔍 透明追踪** — 可展开面板，显示完整推理和工具调用
+- **🤔 aiduMEM 集成** — 持久记忆消除上下文焦虑
+- **🃏 Cardsuit 2.0** — 原生飞书交互式 clarify 卡片
+- **🛡️ Phase 2 保护** — API 失败时自动回滚补救
+- **📊 模型显示** — 稳定的模型名称显示，不会闪烁
 
 ---
 
-## How to Submit Issues
-> Please refer to the template [ISSUES_TEMPLATE.md](docs/ISSUES_TEMPLATE.md)
+## 📦 项目结构
 
-## Acknowledgments
+```
+aiduSTR/
+├── cardkit/           # 卡片渲染引擎
+├── controller/        # 线性控制器 & card_id 追踪
+├── patching/          # 爱嘟定制（模型显示、Phase 2）
+├── state/             # 流式状态机
+├── flush/             # 节流刷新
+├── feishu/            # 飞书 API 客户端
+├── config/            # 配置解析
+├── assets/            # 截图 & 静态资源
+├── tests/             # 测试套件
+├── plugin.yaml        # 插件配置（版本唯一来源）
+└── ...
+```
 
-[![joshcheng820222](https://avatars.githubusercontent.com/u/26886147?v=4&s=66)](https://github.com/joshcheng820222) [![xuu1998](https://avatars.githubusercontent.com/u/40609659?v=4&s=66)](https://github.com/xuu1998) [![joshchengjoshcheng](assets/avatars/joshchengjoshcheng.png)](https://gitee.com/joshchengjoshcheng)
+---
+
+## 🤝 贡献
+
+欢迎贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 了解贡献指南。
+
+---
+
+## 📄 许可证
+
+本项目基于 MIT 许可证 — 详见 [LICENSE](LICENSE)。
+
+---
+
+## 🙏 致谢
+
+- **上游**：[Aowen-Nowor/hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0
+- **作者**：敖文大佬
+- **框架**：[Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research
+- **定制**：aidu
+
+---
+
+<p align="center">
+  <sub>用 💕 制作 by aidu</sub>
+</p>
