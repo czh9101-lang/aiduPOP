@@ -1,3 +1,16 @@
+## v2.0.0 (2026-08-04) — Sapphire Edition (蓝宝石版)
+
+aiduPOP 嘟嘟大美满专属全能高可用重磅升级版。整合社区 Cheerwhy upstream v0.12.0 最新底层（支持 Profile 隔离、Hermes 0.19 TurnRunner 上下文适配、CardKit 重试机制、Width Mode 等），同时全量回植嘟嘟专属卡片美化与根治补丁（v22.2 / v22.3）。
+
+### 💎 重磅更新与嘟嘟定制
+- **Model 头部展示与紧贴**：Panel Header 最左边完美呈现在线 AI Model 名称，格式为 `⚕️model`（⚕️ 字符与模型名紧贴无空格，视觉极佳）。
+- **Model 全生命周期高可用（v22.2 根治）**：引入 `_model_cache` 模块级全局字典，摆脱 contextvar / thread-local 跨 asyncio task 丢失的死穴，确保卡片从创建 Phase 2 到封卡 Phase 3 始终稳定百分百显示 Model。
+- **元素缺失回滚根治（v22.3 防护）**：解耦 `existing_elements` 与 `include_loading_hint` 状态，彻底避免飞书 CardKit 300314 原子更新导致 answer/panel 被错误回滚问题。
+- **界面去噪与优雅布局**：默认隐藏冗余 Footer，模型移入 Panel Header，清理卡片回复中的“回复:……”等牛皮癣文本，只保留优雅有度的 💭/🛠️/⏱/⚕ 核心数据信息。
+- **完全兼容 Hermes 0.19 架构**：全量支持 多 Profile 控制隔离、CardKit 重建重试机制、cron 定时任务卡片独立渲染交付与动态响应模式（default / compact / fill）。
+
+---
+
 ## v1.6.0 (2026-07-21)
 
 Clarify 卡片失效复发修复 — hermes v0.19.0 升级后 clarify 退回纯文本（"❓ 问题 / 编号列表 / Reply with the number..."）。三路调研（插件代码 + hermes v0.19.0 源码 + 服务器日志）确认根因不在 hermes（v0.17.0→v0.19.0 clarify dispatch / deferred loading / 纯文本格式零改动），而在插件 v1.5.0 误删 v1.4.0 的 deferred loading 修复。
