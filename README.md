@@ -11,6 +11,9 @@
 ```
 
 [![Version](https://img.shields.io/badge/version-2.0.1%20·%20Sapphire·蓝宝石-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
+[![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
+[![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
 [![Built on hermes-lark-streaming](https://img.shields.io/badge/built%20on-hermes--lark--streaming-orange.svg)](https://gitee.com/Aowen-Nowor/hermes-lark-streaming)
@@ -24,7 +27,7 @@
 
 **aiduPOP**（爱嘟流式卡片 / 蓝宝石）是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书流式卡片插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
 
-基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduSTR 在其之上做了一套完整的**水晶化改造**：
+基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduPOP 在其之上做了一套完整的**水晶化改造**：
 
 | 层级 | 做什么 | 核心特性 |
 |------|--------|----------|
@@ -43,7 +46,7 @@
 
 ```
 ┌──────────────────────────────────────────────────┐
-│      💎 aiduSTR — Hermes爱嘟流式卡片             │
+│      💎 aiduPOP — Hermes爱嘟流式卡片             │
 │         Feishu Cardsuit 2.0 Streaming            │
 ├──────────────────────────────────────────────────┤
 │  cardkit/     → 卡片渲染引擎（元素、模板）        │
@@ -132,20 +135,32 @@
 
 ### 安装
 
+方式一 · pip（两个包名等价，装的是同一份代码）：
+
 ```bash
-# 克隆仓库
-git clone https://github.com/monkey2jack/aiduSTR.git
+pip install aidupop                 # 爱嘟家族品牌名
+pip install hermes-lark-streaming   # 上游规范名
+```
 
-# 复制到 Hermes 插件目录
-cp -r aiduSTR ~/.hermes/plugins/hermes-lark-streaming
+两者都提供同一个可导入包 `hermes_lark_streaming`，版本号同步发布。
 
-# 重启 Hermes Agent
-hermes restart
+方式二 · 作为 Hermes 目录插件：
+
+```bash
+git clone https://github.com/monkey2jack/aiduPOP.git
+cp -r aiduPOP ~/.hermes/plugins/hermes-lark-streaming
+hermes gateway restart
+```
+
+方式三 · Docker（GHCR）：
+
+```bash
+docker pull ghcr.io/monkey2jack/aidupop:latest
 ```
 
 ### 配置
 
-插件使用与上游 `hermes-lark-streaming` 相同的配置。爱嘟定制部分详见 [CUSTOMIZATIONS.md](CUSTOMIZATIONS.md)。
+插件使用与上游 `hermes-lark-streaming` 相同的配置。爱嘟定制部分详见 [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md)。
 
 版本号唯一来源是 `plugin.yaml` 的 `version` 字段，`setup.py` / `__init__.py` 动态读取，不会出现多处版本不一致。
 
@@ -153,7 +168,7 @@ hermes restart
 
 ## 🔧 定制说明
 
-相对上游 v1.6.0 的完整定制清单详见 [CUSTOMIZATIONS.md](CUSTOMIZATIONS.md)，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+相对上游 v1.6.0 的完整定制清单详见 [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md)，版本演进见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ### 核心特性
 
@@ -171,7 +186,7 @@ hermes restart
 ## 📦 项目结构
 
 ```
-aiduSTR/
+aiduPOP/
 ├── cardkit/           # 卡片渲染引擎
 ├── controller/        # 线性控制器 & card_id 追踪
 ├── patching/          # 爱嘟定制（模型显示、Phase 2）

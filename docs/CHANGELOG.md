@@ -6,6 +6,12 @@ aiduPOP 嘟嘟大美满专属补丁发布。
 - **Hermes Agent 网关钩子全量兼容**：在 `patching/hooks.py` 与 `patching/__init__.py` 中补全所有 Hermes Gateway 钩子定义（含 `on_session_aborted`、`on_message_completed_wait` 等），完美支持 Hermes 0.19+ 最新网关事件流。
 - **推荐运行配置更新**：明确 `flush_interval_ms: 70` 与 `print_strategy: fast` 极速流式打字机效果配置，完美契合飞书 CardKit 2.0 官方 70ms 刷卡率。
 
+### 📦 打包与仓库统一（2026-08-05 收尾）
+- **双包名同版发布**：`aidupop` 与 `hermes-lark-streaming` 从同一份源码、同一个版本号（`plugin.yaml`）发布，两者都提供可导入包 `hermes_lark_streaming`。`aidupop` 从 1.1.1 直接跃迁到 2.0.1 与主线对齐。
+- **别名打包脚本**：新增 `scripts/build_aidupop.py` + `packaging/pyproject.aidupop.toml`。脚本在临时目录暂存源码后再构建，工作区永不被改名污染；使用 `--no-isolation` 式直调 setuptools，避免小内存机器上 `python -m build` 建隔离环境导致的 OOM。
+- **仓库单主线**：历史上并行的 aidupop 1.x 独立 git 线（与主线为 unrelated histories）已归档到 tag `legacy-aidupop-1.1.1-20260805`，`main` 现为唯一主线。GHCR 工作流、Dockerfile、CONTRIBUTING、英文 README 一并回植到主线；`CUSTOMIZATIONS.md` 与 1.x 变更日志迁入 `docs/`。
+- **README 三方式安装**：pip（双包名）/ Hermes 目录插件 / GHCR Docker，中英文 README 同步并补齐 PyPI + Docker 动态徽章。
+
 ---
 
 ## v2.0.0 (2026-08-04) — Sapphire Edition (蓝宝石版)
@@ -118,7 +124,7 @@ Hermes v0.17.0 兼容性修复 — Clarify 卡片消失 + delegate_task 卡片�
 | ✨ Feature | FeishuAdapter 补丁身份运行时校验——`/aowen doctor` 可主动检测补丁是否打在 gateway 实际使用的类上 | deferred loading 根因隐蔽，启动日志显示 `patched ✓` 但实际打错类，用户无感知 | 新增 `_verify_feishu_patch_identity(adapter_instance) -> bool`：检查 `id(type(adapter_instance))` 是否在 `_patched_feishu_classes` 里，mismatch 时 ERROR 日志提示 `/aowen doctor`。本次仅实现+导出，未集成到每条消息调用链（避免性能开销），供 doctor 命令或手动诊断调用 (`patching/__init__.py`) |
 | 🔧 Improvement | `HermesCompat` FeishuAdapter 解析增加 deferred loading 感知日志 | 启动早期真身未加载时静默 fallback 到替身，无日志线索 | 真身路径 import 失败时新增 DEBUG 日志说明 fallback + 提示将在 deferred 阶段重打。新增 `resolve_feishu_adapter_class_fresh()` 方法供延迟重打阶段重新 resolve（不复用缓存）(`patching/hermes_adapter.py`) |
 
-**审计方法**: 四路调研对齐求证。2-a 克隆 DEV 分支（HEAD=v1.3.7）分析插件代码，定位 clarify 走 `FeishuAdapter.send_clarify` patch、panel 走 `partial_update_element` 全量替换。2-b 浅克隆 hermes-agent v0.17.0 源码，锁定 deferred loading 机制（`hermes_cli/plugins.py:1329` deferred loader + `gateway/platform_registry.py:173` 注释）导致 FeishuAdapter 真身/替身类对象分离，以及 `stream_delta_callback(None)` 在工具前触发的 delegate_task 续写问题。2-c SSH 取服务器 agent.log（4 个 rotated 文件 + gateway.log），对比升级前后日志：升级前有 `clarify card: send_clarify intercepted` + `card sent successfully`，升级后 0 行 clarify card 日志 + 出现 `gateway.platforms.base: Routing message to clarify text-intercept`，铁证 clarify 走文本路径。3 E2E 真飞书复现因提供的凭证（`cli_a951f158a1b89bd7`）与 agent 实际 app（`cli_aa8f3742bba55cba`）不匹配无法触发，但前三路证据链已闭合。所有修复基于代码+源码+日志三方对齐，未自行构造测试卡片。871 单元测试 + 26 集成测试通过（4 skipped 为 OPTIONAL reaction 方法）。
+**审计方法**: 四路调研对齐求证。2-a 克隆 DEV 分支（HEAD=v1.3.7）分析插件代码，定位 clarify 走 `FeishuAdapter.send_clarify` patch、panel 走 `partial_update_element` 全量替换。2-b 浅克隆 hermes-agent v0.17.0 源码，锁定 deferred loading 机制（`hermes_cli/plugins.py:1329` deferred loader + `gateway/platform_registry.py:173` 注释）导致 FeishuAdapter 真身/替身类对象分离，以及 `stream_delta_callback(None)` 在工具前触发的 delegate_task 续写问题。2-c SSH 取服务器 agent.log（4 个 rotated 文件 + gateway.log），对比升级前后日志：升级前有 `clarify card: send_clarify intercepted` + `card sent successfully`，升级后 0 行 clarify card 日志 + 出现 `gateway.platforms.base: Routing message to clarify text-intercept`，铁证 clarify 走文本路径。3 E2E 真飞书复现因提供的凭证（`cli_***REDACTED_A***`）与 agent 实际 app（`cli_***REDACTED_B***`）不匹配无法触发，但前三路证据链已闭合。所有修复基于代码+源码+日志三方对齐，未自行构造测试卡片。871 单元测试 + 26 集成测试通过（4 skipped 为 OPTIONAL reaction 方法）。
 
 **已知限制**:
 - E2E 真飞书实机验证因凭证不匹配未能执行 delegate_task 降级修复的端到端确认。源码层面根因链路（`stream_delta_callback(None)` → 长任务 → `_streaming_closed=True` → fallback）已成立，建议用户配合蒲正宇真人在 agent 监听的 chat 发触发消息做最终实机盖章
