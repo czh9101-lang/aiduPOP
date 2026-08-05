@@ -38,34 +38,278 @@ __all__ = [
     "optimize_markdown_style",
 ]
 
-def _find_tables_outside_code_blocks(text: str) -> list[tuple[int, int, str]]:
-    """查找代码块外的 markdown 表格，返回 [(start, end, raw), ...]."""
-    code_ranges: list[tuple[int, int]] = []
-    for m in _RE_FENCED_CODE.finditer(text):
-        code_ranges.append((m.start(), m.end()))
 
-    def _in_code(idx: int) -> bool:
-        return any(s <= idx < e for s, e in code_ranges)
+# ==========================================
+# 【嘟嘟定制 v23.0】贝氏卡片无损降级防爆引擎
+# ==========================================
+import re
+from dataclasses import dataclass
 
-    results: list[tuple[int, int, str]] = []
-    for m in _RE_TABLE_ROW.finditer(text):
-        if not _in_code(m.start()):
-            results.append((m.start(), m.end(), m.group(0)))
-    return results
+@dataclass
+class MarkdownBlock:
+    kind: str
+    text: str
+    start: int
+    end: int
+
+LIST_BOUNDARY_RE = re.compile(r"(\n[ \t]*[-*+]\s|\n[ \t]*\d+\.\s)")
+
+def _fence_opening(line: str) -> tuple[str, int] | None:
+    stripped = line.lstrip(" \t")
+    if not stripped.startswith(("`", "~")):
+        return None
+    char = stripped[0]
+    count = 1
+    while count < len(stripped) and stripped[count] == char:
+        count += 1
+    if count >= 3:
+        return char, count
+    return None
+
+def _is_fence_closing(line: str, marker_char: str, marker_size: int) -> bool:
+    stripped = line.lstrip(" \t").rstrip("\r\n")
+    if not stripped.startswith(marker_char * marker_size):
+        return False
+    return not stripped[marker_size:].strip(marker_char).strip()
+
+def _parse_table_separator(row: str) -> list[str] | None:
+    stripped = row.strip()
+    if not stripped:
+        return None
+    if not re.match(r"^\|?[\s\-|:]+\|?$", stripped):
+        return None
+    cells = _parse_markdown_row(stripped)
+    if not cells:
+        return None
+    for cell in cells:
+        clean = cell.replace("-", "").replace(":", "").strip()
+        if clean:
+            return None
+    return cells
+
+def scan_markdown_blocks(text: str) -> list[MarkdownBlock]:
+    if not text:
+        return [MarkdownBlock(kind="plain", text="", start=0, end=0)]
+
+    lines = text.splitlines(keepends=True)
+    offsets: list[int] = []
+    cursor = 0
+    for line in lines:
+        offsets.append(cursor)
+        cursor += len(line)
+
+    blocks: list[MarkdownBlock] = []
+    paragraph: list[str] = []
+    paragraph_start = 0
+
+    def flush_paragraph(end: int) -> None:
+        nonlocal paragraph
+        if paragraph:
+            blocks.append(
+                MarkdownBlock(
+                    kind="plain",
+                    text="".join(paragraph),
+                    start=paragraph_start,
+                    end=end,
+                )
+            )
+            paragraph = []
+
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        opening = _fence_opening(line)
+        if opening is not None:
+            flush_paragraph(offsets[index])
+            fence_start = offsets[index]
+            fence_lines = [line]
+            marker_char, marker_size = opening
+            index += 1
+            while index < len(lines):
+                candidate = lines[index]
+                fence_lines.append(candidate)
+                index += 1
+                if _is_fence_closing(candidate, marker_char, marker_size):
+                    break
+            fence_text = "".join(fence_lines)
+            blocks.append(
+                MarkdownBlock(
+                    kind="fence",
+                    text=fence_text,
+                    start=fence_start,
+                    end=fence_start + len(fence_text),
+                )
+            )
+            continue
+
+        if index + 1 < len(lines):
+            headers = _parse_markdown_row(line.rstrip("\r\n"))
+            separator = _parse_table_separator(lines[index + 1].rstrip("\r\n"))
+            if (
+                headers is not None
+                and separator is not None
+                and len(headers) == len(separator)
+            ):
+                flush_paragraph(offsets[index])
+                table_start = offsets[index]
+                table_lines = [line, lines[index + 1]]
+                index += 2
+                while index < len(lines):
+                    candidate = lines[index].rstrip("\r\n")
+                    if not candidate:
+                        break
+                    row_cells = _parse_markdown_row(candidate)
+                    if row_cells is None:
+                        break
+                    if len(row_cells) != len(headers):
+                        break
+                    table_lines.append(lines[index])
+                    index += 1
+                table_text = "".join(table_lines)
+                blocks.append(
+                    MarkdownBlock(
+                        kind="table",
+                        text=table_text,
+                        start=table_start,
+                        end=table_start + len(table_text),
+                    )
+                )
+                continue
+        paragraph.append(line)
+        index += 1
+    flush_paragraph(len(text))
+    return blocks
+
+def _parse_markdown_row(row: str) -> list[str] | None:
+    stripped = row.strip()
+    if not stripped:
+        return None
+    cells: list[str] = []
+    current: list[str] = []
+    delimiter_count = 0
+    inline_code_size = 0
+    index = 0
+    while index < len(stripped):
+        char = stripped[index]
+        if char == "\\" and index + 1 < len(stripped):
+            current.append(char)
+            current.append(stripped[index + 1])
+            index += 2
+            continue
+        if char == "`":
+            run_end = index + 1
+            while run_end < len(stripped) and stripped[run_end] == "`":
+                run_end += 1
+            run_size = run_end - index
+            current.append(stripped[index:run_end])
+            if inline_code_size == 0:
+                inline_code_size = run_size
+            elif inline_code_size == run_size:
+                inline_code_size = 0
+            index = run_end
+            continue
+        if char == "|" and inline_code_size == 0:
+            cells.append("".join(current).strip())
+            current = []
+            delimiter_count += 1
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    cells.append("".join(current).strip())
+    if delimiter_count == 0:
+        return None
+    if stripped.startswith("|"):
+        cells = cells[1:]
+    if stripped.endswith("|") and cells:
+        cells = cells[:-1]
+    return cells or None
+
+@dataclass
+class TableOverflowResult:
+    text: str
+    original_tables: int
+    tables_remaining: int
+    compacted: bool
+
+def transform_table_overflow(
+    text: str,
+    *,
+    mode: str = "compact",
+    max_tables: int = 5,
+) -> TableOverflowResult:
+    blocks = scan_markdown_blocks(text)
+    table_indices = [i for i, b in enumerate(blocks) if b.kind == "table"]
+    original_tables = len(table_indices)
+
+    if original_tables <= max_tables:
+        return TableOverflowResult(
+            text=text,
+            original_tables=original_tables,
+            tables_remaining=original_tables,
+            compacted=False,
+        )
+
+    notice_added = False
+    result_parts: list[str] = []
+    for i, block in enumerate(blocks):
+        if block.kind == "table":
+            table_number = table_indices.index(i) + 1
+            if table_number > max_tables:
+                if not notice_added:
+                    result_parts.append(
+                        "\n> 后续表格已转换为紧凑字段列表，以兼容飞书卡片限制；内容完整保留。\n\n"
+                    )
+                    notice_added = True
+                result_parts.append(_compact_table(block.text, table_number))
+                continue
+        result_parts.append(block.text)
+
+    return TableOverflowResult(
+        text="".join(result_parts),
+        original_tables=original_tables,
+        tables_remaining=max_tables,
+        compacted=True,
+    )
+
+def _compact_table(table_text: str, table_number: int) -> str:
+    lines = table_text.splitlines()
+    if len(lines) < 2:
+        return table_text
+    header = _parse_markdown_row(lines[0])
+    if not header:
+        return table_text
+    compact_lines: list[str] = []
+    row_count = 1
+    for row in lines[2:]:
+        if not row.strip():
+            continue
+        cells = _parse_markdown_row(row)
+        if not cells:
+            continue
+        compact_lines.append(f"**Table {table_number} · Row {row_count}**")
+        for i, cell in enumerate(cells):
+            col_name = header[i] if i < len(header) else f"Column {i+1}"
+            compact_lines.append(f"- {col_name}: {cell.strip()}")
+        compact_lines.append("")
+        row_count += 1
+    return "\n".join(compact_lines) + "\n"
+
 
 def _downgrade_tables(text: str, limit: int = _MAX_CARD_TABLES) -> str:
-    """超限表格降级为代码块（保留内容可见但飞书不渲染为表格元素）."""
-    # Early return: no tables possible without pipe characters
+    """
+    超级防爆表格降级: 超过 limit 的表格不再加 ```, 而是转为文本列表
+    """
     if '|' not in text:
         return text
-    matches = _find_tables_outside_code_blocks(text)
-    if len(matches) <= limit:
+    
+    try:
+        # 调用新引擎进行降级
+        result = transform_table_overflow(text, mode="compact", max_tables=limit)
+        return result.text
+    except Exception as e:
+        _logger.warning("嘟嘟防爆引擎降级表格失败，回退原文: %s", e)
         return text
-    result = text
-    for start, end, raw in reversed(matches[limit:]):
-        replacement = f"```\n{raw}\n```"
-        result = result[:start] + replacement + result[end:]
-    return result
 
 def _strip_invalid_image_keys(text: str) -> str:
     """移除非 img_ 前缀的图片引用."""
@@ -151,20 +395,60 @@ def optimize_markdown_style(text: str) -> str:
         _logger.debug("optimize_markdown_style failed", exc_info=True)
         return text
 
+
+# ==========================================
+# 【嘟嘟定制 v23.1】贝氏智能长文代码块保护切片引擎
+# ==========================================
+import re
+
+LIST_BOUNDARY_RE = re.compile(r"(\n[ \t]*[-*+]\s|\n[ \t]*\d+\.\s)")
+
+def _adjust_split_for_inline_code(text: str, split_at: int) -> int:
+    prefix = text[:split_at]
+    if prefix.count("`") % 2 == 0:
+        return split_at
+    before_code = text.rfind("`", 0, split_at)
+    while before_code > 0:
+        if text[:before_code].count("`") % 2 == 0:
+            return before_code
+        before_code = text.rfind("`", 0, before_code)
+    return 0
+
+def _separator_split_index(text: str, separator: str) -> int:
+    index = text.rfind(separator)
+    if index <= 0:
+        return 0
+    return index + len(separator)
+
+def _safe_plain_split_index(text: str, max_block_size: int) -> int:
+    window = text[: max_block_size + 1]
+    candidate_groups = (
+        sorted({match.start() + 1 for match in LIST_BOUNDARY_RE.finditer(window)}, reverse=True),
+        [_separator_split_index(window, "\n\n")],
+        [_separator_split_index(window, "\n")],
+        [_separator_split_index(window, " ")],
+    )
+    for candidates in candidate_groups:
+        for split_at in candidates:
+            if split_at <= 0:
+                continue
+            safe_split = _adjust_split_for_inline_code(window, split_at)
+            if safe_split > 0:
+                return safe_split
+    return max_block_size
+
 def _split_long_text(text: str, limit: int = _MAX_CHUNK_CHARS) -> list[str]:
-    """将超长文本按段落/换行拆分为多个不超过 limit 字符的块."""
+    """将超长文本按段落/换行拆分为多个不超过 limit 字符的块 (嘟嘟智能防爆版)."""
     if len(text) <= limit:
         return [text]
     chunks: list[str] = []
-    while text:
-        if len(text) <= limit:
-            chunks.append(text)
-            break
-        cut = text.rfind("\n\n", 0, limit)
-        if cut < limit // 2:
-            cut = text.rfind("\n", 0, limit)
-        if cut < limit // 2:
-            cut = limit
-        chunks.append(text[:cut])
-        text = text[cut:].lstrip("\n")
+    remaining = text
+    while len(remaining) > limit:
+        split_at = _safe_plain_split_index(remaining, limit)
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+    if remaining:
+        chunks.append(remaining)
     return chunks
+
+
