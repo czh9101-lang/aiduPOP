@@ -7,9 +7,23 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
-from ..controller import get_controller
-
 _logger = logging.getLogger("hermes_lark_streaming")
+
+
+def get_controller():  # noqa: ANN201 — thin lazy re-export, type comes from controller
+    """Lazily resolve the controller singleton.
+
+    Imported inside the function body on purpose: `controller.linear_mixin`
+    imports names from `..patching`, and `patching/__init__` imports this
+    module, so a module-level `from ..controller import get_controller` makes
+    the cycle fatal whenever `hermes_lark_streaming.controller` is the first
+    sub-package to be imported (exactly what `pip install` users hit).
+    Deferring the import to call time breaks the cycle without changing any
+    call site — the rest of this module keeps calling `get_controller()`.
+    """
+    from ..controller import get_controller as _get_controller
+
+    return _get_controller()
 
 def _safe_hook(
     default_return: Any = None,

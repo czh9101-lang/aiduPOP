@@ -27,13 +27,29 @@ dev = [
 # The plugin code lives at the repo root (alongside plugin.yaml).
 # When loaded as a Hermes directory plugin, the plugin loader imports
 # __init__.py directly from this directory.
-# For pip installs, the repo root is mapped as "hermes_lark_streaming".
+#
+# For pip installs the repo root is mapped to the `hermes_lark_streaming`
+# package. Sub-packages MUST be listed explicitly under that prefix:
+# `packages.find` would collect them by their bare directory names
+# (cardkit, controller, ...) and drop them at the top level of
+# site-packages, where every `from ..config import X` relative import
+# fails. Verified by installing the wheel into a clean venv and importing.
+[tool.setuptools]
+packages = [
+    "hermes_lark_streaming",
+    "hermes_lark_streaming.aowen",
+    "hermes_lark_streaming.cardkit",
+    "hermes_lark_streaming.config",
+    "hermes_lark_streaming.controller",
+    "hermes_lark_streaming.feishu",
+    "hermes_lark_streaming.flush",
+    "hermes_lark_streaming.patching",
+    "hermes_lark_streaming.plugin",
+    "hermes_lark_streaming.state",
+]
+
 [tool.setuptools.package-dir]
 hermes_lark_streaming = "."
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["controller*", "cardkit*", "patching*", "state*", "feishu*", "config*", "aowen*", "plugin*", "flush*"]
 
 [tool.setuptools.package-data]
 hermes_lark_streaming = ["plugin.yaml"]

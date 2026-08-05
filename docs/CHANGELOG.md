@@ -1,3 +1,18 @@
+## v2.0.2 (2026-08-05) — Packaging Fix: installable wheel layout
+
+### 🐛 打包根治（P0，影响所有 pip 安装用户）
+- **子包被错误铺到 site-packages 顶层**：`pyproject.toml` 原先用 `[tool.setuptools.packages.find]` + `include = ["controller*", "cardkit*", ...]` 收集子包。setuptools 按**裸目录名**注册它们，于是 wheel 里出现的是顶层的 `controller/`、`cardkit/`、`state/` …，而不是 `hermes_lark_streaming/controller/`。后果：`pip install` 之后 `import hermes_lark_streaming` 直接 `ModuleNotFoundError`（根 `__init__.py` 根本没被打进去），子包里每一句 `from ..config import Config` 也都抛 `attempted relative import beyond top-level package`。2.0.0 / 2.0.1 两个版本的 wheel 都有此缺陷，作为 Hermes 目录插件使用不受影响（走的是本地目录导入）。
+- **修复**：改用显式 `[tool.setuptools] packages = [...]`，把 10 个子包全部以 `hermes_lark_streaming.*` 前缀列出，配合 `package-dir` 把仓库根映射为该包。`plugin.yaml` 也随包一起装进 `hermes_lark_streaming/plugin.yaml`，`__version__` 动态读取恢复正常。
+- **验证方式**：把 wheel 装进全新 venv 后实测 `import hermes_lark_streaming`（返回 `__version__ = 2.0.2`）与 `from hermes_lark_streaming.controller import StreamCardController`，不再依赖「构建成功」这种间接证据。
+- 同一修复同步应用于 `packaging/pyproject.aidupop.toml`，`aidupop` 与 `hermes-lark-streaming` 两个包名布局一致。
+
+### 🔄 循环导入根治（P0，与 wheel 布局同源）
+- **`controller` ↔ `patching` 硬循环**：`patching/hooks.py` 模块级 `from ..controller import get_controller`，而 `controller.linear_mixin` 从 `..patching` 拉 `_model_cache` 等符号——两者在模块加载期互相等对方就绪，只要 `controller` 先于 `patching` 被 import 就必定 ImportError。生产环境（Hermes 目录插件路径）碰巧总是先走 `patching`，所以没炸；pip install 的用户只要 `import hermes_lark_streaming.controller` 就必死（即上一条 wheel 布局修复之后的下一步）。
+- **修法**：`hooks.py` 改为函数内 `from ..controller import get_controller as _get_controller`，第一次调用时才触发真实导入，模块加载期不产生循环依赖。所有现有调用点零改动。
+- **回归防护**：新增 `tests/test_packaging.py` — 10 个测试覆盖 pyproject.toml 包声明正确性、子包前缀完整性、磁盘一致性；以及 controller-first / patching-first 双向导入验证、`__version__` 与 `plugin.yaml` 一致性。
+
+---
+
 ## v2.0.1 (2026-08-05) — Hermes Agent Compatibility & Fast Streaming Release
 
 aiduPOP 嘟嘟大美满专属补丁发布。

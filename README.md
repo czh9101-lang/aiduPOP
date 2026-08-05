@@ -10,7 +10,7 @@
 美不是装饰，而是信息该在的位置，刚好在那里。
 ```
 
-[![Version](https://img.shields.io/badge/version-2.0.1%20·%20Sapphire·蓝宝石-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.0.2%20·%20Sapphire·蓝宝石-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
