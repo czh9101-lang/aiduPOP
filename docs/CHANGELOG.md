@@ -1,3 +1,13 @@
+## v2.0.1 (2026-08-05) — Hermes Agent Compatibility & Fast Streaming Release
+
+aiduPOP 嘟嘟大美满专属补丁发布。
+
+### 🔧 兼容性与速流优化
+- **Hermes Agent 网关钩子全量兼容**：在 `patching/hooks.py` 与 `patching/__init__.py` 中补全所有 Hermes Gateway 钩子定义（含 `on_session_aborted`、`on_message_completed_wait` 等），完美支持 Hermes 0.19+ 最新网关事件流。
+- **推荐运行配置更新**：明确 `flush_interval_ms: 70` 与 `print_strategy: fast` 极速流式打字机效果配置，完美契合飞书 CardKit 2.0 官方 70ms 刷卡率。
+
+---
+
 ## v2.0.0 (2026-08-04) — Sapphire Edition (蓝宝石版)
 
 aiduPOP 嘟嘟大美满专属全能高可用重磅升级版。整合社区 Cheerwhy upstream v0.12.0 最新底层（支持 Profile 隔离、Hermes 0.19 TurnRunner 上下文适配、CardKit 重试机制、Width Mode 等），同时全量回植嘟嘟专属卡片美化与根治补丁（v22.2 / v22.3）。
