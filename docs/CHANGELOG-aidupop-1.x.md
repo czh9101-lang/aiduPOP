@@ -1,0 +1,82 @@
+# Changelog — aiduPOP 💎
+
+All notable changes to this project will be documented in this file.
+本文件记录 aiduPOP 的所有重要变更。
+
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · SemVer with gem codenames.
+版本号遵循语义化版本，每个大版本配一个宝石代号（Crystal 水晶 → …）。
+
+Single source of truth: the `version` field in `plugin.yaml`.
+版本号唯一来源：`plugin.yaml` 的 `version` 字段。
+
+---
+
+## [1.1.1 · Crystal 水晶 社区补丁版] — 2026-08-04
+
+### Added / Fixed
+- **飞书卡片优先回复原话题** — 感谢社区贡献者 @lyhyly (PR #2)。在发送卡片时，若存在提问消息 ID / 锚点消息，优先使用 `reply_card_by_id` 在原话题树下回复卡片；遇到异常时自动平滑降级至群聊独立发送。
+
+---
+
+## [1.1.0 · Crystal 水晶 补丁版] — 2026-08-04
+
+### Fixed
+- **续写卡片 stats 继承** — 修复续写卡片（continuation session）`reasoning_rounds` / `_tool_count` / `panel_visible` / `_panel_events` 等统计数据归零问题；继承旧 session 全部统计与时间戳。
+- **允许续写卡片二次续写** — 修复续写卡片产生后再续写被判定为非法的 bug，最大支持 3 次连续续写。
+- **飞书 300301 卡片过期处理** — 新增对 `CARDKIT_DUPLICATE_ID=300301` 错误码的拦截与处理，防卡片过期/重复 ID 死循环。
+- **面板渲染路径统一** — `_build_session_panel()` 重构面板构建逻辑，消除流式/重试/seal 三重路径面板格式漂移。
+- **Auxiliary Fork 模型缓存隔离** — `on_background_review_message` 辅助 fork 节点隔离 `_model_cache`，防止后台复盘模型覆盖卡片显示的提问模型名。
+
+---
+
+## [1.0.0 · Crystal 水晶] — 2026-07-31
+
+### Initial Release — Crystal 🌟
+
+First public release of Aidu-customized hermes-lark-streaming.
+
+Based on [Aowen-Nowor/hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 with the following customizations:
+
+### Added
+- **v22.2 Model Display** — Stable model name from card birth via module-level global `_model_cache` dict
+- **v22.3 Phase 2 Protection** — Rollback protection for Feishu atomic `batch_update` failures (300314)
+- **Model Formatting** — Clean `⚕model` display with path prefix/date suffix stripping
+- **Panel Position** — Answer on top, collapsible stats panel at bottom
+- **Footer Removal** — Model moved to panel header; footer default empty
+- **Card Recreation** — Auto-retry on API failure (card cache invalidation after gateway restart)
+- **Loading Hint Hidden** — Replaced with loading icon for cleaner streaming experience
+- **receive_id_type Auto-detection** — `ou_` → open_id, `oc_` → chat_id
+- **send_card_by_id Retry** — Transient error retry wrapper for card creation API
+- **Three-Class Identity Resolution** — Auto-patch FeishuAdapter regardless of import path
+
+### Changed
+- Panel header format: `⚕model · 💭N · 🛠️N · ⏱elapsed` (紧凑格式)
+- Footer default fields: `[]` (empty, model in panel header)
+- Processing hint: `⚕Hermesing…` (no space after ⚕️)
+- Panel always renders (even for pure conversations without tools/reasoning)
+
+### Fixed
+- Model name flickering/disappearing across asyncio task boundaries
+- Phase 2 300314 error causing card to fall back to plain text
+- Clarify responses delivered as plain text instead of cards
+- Three FeishuAdapter class identities causing patch gaps
+- send_card_by_id missing retry wrapper
+- Panel appearing above answer (now below)
+
+---
+
+## Upstream History
+
+### [1.6.0] — 2026-07-21 (Aowen-Nowor)
+- Fix clarify card fallback to text
+- Hook `platform_registry.create_adapter` for adapter patching
+
+### [1.5.5] — 2026-07-13 (Aowen-Nowor)
+- Fix Phase 2 300314 existing_elements tracking
+
+### [1.5.0] — 2026-07-09 (Aowen-Nowor)
+- Major refactoring and optimizations
+- Cron card delivery mechanism
+
+### [0.7.0] — (Cheerwhy)
+- Original streaming card plugin for Hermes Agent
