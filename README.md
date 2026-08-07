@@ -1,5 +1,9 @@
 # 💎 aiduPOP — Hermes爱嘟流式卡片
 
+<p align="center">
+  <img src="docs/images/aidupop-banner.jpg" alt="aiduPOP Gem Banner" width="400"/>
+</p>
+
 > **水晶与蓝宝石理念——够简洁，够透明，够美**
 >
 > **不只是卡片 — 是对话本身。**
