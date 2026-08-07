@@ -1,5 +1,9 @@
 ## Unreleased
 
+### Changed
+
+- **飞书品牌表述统一**：中文名称统一为“Hermes爱嘟飞书流式卡片”，英文品牌文案统一使用 “Lark (Feishu)”，明确 aiduPOP 是面向飞书平台的流式卡片插件；技术包名、配置键和代码标识保持不变。
+
 ### Added
 
 - **PC / 手机端差异化字号（Issue #4）**：新增 `hermes_lark_streaming.text_sizes`，支持 `body`、`panel`、`notice` 三个稳定角色。每个角色可填写单一字号，或通过 `default` / `pc` / `mobile` 使用飞书 CardKit JSON 2.0 的设备差异字号。

@@ -1,4 +1,4 @@
-# 💎 aiduPOP — Hermes爱嘟流式卡片
+# 💎 aiduPOP — Hermes爱嘟飞书流式卡片
 
 <p align="center">
   <img src="docs/images/aidupop-banner-wide.jpg" alt="aiduPOP Gem Banner" width="100%">
@@ -21,7 +21,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
 [![Built on hermes-lark-streaming](https://img.shields.io/badge/built%20on-hermes--lark--streaming-orange.svg)](https://gitee.com/Aowen-Nowor/hermes-lark-streaming)
-[![Aidu](https://img.shields.io/badge/爱嘟-流式卡片-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Aidu](https://img.shields.io/badge/爱嘟-飞书流式卡片-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
 
 **中文** | **[📖 English](README_EN.md)**
 
@@ -29,7 +29,7 @@
 
 ## aiduPOP 是什么？
 
-**aiduPOP**（爱嘟流式卡片 / Aegis）是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书流式卡片插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
+**aiduPOP**（爱嘟飞书流式卡片 / Aegis）是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书流式卡片插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
 
 基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduPOP 在其之上做了一套完整的**水晶化改造**：
 
@@ -50,8 +50,8 @@
 
 ```
 ┌──────────────────────────────────────────────────┐
-│      💎 aiduPOP — Hermes爱嘟流式卡片             │
-│         Feishu Cardsuit 2.0 Streaming            │
+│    💎 aiduPOP — Hermes爱嘟飞书流式卡片           │
+│         Lark (Feishu) Cardsuit 2.0 Streaming     │
 ├──────────────────────────────────────────────────┤
 │  cardkit/     → 卡片渲染引擎（元素、模板）        │
 │  controller/  → 线性控制器 + card_id 追踪         │
