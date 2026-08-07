@@ -129,6 +129,8 @@ def _build_session_panel(
         "max_tool_steps": cfg.max_tool_steps,
         "max_reasoning_rounds": cfg.max_reasoning_rounds,
         "model": _get_model_from_ctx() or fallback_model,
+        "panel_text_size": session.panel_text_size,
+        "notice_text_size": session.notice_text_size,
     }
     if border_color is not None:
         panel_kwargs["border_color"] = border_color
@@ -136,7 +138,10 @@ def _build_session_panel(
     return _enforce_panel_element_budget(
         panel,
         reserved_elements=[
-            _streaming_element(element_id=ANSWER_ELEMENT_ID),
+            _streaming_element(
+                element_id=ANSWER_ELEMENT_ID,
+                text_size=session.body_text_size,
+            ),
             # The loading spinner remains in the card during streaming.
             {"tag": "div", "icon": {"tag": "custom_icon"}, "text": {"tag": "plain_text"}},
         ],
@@ -199,6 +204,13 @@ class UnifiedControllerMixin:
             await self._ensure_init()
             assert self._client is not None
 
+            # Freeze text-size aliases for this card lifecycle. Config reloads
+            # only affect newly created cards, never an in-flight card.
+            session.text_size_styles = self._cfg.text_size_styles
+            session.body_text_size = self._cfg.configured_text_size("body")
+            session.panel_text_size = self._cfg.configured_text_size("panel")
+            session.notice_text_size = self._cfg.configured_text_size("notice")
+
             try:
                 card = build_streaming_card_v2(
                     include_unified_panel=False,   # Panel added on first token
@@ -207,6 +219,8 @@ class UnifiedControllerMixin:
                     streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                     print_strategy=self._cfg.print_strategy,
                     print_step=self._cfg.print_step,
+                    text_size_styles=session.text_size_styles,
+                    body_text_size=session.body_text_size,
                 )
                 # 嘟嘟定制: send 失败时重建卡片重试（重启风暴后飞书 card 缓存失效常见）
                 _SEND_MAX_RETRIES = 2
@@ -238,6 +252,8 @@ class UnifiedControllerMixin:
                             streaming_panel_expanded=self._cfg.streaming_panel_expanded,
                             print_strategy=self._cfg.print_strategy,
                             print_step=self._cfg.print_step,
+                            text_size_styles=session.text_size_styles,
+                            body_text_size=session.body_text_size,
                         )
                         continue
 
@@ -370,7 +386,10 @@ class UnifiedControllerMixin:
 
             # ── Path A & B: Always add answer streaming element FIRST ──
             # 嘟嘟定制: answer在上面流式输出
-            new_elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
+            new_elements.append(_streaming_element(
+                element_id=ANSWER_ELEMENT_ID,
+                text_size=session.body_text_size,
+            ))
 
             # ── Always add unified panel AFTER answer (嘟嘟定制: panel放底部) ──
             new_elements.append(_build_session_panel(
@@ -744,7 +763,10 @@ class UnifiedControllerMixin:
                         card_id[:12],
                     )
                     retry_new_elements: list[dict[str, Any]] = []
-                    retry_new_elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
+                    retry_new_elements.append(_streaming_element(
+                        element_id=ANSWER_ELEMENT_ID,
+                        text_size=session.body_text_size,
+                    ))
                     panel_retry = _build_session_panel(
                         session,
                         state,

@@ -166,6 +166,33 @@ docker pull ghcr.io/monkey2jack/aidupop:latest
 
 插件使用与上游 `hermes-lark-streaming` 相同的配置。爱嘟定制部分详见 [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md)。
 
+#### PC / 手机端差异化字号
+
+可在 Hermes 的 `config.yaml` 中按角色设置单一字号，或分别设置 PC、手机和旧客户端兜底字号：
+
+```yaml
+hermes_lark_streaming:
+  text_sizes:
+    body:
+      default: normal
+      pc: normal
+      mobile: large
+    panel: notation
+    notice:
+      default: notation
+      pc: notation
+      mobile: normal
+```
+
+- `body`：AI 回答正文
+- `panel`：思考、工具调用和底部统计面板
+- `notice`：折叠等提示信息
+- 每个角色既可直接填写一个字号，也可填写 `default` / `pc` / `mobile` 设备映射
+- 未配置时保持 aiduPOP 现有 `normal_v2` / `notation` 视觉，不影响老用户
+- 修改后执行 `/aowen config reload` 或重启 Hermes 网关
+
+可配置字号严格使用飞书 CardKit 官方枚举，包括 `normal`、`notation`、`small`、`x-small`、`medium`、`large`、`x-large` 及官方标题字号。`normal_v2` 只作为 aiduPOP 未配置时的历史默认保留，不用于新配置。无效角色、设备字段或字号会明确报错，不会静默生成异常卡片。
+
 版本号唯一来源是 `plugin.yaml` 的 `version` 字段，`setup.py` / `__init__.py` 动态读取，不会出现多处版本不一致。
 
 ---

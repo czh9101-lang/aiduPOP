@@ -53,6 +53,21 @@ _RE_MULTI_NEWLINE = re.compile(r"\n{3,}")
 _RE_BACKTICK_RUN = re.compile(r"`+")
 _RE_MD_SPECIAL = re.compile(r"([`*_{}\[\]<>])")
 
+
+def _apply_text_size_recursive(obj: Any, text_size: str | None) -> None:
+    """Apply one role size to existing text nodes without changing layout."""
+    if text_size is None:
+        return
+    if isinstance(obj, dict):
+        if "text_size" in obj:
+            obj["text_size"] = text_size
+        for value in obj.values():
+            _apply_text_size_recursive(value, text_size)
+    elif isinstance(obj, list):
+        for item in obj:
+            _apply_text_size_recursive(item, text_size)
+
+
 def _extract_images_from_markdown(text: str) -> tuple[str, list[dict]]:
     """提取飞书图片为独立 Card 2.0 img 元素，返回 (清理后的文本, img元素列表)."""
     images: list[dict] = []
@@ -128,12 +143,17 @@ def _collapsible_panel(
         "elements": elements,
     }
 
-def _streaming_element(content: str = "", *, element_id: str = STREAMING_ELEMENT_ID) -> dict:
+def _streaming_element(
+    content: str = "",
+    *,
+    element_id: str = STREAMING_ELEMENT_ID,
+    text_size: str | None = None,
+) -> dict:
     return {
         "tag": "markdown",
         "content": content,
         "text_align": "left",
-        "text_size": "normal_v2",
+        "text_size": text_size or "normal_v2",
         "margin": "0px 0px 0px 0px",
         "element_id": element_id,
     }
@@ -171,7 +191,9 @@ def _loading_hint_element() -> dict:
         "element_id": _LOADING_HINT_ELEMENT_ID,
     }
 
-def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
+def _build_unified_panel_placeholder(
+    *, expanded: bool = False, panel_text_size: str | None = None,
+) -> dict:
     """Build empty unified panel placeholder for initial streaming card."""
     en_title, zh_title = _T["agent_process"]
     panel = _collapsible_panel(
@@ -186,6 +208,7 @@ def _build_unified_panel_placeholder(*, expanded: bool = False) -> dict:
         elements=[{"tag": "markdown", "content": " "}],
     )
     panel["element_id"] = UNIFIED_PANEL_ELEMENT_ID
+    _apply_text_size_recursive(panel, panel_text_size)
     return panel
 
 
@@ -401,7 +424,7 @@ def build_panel_children(*, reasoning_rounds: list, current_reasoning_text: str 
 
     return children
 
-def build_unified_panel(*, reasoning_rounds: list, current_reasoning_text: str = "", tool_steps: list[dict], tool_elapsed_ms: float = 0, show_reasoning: bool = True, expanded: bool = False, element_id: str | None = None, panel_events: list[tuple[str, int]] | None = None, max_tool_steps: int = 20, max_reasoning_rounds: int = 20, border_color: str = "grey", model: str | None = None) -> dict:
+def build_unified_panel(*, reasoning_rounds: list, current_reasoning_text: str = "", tool_steps: list[dict], tool_elapsed_ms: float = 0, show_reasoning: bool = True, expanded: bool = False, element_id: str | None = None, panel_events: list[tuple[str, int]] | None = None, max_tool_steps: int = 20, max_reasoning_rounds: int = 20, border_color: str = "grey", model: str | None = None, panel_text_size: str | None = None, notice_text_size: str | None = None) -> dict:
     """Build full unified panel — 嘟嘟定制: border_color + model 参数."""
     header = build_panel_header(
         reasoning_rounds=reasoning_rounds,
@@ -430,6 +453,10 @@ def build_unified_panel(*, reasoning_rounds: list, current_reasoning_text: str =
         "elements": children,
     }
     panel["element_id"] = element_id or UNIFIED_PANEL_ELEMENT_ID
+    _apply_text_size_recursive(panel, panel_text_size)
+    if notice_text_size and children and isinstance(children[0].get("content"), str):
+        if "已折叠" in children[0]["content"]:
+            children[0]["text_size"] = notice_text_size
     return panel
 
 def _build_tool_step_elements(step: dict) -> list[dict]:

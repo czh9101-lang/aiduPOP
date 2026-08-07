@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hermes_lark_streaming.cardkit import (
+    ANSWER_ELEMENT_ID,
     _LOADING_HINT_ELEMENT_ID,
     _build_error_panel,
     _build_footer_elements,
@@ -448,6 +449,34 @@ class TestBuildStreamingCardV2:
         card = build_streaming_card_v2(show_reasoning=True, print_strategy="fast")
         assert card["config"]["streaming_config"]["print_strategy"] == "fast"
 
+    def test_default_card_json_has_no_custom_style(self) -> None:
+        card = build_streaming_card_v2()
+        assert "style" not in card["config"]
+        answer = next(
+            e for e in card["body"]["elements"]
+            if e.get("element_id") == ANSWER_ELEMENT_ID
+        )
+        assert answer["text_size"] == "normal_v2"
+
+    def test_device_text_size_style_and_answer_alias(self) -> None:
+        styles = {
+            "aidupop_body": {
+                "default": "normal",
+                "pc": "normal",
+                "mobile": "large",
+            },
+        }
+        card = build_streaming_card_v2(
+            text_size_styles=styles,
+            body_text_size="aidupop_body",
+        )
+        assert card["config"]["style"]["text_size"] == styles
+        answer = next(
+            e for e in card["body"]["elements"]
+            if e.get("element_id") == ANSWER_ELEMENT_ID
+        )
+        assert answer["text_size"] == "aidupop_body"
+
     def test_initial_summary_has_i18n_content(self) -> None:
         """Streaming card must set both content and i18n_content for summary.
 
@@ -462,6 +491,48 @@ class TestBuildStreamingCardV2:
         i18n = summary["i18n_content"]
         assert "zh_cn" in i18n
         assert "en_us" in i18n
+
+
+class TestPanelTextSizes:
+    def test_panel_role_applies_to_existing_text_nodes(self) -> None:
+        panel = build_unified_panel(
+            reasoning_rounds=[ReasoningRound(index=1, text="分析")],
+            tool_steps=[],
+            panel_text_size="aidupop_panel",
+        )
+
+        text_sizes: list[str] = []
+
+        def collect(obj: object) -> None:
+            if isinstance(obj, dict):
+                if "text_size" in obj:
+                    text_sizes.append(obj["text_size"])
+                for value in obj.values():
+                    collect(value)
+            elif isinstance(obj, list):
+                for item in obj:
+                    collect(item)
+
+        collect(panel)
+        assert text_sizes
+        assert set(text_sizes) == {"aidupop_panel"}
+
+    def test_notice_role_overrides_folded_hint_only(self) -> None:
+        rounds = [
+            ReasoningRound(index=i, text=f"分析{i}")
+            for i in range(1, 4)
+        ]
+        panel = build_unified_panel(
+            reasoning_rounds=rounds,
+            tool_steps=[],
+            max_reasoning_rounds=1,
+            panel_text_size="aidupop_panel",
+            notice_text_size="aidupop_notice",
+        )
+        hint = panel["elements"][0]
+        assert "已折叠" in hint["content"]
+        assert hint["text_size"] == "aidupop_notice"
+        assert panel["header"]["title"]["text_size"] == "aidupop_panel"
 
 
 class TestBuildCronCard:

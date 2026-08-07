@@ -53,6 +53,10 @@ class CardSession:
         "card_msg_id",
         "card_trace_id",
         "chat_id",
+        "body_text_size",
+        "notice_text_size",
+        "panel_text_size",
+        "text_size_styles",
         "create_epoch",
         "created_at",
         "deferred_background_review_closed",
@@ -89,6 +93,12 @@ class CardSession:
         # v1.1.0: card_trace_id — short unique ID for correlating all logs
         # belonging to one card's lifecycle. Format: last 6 chars of msg_id.
         self.card_trace_id: str = (message_id or "??????")[-6:]
+        # 字号配置在建卡时快照，确保配置热重载不会让同一卡片的 style
+        # 定义与后续增量插入元素发生别名漂移。
+        self.text_size_styles: dict[str, dict[str, str]] = {}
+        self.body_text_size: str | None = None
+        self.panel_text_size: str | None = None
+        self.notice_text_size: str | None = None
         self.text = TextState()
         self.tool_use = ToolUseTracker()
         self.flush = FlushController()

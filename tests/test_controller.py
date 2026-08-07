@@ -346,6 +346,55 @@ def _setup_ctrl(*, linear: bool = False) -> StreamCardController:
 
 
 @pytest.mark.asyncio
+async def test_create_linear_card_includes_device_text_size_styles() -> None:
+    ctrl = _setup_ctrl(linear=True)
+    ctrl._cfg._raw["hermes_lark_streaming"]["text_sizes"] = {
+        "body": {"default": "normal", "pc": "normal", "mobile": "large"},
+        "panel": "small",
+    }
+    session = _make_session("msg_text_sizes", linear=True)
+    ctrl._sessions["msg_text_sizes"] = session
+
+    await ctrl._do_create_linear_card(session)
+
+    created_card = ctrl._client.cardkit_create.await_args.args[0]
+    assert created_card["config"]["style"]["text_size"] == {
+        "aidupop_body": {
+            "default": "normal",
+            "pc": "normal",
+            "mobile": "large",
+        },
+    }
+
+    state = session.unified_state
+    assert state is not None
+    state.answer_text = "回答"
+    state.answer_dirty = True
+    state.panel_visible = True
+    await ctrl._do_unified_flush(session)
+
+    batch_actions = ctrl._client.cardkit_batch_update.await_args.args[1]
+    add_action = next(a for a in batch_actions if a["action"] == "add_elements")
+    answer, panel = add_action["params"]["elements"]
+    assert answer["text_size"] == "aidupop_body"
+    assert panel["header"]["title"]["text_size"] == "small"
+
+    # A config reload during generation must not change aliases on this card.
+    ctrl._cfg._raw["hermes_lark_streaming"]["text_sizes"] = {
+        "body": {"default": "normal", "pc": "large", "mobile": "x-large"},
+        "panel": "large",
+    }
+    state.panel_dirty = True
+    await ctrl._do_unified_flush(session)
+    later_actions = ctrl._client.cardkit_batch_update.await_args.args[1]
+    panel_action = next(
+        a for a in later_actions if a["action"] == "partial_update_element"
+    )
+    partial = panel_action["params"]["partial_element"]
+    assert partial["header"]["title"]["text_size"] == "small"
+
+
+@pytest.mark.asyncio
 async def test_create_linear_card_sends_independent_card() -> None:
     """Customized card creation sends an independent chat card.
 

@@ -168,13 +168,18 @@ def build_streaming_card_v2(
     include_unified_panel: bool = True,
     include_loading_hint: bool = True,
     include_answer_element: bool = True,
+    text_size_styles: dict[str, dict[str, str]] | None = None,
+    body_text_size: str | None = None,
 ) -> dict[str, Any]:
     """Card lifecycle (v1.0.2+):"""
     elements: list[dict] = []
 
     # ── Streaming answer element ──
     if show_streaming_element and include_answer_element:
-        elements.append(_streaming_element(element_id=ANSWER_ELEMENT_ID))
+        elements.append(_streaming_element(
+            element_id=ANSWER_ELEMENT_ID,
+            text_size=body_text_size,
+        ))
 
     # ── Loading hint (context loading placeholder, removed on first LLM token) ──
     if include_loading_hint:
@@ -188,21 +193,25 @@ def build_streaming_card_v2(
     if include_unified_panel:
         elements.append(_build_unified_panel_placeholder(expanded=streaming_panel_expanded))
 
+    config: dict[str, Any] = {
+        "streaming_mode": True,
+        "streaming_config": {
+            "print_frequency_ms": {"default": 70},
+            "print_step": {"default": print_step},
+            "print_strategy": print_strategy,
+        },
+        "locales": _LOCALES,
+        "summary": {
+            "content": _T["processing"][0],
+            "i18n_content": _t("processing"),
+        },
+    }
+    if text_size_styles:
+        config["style"] = {"text_size": text_size_styles}
+
     card: dict[str, Any] = {
         "schema": "2.0",
-        "config": {
-            "streaming_mode": True,
-            "streaming_config": {
-                "print_frequency_ms": {"default": 70},
-                "print_step": {"default": print_step},
-                "print_strategy": print_strategy,
-            },
-            "locales": _LOCALES,
-            "summary": {
-                "content": _T["processing"][0],
-                "i18n_content": _t("processing"),
-            },
-        },
+        "config": config,
         "body": {"elements": elements},
     }
     return card

@@ -43,6 +43,49 @@ class TestEnabled:
         assert cfg.enabled is True
 
 
+class TestTextSizes:
+    def test_missing_keeps_legacy_defaults(self) -> None:
+        cfg = _make_config({"hermes_lark_streaming": {}})
+        assert cfg.text_sizes == {}
+        assert cfg.configured_text_size("body") is None
+        assert cfg.text_size("body") == "normal_v2"
+        assert cfg.text_size("panel") == "notation"
+        assert cfg.text_size_styles == {}
+
+    def test_scalar_roles(self) -> None:
+        cfg = _make_config({"hermes_lark_streaming": {
+            "text_sizes": {"body": "large", "panel": "small"},
+        }})
+        assert cfg.text_size("body") == "large"
+        assert cfg.text_size("panel") == "small"
+        assert cfg.text_size_styles == {}
+
+    def test_device_mapping_normalizes_missing_fields(self) -> None:
+        cfg = _make_config({"hermes_lark_streaming": {
+            "text_sizes": {"body": {"pc": "normal", "mobile": "large"}},
+        }})
+        assert cfg.text_size("body") == "aidupop_body"
+        assert cfg.text_size_styles == {
+            "aidupop_body": {
+                "default": "normal",
+                "pc": "normal",
+                "mobile": "large",
+            },
+        }
+
+    @pytest.mark.parametrize("text_sizes", [
+        "large",
+        {"unknown": "large"},
+        {"body": {}},
+        {"body": {"tablet": "large"}},
+        {"body": "giant"},
+    ])
+    def test_invalid_config_fails_explicitly(self, text_sizes: object) -> None:
+        cfg = _make_config({"hermes_lark_streaming": {"text_sizes": text_sizes}})
+        with pytest.raises(ValueError, match="text_sizes"):
+            _ = cfg.text_sizes
+
+
 class TestFooterFields:
     _DEFAULT_FIELDS: list[list[str]] = []  # 嘟嘟定制：model 移入 panel header，默认 footer 取消
 

@@ -162,6 +162,26 @@ docker pull ghcr.io/monkey2jack/aidupop:latest
 
 The plugin uses the same configuration as the upstream `hermes-lark-streaming`. See [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for Aidu-specific additions.
 
+#### Device-specific text sizes
+
+Configure a single size per role, or map desktop/mobile sizes in Hermes `config.yaml`:
+
+```yaml
+hermes_lark_streaming:
+  text_sizes:
+    body:
+      default: normal
+      pc: normal
+      mobile: large
+    panel: notation
+    notice:
+      default: notation
+      pc: notation
+      mobile: normal
+```
+
+The supported roles are `body` (answer), `panel` (reasoning/tools/stats), and `notice` (folding and status notices). Each role accepts either one official CardKit text size or a `default` / `pc` / `mobile` mapping. Omitting this option preserves the existing `normal_v2` / `notation` appearance; `normal_v2` remains a legacy default and is not accepted in new configuration. Apply changes with `/aowen config reload` or restart the Hermes gateway. Invalid roles, device keys, or sizes fail explicitly instead of producing malformed cards.
+
 The single source of truth for the version is the `version` field in `plugin.yaml`; `setup.py` and `__init__.py` read it dynamically, so versions never drift between files.
 
 ---

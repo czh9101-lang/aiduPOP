@@ -1,3 +1,13 @@
+## Unreleased
+
+### Added
+
+- **PC / 手机端差异化字号（Issue #4）**：新增 `hermes_lark_streaming.text_sizes`，支持 `body`、`panel`、`notice` 三个稳定角色。每个角色可填写单一字号，或通过 `default` / `pc` / `mobile` 使用飞书 CardKit JSON 2.0 的设备差异字号。
+- **严格兼容与校验**：未配置时不向卡片注入 `config.style`，回答正文继续使用 `normal_v2`，面板和提示继续使用 `notation`；未知角色、设备字段及非法字号会抛出带配置路径的明确错误。
+- **完整流式生命周期覆盖**：自定义字号随初始建卡下发，并覆盖回答/面板首次插入、发送重建重试和封卡补建路径；增量 `partial_update_element` 继续只更新正文内容，不触碰飞书禁止更新的 `text_size` 属性。
+
+---
+
 ## v2.1.2 (2026-08-07) — Aegis Patch Release
 
 Aegis 补丁微调版，英文名称和卡片视觉保持不变。

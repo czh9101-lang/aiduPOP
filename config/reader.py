@@ -7,6 +7,7 @@ import math
 import os
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,73 @@ def _get_hermes_config_path() -> Path:
     return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config.yaml"
 
 _RELOAD_CACHE_TTL = 60.0  # 运行时可变配置缓存 TTL.
+
+_TEXT_SIZE_ROLES = ("body", "panel", "notice")
+_TEXT_SIZE_DEFAULTS = {
+    "body": "normal_v2",
+    "panel": "notation",
+    "notice": "notation",
+}
+_TEXT_SIZE_MAPPING_DEFAULTS = {
+    "body": "normal",
+    "panel": "notation",
+    "notice": "notation",
+}
+_TEXT_SIZE_DEVICE_KEYS = frozenset({"default", "pc", "mobile"})
+# 飞书 CardKit JSON 2.0 官方字号。aiduPOP 既有 normal_v2 仅保留为未配置
+# 时的历史直写默认，不进入设备映射，避免客户端静默回退。
+_TEXT_SIZE_VALUES = frozenset({
+    "heading-0", "heading-1", "heading-2", "heading-3", "heading-4",
+    "heading", "normal", "notation", "xxxx-large",
+    "xxx-large", "xx-large", "x-large", "large", "medium", "small",
+    "x-small",
+})
+
+
+def _normalize_text_size(value: Any, *, path: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{path} must be a supported CardKit text size")
+    normalized = value.strip()
+    if normalized not in _TEXT_SIZE_VALUES:
+        raise ValueError(f"{path} must be a supported CardKit text size")
+    return normalized
+
+
+def _normalize_text_sizes(value: Any) -> dict[str, str | dict[str, str]]:
+    """Validate and normalize hermes_lark_streaming.text_sizes."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError("hermes_lark_streaming.text_sizes must be a mapping")
+
+    normalized: dict[str, str | dict[str, str]] = {}
+    for raw_role, raw_size in value.items():
+        role = str(raw_role)
+        role_path = f"hermes_lark_streaming.text_sizes.{role}"
+        if role not in _TEXT_SIZE_DEFAULTS:
+            raise ValueError(f"{role_path} is not a supported text size role")
+        if isinstance(raw_size, str):
+            normalized[role] = _normalize_text_size(raw_size, path=role_path)
+            continue
+        if not isinstance(raw_size, Mapping) or not raw_size:
+            raise ValueError(f"{role_path} must be a text size or non-empty mapping")
+
+        devices: dict[str, str] = {}
+        for raw_device, raw_device_size in raw_size.items():
+            device = str(raw_device)
+            device_path = f"{role_path}.{device}"
+            if device not in _TEXT_SIZE_DEVICE_KEYS:
+                raise ValueError(f"{device_path} is not a supported device field")
+            devices[device] = _normalize_text_size(raw_device_size, path=device_path)
+
+        fallback = devices.get("default", _TEXT_SIZE_MAPPING_DEFAULTS[role])
+        normalized[role] = {
+            "default": fallback,
+            "pc": devices.get("pc", fallback),
+            "mobile": devices.get("mobile", fallback),
+        }
+    return normalized
+
 
 def _to_bool(val: Any, default: bool = False) -> bool:
     if isinstance(val, bool):
@@ -188,6 +256,33 @@ class Config:
     @property
     def card_duration_sec(self) -> int:
         return _to_int(self._plugin_sec().get("card_ttl_sec", 600), default=600)
+
+    @property
+    def text_sizes(self) -> dict[str, str | dict[str, str]]:
+        """可选字号角色；缺省返回空映射，保持现有卡片 JSON 不变."""
+        return _normalize_text_sizes(self._plugin_sec().get("text_sizes"))
+
+    def text_size(self, role: str) -> str:
+        """Return element text_size value, using stable aliases for device maps."""
+        return self.configured_text_size(role) or _TEXT_SIZE_DEFAULTS[role]
+
+    def configured_text_size(self, role: str) -> str | None:
+        """Return only an explicitly configured role size, or None."""
+        value = self.text_sizes.get(role)
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            return f"aidupop_{role}"
+        return None
+
+    @property
+    def text_size_styles(self) -> dict[str, dict[str, str]]:
+        """CardKit config.style.text_size entries for configured device maps."""
+        return {
+            f"aidupop_{role}": dict(value)
+            for role in _TEXT_SIZE_ROLES
+            if isinstance((value := self.text_sizes.get(role)), dict)
+        }
 
     @property
     def footer_fields(self) -> list[list[str]]:
