@@ -1,6 +1,6 @@
-## v2.1.2 (2026-08-07) — Aegis Edition Patch Release
+## v2.1.2 (2026-08-07) — Aegis Patch Release
 
-Aegis Edition 补丁微调版，英文名称和卡片视觉保持不变。
+Aegis 补丁微调版，英文名称和卡片视觉保持不变。
 
 ### Fixed
 

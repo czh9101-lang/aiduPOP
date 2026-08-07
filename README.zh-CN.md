@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-2.1.2%20Aegis%20Edition-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.1.2%20Aegis-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 
 为 Hermes Agent 提供飞书/Lark CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、统一可折叠面板、按时间线交错显示推理与工具调用等。
 
-> 当前版本：**2.1.2 Aegis Edition**。这是补丁微调版本，英文名称与卡片视觉不变；重点修复长任务元素超限、超长回答、话题会话隔离与发布质量门。
+> 当前版本：**2.1.2 Aegis**。这是补丁微调版本，英文名称与卡片视觉不变；重点修复长任务元素超限、超长回答、话题会话隔离与发布质量门。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >
