@@ -394,7 +394,13 @@ class E2ETestRunner:
         return [cards[first_card_id].card_json]
 
     async def teardown(self) -> None:
-        """Clean up patches and state."""
+        """Clean up patches, background tasks, and state."""
+        pending = [task for task in self._controller._pending_tasks if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        self._controller._pending_tasks.clear()
         for p in self._patches:
             p.stop()
         self.mock_server.reset()

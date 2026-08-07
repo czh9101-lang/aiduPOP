@@ -180,6 +180,21 @@ def scan_markdown_blocks(text: str) -> list[MarkdownBlock]:
     flush_paragraph(len(text))
     return blocks
 
+
+def _find_tables_outside_code_blocks(text: str) -> list[tuple[int, int, str]]:
+    """Return markdown table ranges while ignoring fenced code blocks.
+
+    Aegis 2.1 replaced the regex scanner with ``scan_markdown_blocks`` but
+    accidentally removed this public compatibility helper while leaving it in
+    ``__all__``. Keep one parser as the source of truth and adapt its output.
+    """
+    return [
+        (block.start, block.end, block.text)
+        for block in scan_markdown_blocks(text)
+        if block.kind == "table"
+    ]
+
+
 def _parse_markdown_row(row: str) -> list[str] | None:
     stripped = row.strip()
     if not stripped:

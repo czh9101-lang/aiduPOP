@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from tests.e2e.framework import E2ETestRunner
+from .framework import E2ETestRunner
 from hermes_lark_streaming.cardkit import (
     build_clarify_card,
     build_clarify_submitted_card,

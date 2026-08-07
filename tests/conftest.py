@@ -100,7 +100,7 @@ def _cleanup_event_loops():
     yield
     # Import late: the list is populated at test execution time.
     try:
-        from tests.test_controller import _loops_to_cleanup
+        from test_controller import _loops_to_cleanup
 
         loops = list(_loops_to_cleanup)
         _loops_to_cleanup.clear()
@@ -111,11 +111,33 @@ def _cleanup_event_loops():
         if loop.is_closed() or loop.is_running():
             continue
         try:
+            pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             loop.run_until_complete(loop.shutdown_asyncgens())
         except Exception:
             pass
         finally:
             loop.close()
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_plugin_tasks_on_pytest_loop():
+    """Cancel plugin fire-and-forget tasks owned by pytest's active loop."""
+    yield
+    current = asyncio.current_task()
+    pending = []
+    for task in asyncio.all_tasks():
+        if task is current or task.done():
+            continue
+        module = getattr(task.get_coro(), "__module__", "")
+        if module.startswith("hermes_lark_streaming"):
+            task.cancel()
+            pending.append(task)
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 @pytest.fixture(autouse=True)

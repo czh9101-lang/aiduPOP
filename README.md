@@ -10,7 +10,7 @@
 美不是装饰，而是信息该在的位置，刚好在那里。
 ```
 
-[![Version](https://img.shields.io/badge/version-2.0.2%20·%20Sapphire·蓝宝石-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.1.2%20·%20Aegis%20Edition-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
@@ -25,7 +25,7 @@
 
 ## aiduPOP 是什么？
 
-**aiduPOP**（爱嘟流式卡片 / 蓝宝石）是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书流式卡片插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
+**aiduPOP**（爱嘟流式卡片 / Aegis Edition）是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书流式卡片插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
 
 基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduPOP 在其之上做了一套完整的**水晶化改造**：
 
@@ -228,7 +228,18 @@ aiduPOP/
 </p>
 
 ## CHANGELOG
-n- **v2.1.1** (2026-08): 收编 lyhyly PR #2 及 PR #3，修复了飞书回复错位及 clarify 僵尸回调的问题，致谢 lyhyly！💕
+
+### v2.1.2 Aegis Edition (2026-08-07)
+
+这是 Aegis Edition 的补丁版本，英文名称与卡片视觉保持不变。
+
+* 修复长任务在 Phase 2 / Phase 3 增量更新时可能先于最终安全网触发飞书 `300305` 元素超限的问题；所有面板路径统一预留回答与 loading 元素预算，并在发送前裁剪早期推理/工具记录。
+* 修复 24,000 字以上回答调用未导入 `_split_long_text` 导致的隐藏 `NameError`。
+* 修复 message/anchor 双键导致的活动会话重复计数和跨话题错误封卡，并为过期 Clarify 卡片恢复 Hermes 原生回退路径。
+* 恢复 Aegis 表格扫描兼容接口，收口测试包名、异步任务清理与 885 项回归测试。
+* 加固发布链路：候选代码先测试后推送，Docker 发布前强制通过关键静态检查与测试。
+
+完整版本历史见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ### v2.1.0 Aegis Edition (2026-08-05)
 * 🛡️ **Aegis Markdown 防爆引擎**: 吸收并融合贝氏卡片的高级安全降级机制，彻底根治飞书卡片 `300314` (格式错误) 与 `200860` (卡片过载) 的死穴。

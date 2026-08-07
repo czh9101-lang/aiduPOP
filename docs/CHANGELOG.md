@@ -1,3 +1,33 @@
+## v2.1.2 (2026-08-07) — Aegis Edition Patch Release
+
+Aegis Edition 补丁微调版，英文名称和卡片视觉保持不变。
+
+### Fixed
+
+- **增量卡片元素预算**：修复长任务在 Phase 2 / Phase 3 创建或更新完整面板时，尚未进入最终封卡安全网就触发飞书 `300305 element exceeds the limit` 的问题。所有面板由 `_build_session_panel()` 唯一出口执行 195 元素预算，预留 answer 与 loading spinner 开销，只折叠最早的推理/工具项。
+- **超长回答 NameError**：补齐 `_split_long_text` 导入，修复 24,000 字以上回答进入截断路径时的隐藏异常，并增加 25,000 字回归测试。
+- **会话别名与话题隔离**：message ID / anchor ID 指向同一 `CardSession` 时按对象去重，避免活动数、TTL 清理和并发封卡重复；不同回复锚点的活动卡片不再互相封口。
+- **过期 Clarify 回退**：Clarify 卡片回调缺少插件运行态时，不再静默吞掉动作，安全回退 Hermes 原生处理器。
+- **Aegis 表格接口兼容**：基于 `scan_markdown_blocks()` 恢复 `_find_tables_outside_code_blocks()` 适配接口，避免导出、实现和测试漂移。
+- **测试可移植性与资源回收**：统一 `hermes_lark_streaming.*` 包路径、修正 E2E 相对导入和 Aegis 紧凑表格断言，并回收 fire-and-forget 测试任务。全套 885 项测试通过，`RuntimeWarning` 按错误处理。
+
+### Security / Release Engineering
+
+- GitHub 同步工作流改为候选代码先测试、后推送；分支改写使用 `--force-with-lease`，关键 Ruff 错误不再静默放行。
+- GHCR Docker 发布前增加依赖安装、关键静态检查和完整测试质量门。
+- 发布前敏感信息扫描未发现真实私钥、API Key、Token 或 App Secret 硬编码。
+
+---
+
+## v2.1.0 (2026-08-05) — Aegis Edition
+
+### Added / Changed
+
+- 引入 Aegis Markdown 防爆引擎、无损紧凑表格降级和代码块安全截断。
+- 保持 aiduPOP 嘟嘟定制的模型缓存及 `⚕️💭🛠️⏱` 面板布局。
+
+---
+
 ## v2.0.2 (2026-08-05) — Packaging Fix: installable wheel layout
 
 ### 🐛 打包根治（P0，影响所有 pip 安装用户）

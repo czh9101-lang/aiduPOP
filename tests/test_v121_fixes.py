@@ -28,7 +28,7 @@ class TestEscapeMarkdownAsterisks:
 
     @pytest.fixture(autouse=True)
     def _import(self):
-        from cardkit.md import escape_markdown_asterisks
+        from hermes_lark_streaming.cardkit.md import escape_markdown_asterisks
         self.escape = escape_markdown_asterisks
 
     def test_no_asterisk(self):
@@ -190,7 +190,7 @@ class TestEnforceCardElementLimit:
 
     def test_hint_count_accumulation(self):
         """When trimming happens multiple times, the hint should show cumulative count."""
-        from cardkit.cards import _enforce_card_element_limit
+        from hermes_lark_streaming.cardkit.cards import _enforce_card_element_limit
         # Build a card with many panel children to trigger trimming
         children = []
         for i in range(50):
@@ -239,7 +239,7 @@ class TestTruncateReasoning:
 
     @pytest.fixture(autouse=True)
     def _import(self):
-        from cardkit.elements import _truncate_reasoning, _REASONING_DISPLAY_LIMIT
+        from hermes_lark_streaming.cardkit.elements import _truncate_reasoning, _REASONING_DISPLAY_LIMIT
         self.truncate = _truncate_reasoning
         self.limit = _REASONING_DISPLAY_LIMIT
 
@@ -276,7 +276,7 @@ class TestClarifyLabelOverflow:
     """Test that clarify labels don't overflow past Z into special chars."""
 
     def test_under_26_uses_letters(self):
-        from cardkit.special import build_clarify_card
+        from hermes_lark_streaming.cardkit.special import build_clarify_card
         # 5 choices — should use A-E
         card = build_clarify_card(question="Q", choices=["A", "B", "C", "D", "E"])
         # Find the select_static options
@@ -288,7 +288,7 @@ class TestClarifyLabelOverflow:
         assert "\\." not in content_str
 
     def test_over_26_uses_numbers(self):
-        from cardkit.special import build_clarify_card
+        from hermes_lark_streaming.cardkit.special import build_clarify_card
         # 30 choices — labels after Z should be numbers
         choices = [f"Choice {i}" for i in range(30)]
         card = build_clarify_card(question="Q", choices=choices)
@@ -304,7 +304,7 @@ class TestMetricsLockThreadSafety:
     """Test that metrics operations are thread-safe."""
 
     def test_concurrent_increments(self):
-        from aowen import record_card_created, get_metrics, _do_reset
+        from hermes_lark_streaming.aowen import record_card_created, get_metrics, _do_reset
         _do_reset()
         errors = []
 
@@ -333,7 +333,7 @@ class TestUnavailableCacheLockThreadSafety:
     """Test that unavailable cache operations are thread-safe."""
 
     def test_concurrent_mark_and_check(self):
-        from feishu.guard import mark_unavailable, is_unavailable
+        from hermes_lark_streaming.feishu.guard import mark_unavailable, is_unavailable
         errors = []
 
         def mark_many():
@@ -422,7 +422,7 @@ class TestYAMLErrorHandling:
     def test_load_invalid_yaml(self, tmp_path):
         """_load() should return empty dict on invalid YAML."""
         import yaml
-        from config.reader import Config
+        from hermes_lark_streaming.config.reader import Config
 
         cfg = Config()
         # Write invalid YAML
@@ -447,7 +447,7 @@ def test_v134_aowen_handler_exception_returns_skip_not_none():
     返回 None 会让 /aowen 命令落入 agent，LLM 把 "/aowen foo" 当用户 prompt 处理。
     修复：异常时 return _skip(...) + 升级到 exception 级别日志。
     """
-    from aowen import handle_pre_gateway_dispatch
+    from hermes_lark_streaming.aowen import handle_pre_gateway_dispatch
     from types import SimpleNamespace
 
     # 构造一个 /aowen 命令事件
@@ -461,7 +461,7 @@ def test_v134_aowen_handler_exception_returns_skip_not_none():
     )
 
     # 让 _send_card_async 抛异常（模拟 controller 未初始化等场景）
-    import aowen
+    from hermes_lark_streaming import aowen
     original_send = aowen._send_card_async
     aowen._send_card_async = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("test crash"))
 

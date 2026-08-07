@@ -9,6 +9,7 @@ from hermes_lark_streaming.cardkit import (
     _compact,
     _count_tag_objects,
     _enforce_card_element_limit,
+    _enforce_panel_element_budget,
     _escape_md,
     _extract_images_from_markdown,
     _format_elapsed,
@@ -122,7 +123,10 @@ class TestDowngradeTables:
         # _MAX_CARD_TABLES = 20, so 22 tables triggers downgrade
         text = "\n\n".join([table] * 22)
         result = _downgrade_tables(text)
-        assert result.count("```") >= 4  # 超限表格被包装为代码块
+        assert "后续表格已转换为紧凑字段列表" in result
+        assert "**Table 21 · Row 1**" in result
+        assert "- A: 1" in result
+        assert "- B: 2" in result
 
 
 # --- 文本拆分 ---
@@ -497,9 +501,10 @@ class TestBuildCronCard:
         # _MAX_CARD_TABLES = 20, so 22 tables triggers _downgrade_tables
         content = "\n\n".join([table] * 22)
         card = build_cron_card(content)
-        # Excess tables are wrapped in code blocks by _downgrade_tables
+        # Excess tables are converted to compact field lists without losing rows.
         combined = " ".join(e["content"] for e in card["body"]["elements"])
-        assert "```" in combined
+        assert "后续表格已转换为紧凑字段列表" in combined
+        assert "**Table 21 · Row 1**" in combined
 
     def test_long_content_split_into_multiple_elements(self) -> None:
         from hermes_lark_streaming.cardkit import build_cron_card
@@ -1013,6 +1018,40 @@ class TestBuildUnifiedPanelTrimming:
         assert panel is not None
         first_child = panel["elements"][0]
         assert "已折叠" in first_child.get("content", "")
+
+
+class TestEnforcePanelElementBudget:
+    """Incremental Phase 2/3 panel payloads must be safe before sealing."""
+
+    def test_trims_panel_with_streaming_reservations(self):
+        rounds = [ReasoningRound(index=i + 1, text=f"Reasoning {i + 1}") for i in range(30)]
+        steps = [
+            {
+                "name": f"tool_{i}",
+                "status": "success",
+                "title": f"Tool {i}",
+                "detail": f"Detail {i}",
+                "result_block": {"content": f"Result {i}", "language": "text"},
+            }
+            for i in range(30)
+        ]
+        panel = build_unified_panel(
+            reasoning_rounds=rounds,
+            tool_steps=steps,
+            show_reasoning=True,
+            max_reasoning_rounds=30,
+            max_tool_steps=30,
+        )
+        reserved = [
+            {"tag": "markdown", "content": "answer"},
+            {"tag": "div", "icon": {"tag": "custom_icon"}, "text": {"tag": "plain_text"}},
+        ]
+
+        result = _enforce_panel_element_budget(panel, reserved_elements=reserved)
+        total = _count_tag_objects({"body": {"elements": [*reserved, result]}})
+
+        assert total <= 195
+        assert any("已折叠" in child.get("content", "") for child in result["elements"])
 
 
 class TestEnforceCardElementLimit:

@@ -19,8 +19,14 @@ from ..cardkit import (
     build_preservative_seal_actions,
     _count_tag_objects,
     _enforce_card_element_limit,
+    _enforce_panel_element_budget,
 )
-from ..cardkit.md import _downgrade_tables, escape_markdown_asterisks, optimize_markdown_style
+from ..cardkit.md import (
+    _downgrade_tables,
+    _split_long_text,
+    escape_markdown_asterisks,
+    optimize_markdown_style,
+)
 from ..state.linear import UnifiedLinearState
 from ..state.text import split_reasoning_text
 from ..feishu import (
@@ -126,7 +132,15 @@ def _build_session_panel(
     }
     if border_color is not None:
         panel_kwargs["border_color"] = border_color
-    return build_unified_panel(**panel_kwargs)
+    panel = build_unified_panel(**panel_kwargs)
+    return _enforce_panel_element_budget(
+        panel,
+        reserved_elements=[
+            _streaming_element(element_id=ANSWER_ELEMENT_ID),
+            # The loading spinner remains in the card during streaming.
+            {"tag": "div", "icon": {"tag": "custom_icon"}, "text": {"tag": "plain_text"}},
+        ],
+    )
 
 
 async def _fallback_write_answer(

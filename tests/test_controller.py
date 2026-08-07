@@ -180,7 +180,8 @@ def test_on_aborted_skips_abort_for_completing_session() -> None:
     ctrl = StreamCardController()
     _enable(ctrl)
 
-    ctrl.on_message_started(message_id="completing_msg", chat_id="chat")
+    with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+        ctrl.on_message_started(message_id="completing_msg", chat_id="chat")
     # Simulate session in COMPLETING state (on_completed already fired)
     ctrl._sessions["completing_msg"].state = COMPLETING
 
@@ -205,7 +206,8 @@ def test_on_aborted_normally_aborts_non_completing_session() -> None:
     ctrl = StreamCardController()
     _enable(ctrl)
 
-    ctrl.on_message_started(message_id="streaming_msg", chat_id="chat")
+    with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
+        ctrl.on_message_started(message_id="streaming_msg", chat_id="chat")
     # Session starts in IDLE state, on_message_started sets it up
     # Simulate it in STREAMING state
     ctrl._sessions["streaming_msg"].state = STREAMING
@@ -453,7 +455,7 @@ class TestLinearDispatch:
         session.state = STREAMING
         session.card_id = "card_123"
         ctrl._sessions["msg_c"] = session
-        with patch.object(ctrl, "_do_linear_complete_with_fallback", new_callable=AsyncMock):
+        with patch.object(ctrl, "_fire_and_forget", side_effect=lambda coro, loop: coro.close()):
             ctrl.on_completed(message_id="msg_c")
         # After on_completed, state should be COMPLETING (not COMPLETED yet)
         # The actual completion happens asynchronously in _do_linear_complete
@@ -603,6 +605,25 @@ class TestDoUnifiedFlush:
         ctrl._client.cardkit_stream_element.assert_called()
         # Panel should now be created
         assert "panel" in session._creation_stages
+
+    @pytest.mark.asyncio
+    async def test_very_long_answer_is_truncated_without_name_error(self) -> None:
+        """Answers above 24k chars must use the imported safe splitter."""
+        ctrl = _setup_ctrl()
+        session = _make_session("msg_long_answer", linear=True)
+        session.state = STREAMING
+        session.card_id = "card_long_answer"
+        session._creation_stages.update({"answer", "panel", "hint_removed"})
+        session.unified_state.on_answer_delta("x" * 25000)
+        session.unified_state.panel_dirty = False
+        session.unified_state.tool_steps_dirty = False
+
+        await ctrl._do_unified_flush(session)
+
+        content = ctrl._client.cardkit_stream_element.await_args.args[2]
+        assert len(content) < 25000
+        assert content.endswith("...(过长截断)")
+        assert session.unified_state.answer_dirty is False
 
     @pytest.mark.asyncio
     async def test_no_api_calls_when_no_card_id(self) -> None:

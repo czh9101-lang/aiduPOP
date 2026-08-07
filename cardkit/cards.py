@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 __all__ = [
     'build_streaming_card_v2',
     '_enforce_card_element_limit',
+    '_enforce_panel_element_budget',
 ]
 
 # Feishu Card 2.0 element limit — every JSON object with a ``tag`` key
@@ -34,6 +35,32 @@ __all__ = [
 _FEISHU_ELEMENT_LIMIT = 200
 
 _ELEMENT_LIMIT_MARGIN = 5
+
+
+def _enforce_panel_element_budget(
+    panel: dict[str, Any],
+    *,
+    reserved_elements: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Trim one panel before any incremental CardKit update is sent.
+
+    ``_enforce_card_element_limit`` only protects complete card payloads. The
+    live plugin creates and updates the panel incrementally, so Phase 2 could
+    exceed Feishu's 200-element limit before the final seal safety net ran.
+    Model the persistent non-panel elements as reserved content and reuse the
+    same card-level limiter for every panel payload.
+    """
+    card = {
+        "body": {
+            "elements": [
+                *(reserved_elements or []),
+                panel,
+            ]
+        }
+    }
+    _enforce_card_element_limit(card)
+    return panel
+
 
 def _enforce_card_element_limit(
     card: dict[str, Any],
