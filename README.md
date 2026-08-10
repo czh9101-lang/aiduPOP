@@ -14,7 +14,7 @@
 美不是装饰，而是信息该在的位置，刚好在那里。
 ```
 
-[![Version](https://img.shields.io/badge/version-2.1.2%20·%20Aegis-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.1.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
@@ -29,7 +29,7 @@
 
 ## aiduPOP 是什么？
 
-**aiduPOP⚕爱嘟流式卡**（Aegis）是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书流式卡片插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
+**aiduPOP⚕爱嘟流式卡**是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书流式卡片插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
 
 基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduPOP 在其之上做了一套完整的**水晶化改造**：
 
@@ -260,20 +260,20 @@ aiduPOP/
 
 ## CHANGELOG
 
-### v2.1.2 Aegis (2026-08-07)
+### v2.1.2 (2026-08-07)
 
-这是 Aegis 的补丁版本，英文名称与卡片视觉保持不变。
+这是 本次的补丁版本，英文名称与卡片视觉保持不变。
 
 * 修复长任务在 Phase 2 / Phase 3 增量更新时可能先于最终安全网触发飞书 `300305` 元素超限的问题；所有面板路径统一预留回答与 loading 元素预算，并在发送前裁剪早期推理/工具记录。
 * 修复 24,000 字以上回答调用未导入 `_split_long_text` 导致的隐藏 `NameError`。
 * 修复 message/anchor 双键导致的活动会话重复计数和跨话题错误封卡，并为过期 Clarify 卡片恢复 Hermes 原生回退路径。
-* 恢复 Aegis 表格扫描兼容接口，收口测试包名、异步任务清理与 885 项回归测试。
+* 恢复表格扫描兼容接口，收口测试包名、异步任务清理与 885 项回归测试。
 * 加固发布链路：候选代码先测试后推送，Docker 发布前强制通过关键静态检查与测试。
 
 完整版本历史见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
-### v2.1.0 Aegis Edition (2026-08-05)
-* 🛡️ **Aegis Markdown 防爆引擎**: 吸收并融合贝氏卡片的高级安全降级机制，彻底根治飞书卡片 `300314` (格式错误) 与 `200860` (卡片过载) 的死穴。
+### v2.1.0 (2026-08-05)
+* 🛡️ **Markdown 防爆引擎**: 吸收并融合贝氏卡片的高级安全降级机制，彻底根治飞书卡片 `300314` (格式错误) 与 `200860` (卡片过载) 的死穴。
 * 📊 **无损表格降级 (Compact Mode)**: 当卡片中 Markdown 表格数量超出飞书单卡限制 (最大 5-20 个) 时，不再粗暴转为代码块，而是无损压扁为带有黑体子标题和字段列表的 `Table N · Row M` 形式，彻底杜绝复杂表格引发的崩溃。
 * ✂️ **智能长文断层保护**: 当内容超过飞书安全红线 (24KB+) 触发截断时，算法将智能回退至段落或闭合符边缘，严密保护 Markdown 代码块围栏 (` ``` `) 以及行内变量 (\` \`)，坚决杜绝代码块“腰斩”与排版错乱。
 * 💎 **aiduPOP 核心守护**: 所有截断与降级拦截均在底层 (`md.py` 与 `linear_mixin.py` 的最后一公里) 进行，0 侵入，0 UI 改变，完美保持 aiduPOP 定制的 `_model_cache` 及 (⚕️💭🛠️⏱) 原生布局。

@@ -10,7 +10,7 @@ Transparent is not dumping logs, but letting you see what the AI is thinking at 
 Beautiful is not decoration, but the right information being exactly where it belongs.
 ```
 
-[![Version](https://img.shields.io/badge/version-2.1.2%20·%20Aegis-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.1.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -25,7 +25,7 @@ Beautiful is not decoration, but the right information being exactly where it be
 
 ## What is aiduPOP?
 
-**aiduPOP⚕爱嘟流式卡** (Aegis) is a streaming card plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) on Feishu/Lark — rendering the AI's answer and reasoning process in real time, clearly and elegantly.
+**aiduPOP⚕爱嘟流式卡** is a streaming card plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) on Feishu/Lark — rendering the AI's answer and reasoning process in real time, clearly and elegantly.
 
 Built on top of [Aowen-Nowor's hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0, aiduPOP adds a complete **crystallization** layer:
 
@@ -204,12 +204,12 @@ See [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the full list of custom
 
 ## What's new in 2.1.2
 
-This is a patch release of **Aegis**; the English name and card design remain unchanged.
+This is a patch release of aiduPOP; the English name and card design remain unchanged.
 
 - Prevents Feishu `300305` element-limit failures during incremental Phase 2/3 panel updates by enforcing a shared pre-send element budget.
 - Fixes a hidden `NameError` for responses longer than 24,000 characters.
 - Deduplicates message/anchor session aliases, preserves unrelated topic cards, and safely falls back for stale Clarify actions.
-- Restores the Aegis table-scanner compatibility API and makes the 885-test suite portable and warning-clean.
+- Restores the table-scanner compatibility API and makes the 885-test suite portable and warning-clean.
 - Adds test gates before GitHub synchronization and GHCR publication.
 
 See [docs/CHANGELOG.md](docs/CHANGELOG.md) for the complete history.

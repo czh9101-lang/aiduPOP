@@ -12,9 +12,9 @@
 
 ---
 
-## v2.1.2 (2026-08-07) — Aegis Patch Release
+## v2.1.2 (2026-08-07)
 
-Aegis 补丁微调版，英文名称和卡片视觉保持不变。
+补丁微调版，英文名称和卡片视觉保持不变。
 
 ### Fixed
 
@@ -22,8 +22,8 @@ Aegis 补丁微调版，英文名称和卡片视觉保持不变。
 - **超长回答 NameError**：补齐 `_split_long_text` 导入，修复 24,000 字以上回答进入截断路径时的隐藏异常，并增加 25,000 字回归测试。
 - **会话别名与话题隔离**：message ID / anchor ID 指向同一 `CardSession` 时按对象去重，避免活动数、TTL 清理和并发封卡重复；不同回复锚点的活动卡片不再互相封口。
 - **过期 Clarify 回退**：Clarify 卡片回调缺少插件运行态时，不再静默吞掉动作，安全回退 Hermes 原生处理器。
-- **Aegis 表格接口兼容**：基于 `scan_markdown_blocks()` 恢复 `_find_tables_outside_code_blocks()` 适配接口，避免导出、实现和测试漂移。
-- **测试可移植性与资源回收**：统一 `hermes_lark_streaming.*` 包路径、修正 E2E 相对导入和 Aegis 紧凑表格断言，并回收 fire-and-forget 测试任务。全套 885 项测试通过，`RuntimeWarning` 按错误处理。
+- **表格接口兼容**：基于 `scan_markdown_blocks()` 恢复 `_find_tables_outside_code_blocks()` 适配接口，避免导出、实现和测试漂移。
+- **测试可移植性与资源回收**：统一 `hermes_lark_streaming.*` 包路径、修正 E2E 相对导入和紧凑表格断言，并回收 fire-and-forget 测试任务。全套 885 项测试通过，`RuntimeWarning` 按错误处理。
 
 ### Security / Release Engineering
 
@@ -33,11 +33,11 @@ Aegis 补丁微调版，英文名称和卡片视觉保持不变。
 
 ---
 
-## v2.1.0 (2026-08-05) — Aegis Edition
+## v2.1.0 (2026-08-05)
 
 ### Added / Changed
 
-- 引入 Aegis Markdown 防爆引擎、无损紧凑表格降级和代码块安全截断。
+- 引入 Markdown 防爆引擎、无损紧凑表格降级和代码块安全截断。
 - 保持 aiduPOP 定制的模型缓存及 `⚕️💭🛠️⏱` 面板布局。
 
 ---
