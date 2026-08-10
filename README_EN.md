@@ -1,4 +1,4 @@
-# 💎 aiduPOP⚕爱嘟流式卡 — Hermes Aidu Streaming Card
+# aiduPOP⚕爱嘟流式卡 — Hermes Aidu Streaming Card
 
 > **Crystal philosophy — clean enough, transparent enough, beautiful enough.**
 >
@@ -46,7 +46,7 @@ Built on top of [Aowen-Nowor's hermes-lark-streaming](https://gitee.com/Aowen-No
 
 ```
 ┌──────────────────────────────────────────────────┐
-│    💎 aiduPOP⚕爱嘟流式卡                         │
+│      aiduPOP⚕爱嘟流式卡                          │
 ├──────────────────────────────────────────────────┤
 │  cardkit/     → Card rendering engine             │
 │  controller/  → Linear controller + card_id track │

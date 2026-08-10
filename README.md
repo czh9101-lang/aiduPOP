@@ -1,4 +1,4 @@
-# 💎 aiduPOP⚕爱嘟流式卡 — Hermes Agent 飞书流式卡片插件
+# aiduPOP⚕爱嘟流式卡 — Hermes Agent 飞书流式卡片插件
 
 <p align="center">
   <img src="docs/images/aidupop-banner-wide.jpg" alt="aiduPOP Gem Banner" width="100%">
@@ -50,7 +50,7 @@
 
 ```
 ┌──────────────────────────────────────────────────┐
-│      💎 aiduPOP⚕爱嘟流式卡                     │
+│        aiduPOP⚕爱嘟流式卡                      │
 │         Lark (Feishu) Cardsuit 2.0 Streaming     │
 ├──────────────────────────────────────────────────┤
 │  cardkit/     → 卡片渲染引擎（元素、模板）        │
