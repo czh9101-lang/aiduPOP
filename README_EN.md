@@ -1,4 +1,4 @@
-# 💎 aiduPOP — Hermes aidu Lark (Feishu) Streaming Card
+# 💎 aiduPOP⚕爱嘟流式卡 — Hermes Aidu Streaming Card
 
 > **Crystal philosophy — clean enough, transparent enough, beautiful enough.**
 >
@@ -17,7 +17,7 @@ Beautiful is not decoration, but the right information being exactly where it be
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg?logo=docker)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
 [![Built on hermes-lark-streaming](https://img.shields.io/badge/built%20on-hermes--lark--streaming-orange.svg)](https://gitee.com/Aowen-Nowor/hermes-lark-streaming)
-[![Aidu](https://img.shields.io/badge/Aidu-Lark%20%28Feishu%29%20Streaming%20Card-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Aidu](https://img.shields.io/badge/aiduPOP-⚕️爱嘟流式卡-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
 
 **[📖 中文文档](README.md)** | **English**
 
@@ -25,7 +25,7 @@ Beautiful is not decoration, but the right information being exactly where it be
 
 ## What is aiduPOP?
 
-**aiduPOP** (Aidu Lark (Feishu) Streaming Card / Aegis) is a Lark (Feishu) streaming card plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) — rendering the AI's answer and reasoning process in real time, clearly and elegantly.
+**aiduPOP⚕爱嘟流式卡** (Aegis) is a streaming card plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) on Feishu/Lark — rendering the AI's answer and reasoning process in real time, clearly and elegantly.
 
 Built on top of [Aowen-Nowor's hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0, aiduPOP adds a complete **crystallization** layer:
 
@@ -46,8 +46,7 @@ Built on top of [Aowen-Nowor's hermes-lark-streaming](https://gitee.com/Aowen-No
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  💎 aiduPOP — Hermes Aidu Lark (Feishu)          │
-│             Streaming Card                       │
+│    💎 aiduPOP⚕爱嘟流式卡                         │
 ├──────────────────────────────────────────────────┤
 │  cardkit/     → Card rendering engine             │
 │  controller/  → Linear controller + card_id track │
