@@ -38,7 +38,7 @@ Aegis 补丁微调版，英文名称和卡片视觉保持不变。
 ### Added / Changed
 
 - 引入 Aegis Markdown 防爆引擎、无损紧凑表格降级和代码块安全截断。
-- 保持 aiduPOP 嘟嘟定制的模型缓存及 `⚕️💭🛠️⏱` 面板布局。
+- 保持 aiduPOP 定制的模型缓存及 `⚕️💭🛠️⏱` 面板布局。
 
 ---
 
@@ -59,7 +59,7 @@ Aegis 补丁微调版，英文名称和卡片视觉保持不变。
 
 ## v2.0.1 (2026-08-05) — Hermes Agent Compatibility & Fast Streaming Release
 
-aiduPOP 嘟嘟大美满专属补丁发布。
+aiduPOP 专属补丁发布。
 
 ### 🔧 兼容性与速流优化
 - **Hermes Agent 网关钩子全量兼容**：在 `patching/hooks.py` 与 `patching/__init__.py` 中补全所有 Hermes Gateway 钩子定义（含 `on_session_aborted`、`on_message_completed_wait` 等），完美支持 Hermes 0.19+ 最新网关事件流。
@@ -75,9 +75,9 @@ aiduPOP 嘟嘟大美满专属补丁发布。
 
 ## v2.0.0 (2026-08-04) — Sapphire Edition (蓝宝石版)
 
-aiduPOP 嘟嘟大美满专属全能高可用重磅升级版。整合社区 Cheerwhy upstream v0.12.0 最新底层（支持 Profile 隔离、Hermes 0.19 TurnRunner 上下文适配、CardKit 重试机制、Width Mode 等），同时全量回植嘟嘟专属卡片美化与根治补丁（v22.2 / v22.3）。
-
-### 💎 重磅更新与嘟嘟定制
+aiduPOP 专属全能高可用重磅升级版。整合社区 Cheerwhy upstream v0.12.0 最新底层（支持 Profile 隔离、Hermes 0.19 TurnRunner 上下文适配、CardKit 重试机制、Width Mode 等），同时全量回植定制专属卡片美化与根治补丁（v22.2 / v22.3）。
+ 
+ ### 💎 重磅更新与定制
 - **Model 头部展示与紧贴**：Panel Header 最左边完美呈现在线 AI Model 名称，格式为 `⚕️model`（⚕️ 字符与模型名紧贴无空格，视觉极佳）。
 - **Model 全生命周期高可用（v22.2 根治）**：引入 `_model_cache` 模块级全局字典，摆脱 contextvar / thread-local 跨 asyncio task 丢失的死穴，确保卡片从创建 Phase 2 到封卡 Phase 3 始终稳定百分百显示 Model。
 - **元素缺失回滚根治（v22.3 防护）**：解耦 `existing_elements` 与 `include_loading_hint` 状态，彻底避免飞书 CardKit 300314 原子更新导致 answer/panel 被错误回滚问题。
