@@ -1,4 +1,4 @@
-# aiduPOP⚕爱嘟流式卡 — Hermes Agent 飞书流式卡片插件
+# aiduPOP⚕爱嘟流式卡 — Hermes Agent 飞书流式卡片
 
 <p align="center">
   <img src="docs/images/aidupop-banner-wide.jpg" alt="aiduPOP Gem Banner" width="100%">
