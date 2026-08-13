@@ -1,4 +1,4 @@
-# aiduPOP⚕爱嘟流式卡 — Hermes Agent 飞书流式卡片
+# aiduPOP⚕爱嘟泡波卡 — Hermes Agent 飞书泡波卡
 
 <p align="center">
   <img src="docs/images/aidupop-banner-wide.jpg" alt="aiduPOP Gem Banner" width="100%">
@@ -21,7 +21,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
 [![Built on hermes-lark-streaming](https://img.shields.io/badge/built%20on-hermes--lark--streaming-orange.svg)](https://gitee.com/Aowen-Nowor/hermes-lark-streaming)
-[![Aidu](https://img.shields.io/badge/aiduPOP-⚕️爱嘟流式卡-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Aidu](https://img.shields.io/badge/aiduPOP-⚕️爱嘟泡波卡-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
 
 **中文** | **[📖 English](README_EN.md)**
 
@@ -29,7 +29,7 @@
 
 ## aiduPOP 是什么？
 
-**aiduPOP⚕爱嘟流式卡**是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书流式卡片插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
+**aiduPOP⚕爱嘟泡波卡**是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书泡波卡插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
 
 基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduPOP 在其之上做了一套完整的**水晶化改造**：
 
@@ -50,7 +50,7 @@
 
 ```
 ┌──────────────────────────────────────────────────┐
-│        aiduPOP⚕爱嘟流式卡                      │
+│        aiduPOP⚕爱嘟泡波卡                      │
 │         Lark (Feishu) Cardsuit 2.0 Streaming     │
 ├──────────────────────────────────────────────────┤
 │  cardkit/     → 卡片渲染引擎（元素、模板）        │
@@ -75,7 +75,7 @@
   <img src="assets/screenshots/01-instant-response.png" width="600" alt="即时响应">
 </p>
 
-> **没有「正在输入...」提示，没有「回复：...」狗皮膏药。** 流式卡片即时出现，从第一个 token 开始实时渲染。没有飞书的 UI 噪音，只有纯粹的对话。
+> **没有「正在输入...」提示，没有「回复：...」狗皮膏药。** 泡波卡即时出现，从第一个 token 开始实时渲染。没有飞书的 UI 噪音，只有纯粹的对话。
 
 ---
 
