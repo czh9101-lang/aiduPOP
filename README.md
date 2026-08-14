@@ -14,7 +14,7 @@
 美不是装饰，而是信息该在的位置，刚好在那里。
 ```
 
-[![Version](https://img.shields.io/badge/version-2.1.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.1.3-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
@@ -259,6 +259,12 @@ aiduPOP/
 </p>
 
 ## CHANGELOG
+
+### v2.1.3 (2026-08-14)
+
+* 🐛 **Hermes CLI 导入死锁根治 (P0)**: 修复在 Hermes Agent 启动时，`model_tools` 模块级导入与后台插件发现线程之间的 Python `import_lock` 死锁。将 `apply_patches()` 从同步调用改为异步守护线程延迟执行，彻底消除 `hermes` CLI 终端启动卡死问题。
+* 🏷️ **飞书品牌表述统一**: 中文名称统一为“Hermes爱嘟飞书流式卡片”，英文品牌文案统一使用 “Lark (Feishu)”。
+* 📱 **设备差异化字号 (Issue #4)**: 支持通过 `hermes_lark_streaming.text_sizes` 配置 PC 与手机端差异化字号。
 
 ### v2.1.2 (2026-08-07)
 

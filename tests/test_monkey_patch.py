@@ -66,6 +66,31 @@ class TestPatchBasics:
         from hermes_lark_streaming import __version__ as pkg_version
         assert mp_version == pkg_version
 
+    def test_register_defers_apply_patches_in_thread(self) -> None:
+        """v2.1.3: register() must apply patches in a background daemon thread to avoid import-lock deadlock."""
+        import threading
+        from hermes_lark_streaming.plugin import register
+
+        mock_ctx = MagicMock()
+        threads_created = []
+        orig_thread_init = threading.Thread.__init__
+
+        def tracked_init(self, *args, **kwargs):
+            threads_created.append((self, kwargs))
+            orig_thread_init(self, *args, **kwargs)
+
+        with (
+            patch("hermes_lark_streaming.plugin._ensure_streaming_config"),
+            patch("threading.Thread.__init__", tracked_init),
+            patch("hermes_lark_streaming.patching.apply_patches") as mock_apply,
+        ):
+            register(mock_ctx)
+
+        # Confirm a daemon thread named hls-deferred-patches was started
+        hls_threads = [t for t in threads_created if t[1].get("name") == "hls-deferred-patches"]
+        assert len(hls_threads) == 1, "Expected hls-deferred-patches thread to be created"
+        assert hls_threads[0][1].get("daemon") is True, "Patch thread must be a daemon thread"
+
 
 # ── Cron delivery wrapper tests ──
 

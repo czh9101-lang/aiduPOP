@@ -10,7 +10,7 @@ Transparent is not dumping logs, but letting you see what the AI is thinking at 
 Beautiful is not decoration, but the right information being exactly where it belongs.
 ```
 
-[![Version](https://img.shields.io/badge/version-2.1.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.1.3-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -202,7 +202,13 @@ See [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the full list of custom
 
 ---
 
-## What's new in 2.1.2
+## What's new in 2.1.3
+
+- Fixes Hermes CLI terminal startup import lock deadlock by deferring runtime patches to a background daemon thread.
+- Unifies Lark (Feishu) branding across documentation.
+- Supports device-specific text sizes for PC and mobile via CardKit v2.0 style configuration.
+
+### What's new in 2.1.2
 
 This is a patch release of aiduPOP; the English name and card design remain unchanged.
 

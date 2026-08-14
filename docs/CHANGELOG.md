@@ -1,4 +1,8 @@
-## Unreleased
+## v2.1.3 (2026-08-14)
+
+### 🐛 Fixed (P0)
+
+- **Hermes CLI 导入死锁根治**：修复在 Hermes Agent 启动时，`model_tools` 模块级导入与后台插件发现线程之间的 Python `import_lock` 死锁。将 `apply_patches()` 从同步调用改为异步守护线程延迟执行（`_patch_thread`），彻底消除 `hermes` CLI 终端启动卡死问题。
 
 ### Changed
 
