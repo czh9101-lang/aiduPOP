@@ -238,9 +238,10 @@ class TestReactionStatusMap:
 
     def test_common_reactions_mapped(self):
         from hermes_lark_streaming.patching import _REACTION_STATUS_MAP
-        assert "👀" in _REACTION_STATUS_MAP
-        assert "👍" in _REACTION_STATUS_MAP
-        assert "🤔" in _REACTION_STATUS_MAP
+        # v2.2.0 泡波样式 reaction emoji（猴哥拍板，决策表③）
+        assert "👩🏻‍🏫" in _REACTION_STATUS_MAP
+        assert "🙆🏻‍♀️" in _REACTION_STATUS_MAP
+        assert "🧏🏻‍♀️" in _REACTION_STATUS_MAP
 
     def test_reaction_values_are_strings(self):
         from hermes_lark_streaming.patching import _REACTION_STATUS_MAP

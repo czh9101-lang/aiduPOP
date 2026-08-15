@@ -315,13 +315,13 @@ class TestToolUseTracker:
         tracker = ToolUseTracker()
         tracker.record_start("read", "file.py")
         steps = tracker.build_display_steps()
-        assert steps[0]["icon"] == "file-link-text_outlined"
+        assert steps[0]["icon"] == "👩🏻‍🏫"  # v2.2.0 泡波: theme emoji 为默认
 
     def test_unknown_tool_gets_default_icon(self) -> None:
         tracker = ToolUseTracker()
         tracker.record_start("custom_tool_xyz", "")
         steps = tracker.build_display_steps()
-        assert steps[0]["icon"] == "setting-inter_outlined"
+        assert steps[0]["icon"] == "👩🏻‍🔧"  # v2.2.0 泡波: fallback emoji
 
     def test_no_result_tools_skip_result_block(self) -> None:
         tracker = ToolUseTracker()

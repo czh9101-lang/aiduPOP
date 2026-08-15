@@ -20,6 +20,7 @@ from .elements import (
     build_unified_panel,
 )
 from .i18n import _LOCALES, _T, _i18n, _t
+from .theme import get_theme
 
 if TYPE_CHECKING:
     from ..state.linear import ReasoningRound
@@ -94,7 +95,7 @@ def _enforce_card_element_limit(
         if isinstance(child.get("content"), str) and "已折叠" in child["content"]:
             hint_idx = i
             break
-    _HINT_TEMPLATE = {"tag": "markdown", "content": "⚡ 还有 0 项已折叠", "text_size": "notation"}
+    _HINT_TEMPLATE = {"tag": "markdown", "content": f"{get_theme()['collapse_icon']} 还有 0 项已折叠", "text_size": "notation"}
     _HINT_TAG_COUNT = _count_tag_objects(_HINT_TEMPLATE)  # typically 1
     if hint_idx is None:
         total += _HINT_TAG_COUNT  # Reserve exact space for the new collapse hint
@@ -119,7 +120,7 @@ def _enforce_card_element_limit(
                 break
         if hint_idx is not None:
             # Parse existing trimmed count from hint, then add new trimmed count
-            # e.g. "⚡ 还有 5 项已折叠" → existing_count=5, trimmed_count=3 → "⚡ 还有 8 项已折叠"
+            # e.g. "💦 还有 5 项已折叠" → existing_count=5, trimmed_count=3 → "💦 还有 8 项已折叠"
             old_hint = children[hint_idx]["content"]
             # Extract the number before "项" — simple string parsing, no regex needed
             existing_count = 0
@@ -135,11 +136,11 @@ def _enforce_card_element_limit(
                 if _start < _end:
                     existing_count = int(old_hint[_start:_end])
             total_trimmed = existing_count + trimmed_count
-            children[hint_idx]["content"] = f"⚡ 还有 {total_trimmed} 项已折叠"
+            children[hint_idx]["content"] = f"{get_theme()['collapse_icon']} 还有 {total_trimmed} 项已折叠"
         else:
             children.insert(0, {
                 "tag": "markdown",
-                "content": f"⚡ 还有 {trimmed_count} 项已折叠",
+                "content": f"{get_theme()['collapse_icon']} 还有 {trimmed_count} 项已折叠",
                 "text_size": "notation",
             })
 

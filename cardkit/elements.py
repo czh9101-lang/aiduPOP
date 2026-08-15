@@ -11,6 +11,7 @@ from .md import (
     _split_long_text,
     optimize_markdown_style,
 )
+from .theme import get_theme, is_emoji_icon
 
 __all__ = [
     'STREAMING_ELEMENT_ID',
@@ -248,13 +249,18 @@ def build_panel_header(
     tools_count = len(tool_steps)
     elapsed_str = _format_elapsed(tool_elapsed_ms)
 
-    # 组装: ⚕model · 💭N · 🛠️N · ⏱elapsed（⚕紧贴 model，无空格；用单字符更清爽）
+    # 组装: ⚕model · 🫧N · ✨N · 🎶elapsed（v2.2.0 泡波样式，图标走 theme 层；⚕/· 保持）
+    th_panel = get_theme()["panel"]
     parts: list[str] = []
     model_disp = _format_model_display(model)
     if model_disp:
-        parts.append(f"⚕{model_disp}")
-    parts.extend([f"💭{rounds_count}", f"🛠️{tools_count}", f"⏱{elapsed_str}"])
-    stats = " · ".join(parts)
+        parts.append(f"{th_panel['model_prefix']}{model_disp}")
+    parts.extend([
+        f"{th_panel['rounds_icon']}{rounds_count}",
+        f"{th_panel['tools_icon']}{tools_count}",
+        f"{th_panel['elapsed_icon']}{elapsed_str}",
+    ])
+    stats = th_panel["separator"].join(parts)
 
     title_el = {
         "tag": "plain_text",
@@ -324,7 +330,7 @@ def build_panel_children(*, reasoning_rounds: list, current_reasoning_text: str 
             collapse_parts.append(f"{trimmed_rounds} 轮早期推理")
         if trimmed_tools > 0:
             collapse_parts.append(f"{trimmed_tools} 步早期操作")
-        collapse_text = "⚡ 还有 " + "、".join(collapse_parts) + "已折叠"
+        collapse_text = f"{get_theme()['collapse_icon']} 还有 " + "、".join(collapse_parts) + "已折叠"
         children.append({
             "tag": "markdown",
             "content": collapse_text,
@@ -473,12 +479,25 @@ def _build_tool_step_title(step: dict) -> dict:
     status = step.get("status", "running")
     status_info = _tool_status_info(status)
     title = step.get("title", step.get("name", "tool"))
+    icon_val = step.get("icon", "tool_02")
+    if is_emoji_icon(icon_val):
+        # v2.2.0 泡波样式: emoji 不能进 standard_icon token（渲染空白），
+        # 前置进 lark_md 文本、省略 icon 键（div 无 icon 合法，布局不变）
+        content = f"{icon_val} <font color='{status_info['color']}'>**{_escape_md(title)}**</font>"
+        return {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": content,
+                "text_size": "notation",
+            },
+        }
     content = f"<font color='{status_info['color']}'>**{_escape_md(title)}**</font>"
     return {
         "tag": "div",
         "icon": {
             "tag": "standard_icon",
-            "token": step.get("icon", "tool_02"),
+            "token": icon_val,
             "color": "grey",
         },
         "text": {
@@ -503,12 +522,24 @@ def _build_reasoning_round_title(round_index: int, elapsed_ms: float, finalized:
     if elapsed:
         text += f" · {elapsed}"
 
+    # v2.2.0 泡波样式: 轮次图标走 theme 层（默认 🌊）；emoji 前置进文本，token 走 standard_icon
+    round_icon = get_theme()["round_icon"]
+    if is_emoji_icon(round_icon):
+        content = f"{round_icon} <font color='{color}'>**{text}**</font>"
+        return {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": content,
+                "text_size": "notation",
+            },
+        }
     content = f"<font color='{color}'>**{text}**</font>"
     return {
         "tag": "div",
         "icon": {
             "tag": "standard_icon",
-            "token": "robot-add_outlined",
+            "token": round_icon,
             "size": "16px 16px",
             "color": "grey",
         },
@@ -826,7 +857,7 @@ def _render_footer_field(
     if name == "model":
         v = _format_model_display(data.get("model") or None)
         if v:
-            v = f"⚕{v}"  # 单字符 ⚕ 紧贴 model，无空格（飞书小字号更美观）
+            v = f"{get_theme()['footer']['model_prefix']}{v}"  # ⚕ 紧贴 model，无空格（飞书小字号更美观）
         return v, v
 
     if name == "tokens":
@@ -836,7 +867,7 @@ def _render_footer_field(
         if input_t or output_t:
             v = f"↑ {_compact(input_t)} ↓ {_compact(output_t)}"
             if reasoning_t:
-                v += f" 💭 {_compact(reasoning_t)}"
+                v += f" {get_theme()['footer']['reasoning_icon']} {_compact(reasoning_t)}"
             return v, v
         return None, None
 

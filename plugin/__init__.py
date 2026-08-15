@@ -175,20 +175,14 @@ def register(ctx: "PluginContext") -> None:
     except Exception:
         _logger.debug("config diagnostic log failed", exc_info=True)
 
-    _logger.info("hermes-lark-streaming v%s: deferring runtime patches (import-lock fix)...", __version__)
-    import threading as _threading
+    _logger.info("hermes-lark-streaming v%s: applying runtime patches...", __version__)
+    try:
+        from ..patching import apply_patches
 
-    def _deferred_apply_patches():
-        try:
-            from ..patching import apply_patches
-
-            apply_patches()
-            _logger.info("hermes-lark-streaming v%s: patches applied (deferred, check logs for per-module status)", __version__)
-        except Exception:
-            _logger.exception("hermes-lark-streaming v%s: failed to apply patches", __version__)
-
-    _patch_thread = _threading.Thread(target=_deferred_apply_patches, name="hls-deferred-patches", daemon=True)
-    _patch_thread.start()
+        apply_patches()
+        _logger.info("hermes-lark-streaming v%s: patches applied (check logs for per-module status)", __version__)
+    except Exception:
+        _logger.exception("hermes-lark-streaming v%s: failed to apply patches", __version__)
 
     # Pre-warm FeishuClient at registration to skip ~50-100ms latency on first card.
     try:

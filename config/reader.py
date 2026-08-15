@@ -262,6 +262,12 @@ class Config:
         """可选字号角色；缺省返回空映射，保持现有卡片 JSON 不变."""
         return _normalize_text_sizes(self._plugin_sec().get("text_sizes"))
 
+    @property
+    def theme(self) -> dict[str, Any]:
+        """v2.2.0 主题覆盖段（``hermes_lark_streaming.theme``）；缺省返回空映射 = 泡波默认样式."""
+        overlay = self._plugin_sec().get("theme")
+        return overlay if isinstance(overlay, dict) else {}
+
     def text_size(self, role: str) -> str:
         """Return element text_size value, using stable aliases for device maps."""
         return self.configured_text_size(role) or _TEXT_SIZE_DEFAULTS[role]

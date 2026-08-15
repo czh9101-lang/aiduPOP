@@ -114,52 +114,60 @@ def _basename_only(text: str) -> str:
         return text
     return os.path.basename(text.replace("\\", "/").rstrip("/"))
 
+# v2.2.0: "emoji" = 泡波样式图标（theme 层默认值，见 cardkit/theme.py）；
+# "icon" 保留官方 token 作为回退（theme 覆盖成 token 时走 standard_icon 渲染）。
 _TOOL_DESCRIPTORS: list[dict[str, Any]] = [
-    {"aliases": ["skill"], "icon": "app-default_outlined", "title": "Load skill", "sanitizer": None},
+    {"aliases": ["skill", "skill_view", "skill_manage", "skills_list"], "icon": "app-default_outlined", "emoji": "🤹🏻‍♀️", "title": "Load skill", "sanitizer": None},
     {
-        "aliases": ["read", "open"],
+        "aliases": ["read", "open", "read_file"],
         "icon": "file-link-text_outlined",
+        "emoji": "👩🏻‍🏫",
         "title": "Read",
         "sanitizer": "path",
         "no_result": True,
     },
     {
-        "aliases": ["write", "edit"],
+        "aliases": ["write", "edit", "write_file", "patch"],
         "icon": "edit_outlined",
+        "emoji": "👩🏻‍🎨",
         "title": "Edit",
         "sanitizer": "path",
         "no_result": True,
     },
     {
-        "aliases": ["web_search", "web-search", "search"],
+        "aliases": ["web_search", "web-search"],
         "icon": "search_outlined",
+        "emoji": "🕵🏻‍♀️",
         "title": "Search",
         "sanitizer": "search",
     },
     {
-        "aliases": ["web_fetch", "web-fetch", "fetch"],
+        "aliases": ["web_fetch", "web-fetch", "fetch", "web_extract"],
         "icon": "language_outlined",
+        "emoji": "👩🏻‍🚀",
         "title": "Fetch web page",
         "sanitizer": "url",
         "no_result": True,
     },
-    {"aliases": ["grep"], "icon": "doc-search_outlined", "title": "Search text", "sanitizer": "search"},
-    {"aliases": ["glob"], "icon": "folder_outlined", "title": "Search files", "sanitizer": "path"},
+    {"aliases": ["grep"], "icon": "doc-search_outlined", "emoji": "👩🏻‍🔬", "title": "Search text", "sanitizer": "search"},
+    {"aliases": ["glob", "search_files"], "icon": "folder_outlined", "emoji": "👮🏻‍♀️", "title": "Search files", "sanitizer": "path"},
     {
-        "aliases": ["exec", "bash", "command", "run"],
+        "aliases": ["exec", "bash", "command", "run", "terminal", "execute_code"],
         "icon": "setting_outlined",
+        "emoji": "👩🏻‍💻",
         "title": "Run command",
         "sanitizer": "command",
     },
     {
-        "aliases": ["browser", "playwright", "navigate"],
+        "aliases": ["browser", "playwright", "navigate", "browser_exec"],
         "icon": "browser-mac_outlined",
+        "emoji": "🥷🏻",
         "title": "Browser",
         "no_result": True,
     },
-    {"aliases": ["agent", "task", "spawn"], "icon": "robot_outlined", "title": "Run sub-agent"},
-    {"aliases": ["check", "determine", "verify"], "icon": "list-check_outlined", "title": "Check"},
-    {"aliases": ["summarize", "analyze", "prepare"], "icon": "report_outlined", "title": "Analyze"},
+    {"aliases": ["agent", "task", "spawn", "delegate", "delegate_task"], "icon": "robot_outlined", "emoji": "👷🏻‍♀️", "title": "Run sub-agent"},
+    {"aliases": ["check", "determine", "verify"], "icon": "list-check_outlined", "emoji": "👩🏻‍⚖️", "title": "Check"},
+    {"aliases": ["summarize", "analyze", "prepare", "vision_analyze"], "icon": "report_outlined", "emoji": "👩🏻‍🎓", "title": "Analyze"},
 ]
 
 def _resolve_tool_descriptor(name: str | None) -> dict[str, Any] | None:
@@ -277,6 +285,8 @@ class ToolUseTracker:
         """构建用于卡片渲染的步骤列表 — 与 openclaw 结构对齐."""
         if self._session is None:
             return []
+        from ..cardkit.theme import get_theme  # lazy: 避免 state→cardkit 顶层耦合
+        tool_icons = get_theme()["tool_icons"]
         steps = []
         for s in self._session.steps:
             desc = _resolve_tool_descriptor(s.name)
@@ -285,6 +295,11 @@ class ToolUseTracker:
                 base_title = f"{base_title} ({_format_duration_label(s.elapsed_ms)})"
             sanitizer = desc.get("sanitizer") if desc else None
             detail = _sanitize_detail(s.detail, sanitizer)
+            # v2.2.0 泡波样式: 图标默认走 theme emoji；theme 覆盖成官方 token 时回退 token
+            if desc:
+                icon = tool_icons.get(desc["aliases"][0], desc["emoji"])
+            else:
+                icon = tool_icons.get("fallback", "👩🏻‍🔧")
             steps.append(
                 {
                     "name": s.name,
@@ -293,7 +308,7 @@ class ToolUseTracker:
                     "detail": detail,
                     "output": s.output,
                     "error": s.error,
-                    "icon": desc["icon"] if desc else "setting-inter_outlined",
+                    "icon": icon,
                     "elapsed_ms": s.elapsed_ms,
                     "result_block": None if (desc and desc.get("no_result")) else s.result_block,
                     "error_block": s.error_block,

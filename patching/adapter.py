@@ -298,16 +298,14 @@ def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
 
 # ── Reaction → card status indicator (Phase 3) ─────────────────────
 
-# Map Feishu reaction emojis to human-readable status labels
-_REACTION_STATUS_MAP: dict[str, str] = {
-    "👀": "Reading",
-    "👍": "Done",
-    "🤔": "Thinking",
-    "⏳": "Processing",
-    "✅": "Completed",
-    "🔄": "Refreshing",
-    "📝": "Composing",
-}
+# Map Feishu reaction emojis to human-readable status labels.
+# v2.2.0 泡波样式（猴哥拍板，决策表③）；数据源 = theme 层。
+# 注: reaction 拦截默认关闭（嘟嘟定制），此映射为休眠数据，供开源启用方使用。
+def _build_reaction_status_map() -> dict[str, str]:
+    from ..cardkit.theme import get_theme  # lazy: patching→cardkit 不做顶层导入
+    return dict(get_theme()["reactions"])
+
+_REACTION_STATUS_MAP: dict[str, str] = _build_reaction_status_map()
 
 def _wrap_feishu_adapter_add_reaction(orig_add_reaction: Callable) -> Callable:
     """Intercept ``FeishuAdapter.add_reaction()`` — card status indicator."""

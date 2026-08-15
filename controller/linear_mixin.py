@@ -27,6 +27,7 @@ from ..cardkit.md import (
     escape_markdown_asterisks,
     optimize_markdown_style,
 )
+from ..cardkit.theme import get_theme
 from ..state.linear import UnifiedLinearState
 from ..state.text import split_reasoning_text
 from ..feishu import (
@@ -1035,11 +1036,11 @@ class UnifiedControllerMixin:
                                 if _start < _end:
                                     existing_count = int(old_hint[_start:_end])
                             total_trimmed = existing_count + trimmed_count
-                            children[hint_idx]["content"] = f"⚡ 还有 {total_trimmed} 项已折叠"
+                            children[hint_idx]["content"] = f"{get_theme()['collapse_icon']} 还有 {total_trimmed} 项已折叠"
                         else:
                             children.insert(0, {
                                 "tag": "markdown",
-                                "content": f"⚡ 还有 {trimmed_count} 项已折叠",
+                                "content": f"{get_theme()['collapse_icon']} 还有 {trimmed_count} 项已折叠",
                                 "text_size": "notation",
                             })
                         # Update panel's elements

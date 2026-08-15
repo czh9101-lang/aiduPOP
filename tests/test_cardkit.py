@@ -315,7 +315,7 @@ class TestBuildFooterElements:
             fields=[["tokens"]],
         )
         assert len(result) >= 2
-        assert "💭" in result[1]["content"]
+        assert "🫧" in result[1]["content"]  # v2.2.0 泡波: 推理 token 💭→🫧
 
     def test_tokens_without_reasoning_no_thinking_icon(self) -> None:
         result = _build_footer_elements(
@@ -323,7 +323,7 @@ class TestBuildFooterElements:
             fields=[["tokens"]],
         )
         assert len(result) >= 2
-        assert "💭" not in result[1]["content"]
+        assert "🫧" not in result[1]["content"]
 
 
 # --- 错误面板 ---

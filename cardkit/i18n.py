@@ -18,7 +18,7 @@ _T: dict[str, tuple[str, str]] = {
     "elapsed": ("Elapsed {}", "耗时 {}"),
     "context": ("Context {}", "上下文 {}"),
     "processing": ("⚕Hermesing…", "⚕Hermesing…"),  # ⚕紧贴无空格，对齐 panel header model
-    "processing_prefix": ("💭 Processing...", "💭 处理中..."),
+    "processing_prefix": ("💭 Processing...", "⚕Hermesing…"),  # v2.2.0 猴哥拍板: 中文对齐卡片 summary
     "thought": ("Thought", "思考"),
     "thinking_panel": ("Thinking", "思考中"),
     "thought_for": ("Thought for {}", "思考了 {}"),
@@ -43,11 +43,11 @@ _T: dict[str, tuple[str, str]] = {
     "cost_estimated": ("${} (est.)", "${} (估算)"),
     "cost_actual": ("${} (actual)", "${} (实报)"),
     "cost_included": ("Free", "免费"),
-    # ── Unified panel i18n ──
-    "agent_process": ("💭", "💭"),
-    "rounds": ("💭{}", "💭{}"),
-    "tools_count": ("🛠️{}", "🛠️{}"),
-    "round_n": ("Round {}", "第 {} 轮"),
+    # ── Unified panel i18n (v2.2.0 泡波样式: 中文 💭→🫧 🛠️→✨ 轮→波; 英文不动) ──
+    "agent_process": ("💭", "🫧"),
+    "rounds": ("💭{}", "🫧{}"),
+    "tools_count": ("🛠️{}", "✨{}"),
+    "round_n": ("Round {}", "第 {} 波"),
 }
 
 def _i18n(en: str, zh: str) -> dict[str, str]:

@@ -1,3 +1,29 @@
+## v2.2.0 (2026-08-16) — 爱嘟波泡卡 · 泡波样式主题化
+
+### 🎨 Added — 泡波样式主题层（Bubble Wave Theme）
+
+- **可配置主题层 `cardkit/theme.py`**：新增 `BUBBLE_WAVE` 出厂默认主题 + `get_theme()` 深度合并机制（配置键 `hermes_lark_streaming.theme` 覆盖）。出厂默认即泡波样式，用户零配置即可获得萌化视觉；进阶用户可通过配置层覆盖任意图标/文本，**不改一行源码**。
+- **工具图标全面 emoji 化**：13 个工具描述符（read/write/exec/web_search/grep/glob/browser/agent/check/analyze/skill 等）从飞书官方 token 图标替换为泡波 emoji 图标群（👩🏻‍🏫/👩🏻‍🎨/👩🏻‍💻/🕵🏻‍♀️/👩🏻‍🔬/👮🏻‍♀️/🥷🏻/👷🏻‍♀️/👩🏻‍⚖️/👩🏻‍🎓/🤹🏻‍♀️）。`is_emoji_icon()` 分类器智能分流：emoji 走文本渲染，官方 token 走 `standard_icon`，零冲突。
+- **i18n 文本泡波化**：5 处中文文本键萌化（`processing_prefix`→`⚕Hermesing…`、`agent_process`→`🫧`、`rounds`→`🫧{}`、`tools_count`→`✨{}`、`round_n`→`第 {} 波`），英文键保持不动（国际化安全铁律）。
+- **面板头部/折叠/footer 统一泡波视觉**：统计行 `⚕model · 🫧N · ✨N · 🎶elapsed`、轮次标题 `🌊`、折叠提示 `💦`、footer 推理 token `🫧`，统一水/气泡意象。
+- **reaction 表情映射**：7 个状态 reaction 统一为女性职业 emoji 群（Reading→👩🏻‍🏫、Done→🙆🏻‍♀️、Thinking→🧏🏻‍♀️ 等），数据为休眠配置，**结构守卫保持 reaction 拦截注释禁用**（嘟嘟定制不动）。
+
+### 🐛 Fixed
+
+- **工具别名漏配致 fallback 误显**：补齐嘟嘟 Hermes 0.20 真实工具名别名（`terminal`/`execute_code`→exec、`read_file`→read、`patch`→write、`search_files`→glob、`web_extract`→web_fetch、`browser_exec`→browser、`delegate_task`→agent、`vision_analyze`→analyze、`skill_view`/`skill_manage`/`skills_list`→skill），杜绝 terminal 误显兜底 👩🏻‍🔧 的漏配回归。
+- **`search` 前缀匹配歧义**：移除 `web_search` 描述符里的裸 `search` 别名（`_resolve_tool_descriptor` 前缀匹配会把 `search_files` 误中 `search`→web_search 的 🕵🏻‍♀️）。
+
+### 🧪 Test — v2.2.0 泡波样式锁定测试
+
+- 新增 `tests/test_v220.py`：工具图标断言、i18n 决策锁定、theme 层机制、**嘟嘟五大结构定制守卫**（无 header / 无 reaction 拦截 / answer 在 panel 之上 / panel 默认收起 / 无 footer）、嘟嘟真实工具名回归。共 38 个测试函数 / 84 项断言锁死泡波样式与结构不变。
+
+### 🏗️ Architecture — 开源原则铁律
+
+- **出厂默认 = 泡波样式**：`BUBBLE_WAVE` 作为 `get_theme()` 默认值，开源仓库开箱即用泡波视觉，无需任何私有定制。
+- **纯换皮不改结构**：v2.2.0 仅触碰 `i18n.py`/`tooluse.py`/`elements.py`/`adapter.py` 的图标与文本，**零触碰** `_model_cache`、贝氏防爆、长文反引号切片、`batch_update` 原子回滚、controller↔patching 延迟导入等稳定核心机制。
+
+---
+
 ## v2.1.3 (2026-08-14)
 
 ### 🐛 Fixed (P0)
@@ -165,7 +191,7 @@ Clarify 卡片失效复发修复 — hermes v0.19.0 升级后 clarify 退回纯�
 | 🐛 Bug Fix (P1) | 飞书消息反复显示「正在加载上下文...」无法正常完成，日志每轮刷 `unified flush batch_update failed: code=300315, msg=ErrMsg: not find elementID : context_loading_hint;`（用户「诺玛🌙」反馈） | `controller/linear_mixin.py` Phase 3 batch_update 的 except 块有 `is_schema_error` 分支但**缺 `is_element_not_found_error` 分支**（Phase 2 有，line 645）。最常见场景：Phase 2 在飞书侧成功删除了 `context_loading_hint` 元素（例如 Phase 2 await 抛网络异常但飞书已处理 batch），本地 `_creation_stages` / `existing_elements` 未同步 → Phase 3 safety net（line 793-798）检测到 loading_hint 还在 `existing_elements` 中 → 添加 `delete_elements` 操作 → 飞书 API 返回 300315（元素已被删除）→ 错误落入通用 `warning` 分支（line 851）→ `hint_removed` 仍未同步 + `existing_elements` 未 discard → 下轮 safety net 再次添加 delete → **死循环** → batch 原子失败导致 partial_update（面板内容）丢失 → 卡片卡在「正在加载上下文...」 | Phase 3 except 块 `is_schema_error` 之后、通用 warning 之前，**新增 `is_element_not_found_error` 分支**（与 Phase 2 对齐）：300315 = 元素不存在 = 非致命。同步本地标志位（`_creation_stages.add("hint_removed")` + `existing_elements.discard(_LOADING_HINT_ELEMENT_ID)`）→ 下次 flush safety net 不再触发 delete，死循环打破。**保留** `panel_dirty` / `tool_steps_dirty` → batch 中其他操作（partial_update）下轮重试。`info` 级别日志（不是 warning/error）— 不是真正的故障 (`controller/linear_mixin.py`) |
 | 🧪 Test | 新增 11 个回归测试覆盖 v1.4.1 三个修复点 | 防御性拦截 / 懒重打 / Phase 3 element_not_found 均为用户反馈的生产问题，需回归保障 | `TestWrapFeishuCardActionTriggerV141`（5 个：unknown action 抑制、hermes_action 放行、hermes_update_prompt_action 放行、空 action_value 抑制、clarify 仍拦截）；`TestPhase3ElementNotFoundV141`（2 个：300315 同步 hint + 保留 dirty、二次 flush 不再添加 delete 验证死循环打破）；`TestLazyRepatchV141`（4 个：函数存在、60s 节流、force 跳过节流、None class 不崩溃）(`tests/test_clarify_card.py`, `tests/test_controller.py`, `tests/test_monkey_patch.py`) |
 
-**审计方法**: 三方对齐求证，未盲信 bug 报告根因分析。①克隆 Gitee DEV 分支（HEAD=v1.4.0）分析插件代码，确认插件无 `/card` 命令（grep 全仓 "Routing card action|synthetic command|/card " 无匹配），clarify 卡片 select_static/input 全部携带 `hermes_clarify_action`，streaming 卡片无交互元素。②SSH 服务器（47.239.199.25, hermes v0.18.0 + 插件 v1.4.0）取证：服务器 clarify 拦截正常工作（`callback received action=select` → `confirmed (hard lock)`），无 `/card` 错误，无 300315 错误；启动日志铁证 deferred repatch 工作正常——替身 class_id=94212263706992，真身 class_id=94212274640752（不同对象），两者都 patched ✓。bug 报告者环境（hermes v0.17.0）2s/10s repatch 可能未覆盖其真身加载时机。③读 hermes core 源码（`/usr/local/lib/hermes-agent/plugins/platforms/feishu/adapter.py`）：`_on_card_action_trigger`（:2582）检查 `hermes_action`/`hermes_update_prompt_action`，其余路由 `_handle_card_action_event`（:2913）生成 `f"/card {action_tag}"` 合成 COMMAND（:2933），Gateway 不认识 → "Unknown command /card"。Phase 3 300315 根因经代码行级确认（Phase 2 line 645 有 is_element_not_found_error，Phase 3 line 840-851 缺）。906 单元测试通过（895 原有 + 11 新增回归），0 回归。
+**审计方法**: 三方对齐求证，未盲信 bug 报告根因分析。①克隆 Gitee DEV 分支（HEAD=v1.4.0）分析插件代码，确认插件无 `/card` 命令（grep 全仓 "Routing card action|synthetic command|/card " 无匹配），clarify 卡片 select_static/input 全部携带 `hermes_clarify_action`，streaming 卡片无交互元素。②SSH 服务器（47.239.x.x, hermes v0.18.0 + 插件 v1.4.0）取证：服务器 clarify 拦截正常工作（`callback received action=select` → `confirmed (hard lock)`），无 `/card` 错误，无 300315 错误；启动日志铁证 deferred repatch 工作正常——替身 class_id=94212263706992，真身 class_id=94212274640752（不同对象），两者都 patched ✓。bug 报告者环境（hermes v0.17.0）2s/10s repatch 可能未覆盖其真身加载时机。③读 hermes core 源码（`/usr/local/lib/hermes-agent/plugins/platforms/feishu/adapter.py`）：`_on_card_action_trigger`（:2582）检查 `hermes_action`/`hermes_update_prompt_action`，其余路由 `_handle_card_action_event`（:2913）生成 `f"/card {action_tag}"` 合成 COMMAND（:2933），Gateway 不认识 → "Unknown command /card"。Phase 3 300315 根因经代码行级确认（Phase 2 line 645 有 is_element_not_found_error，Phase 3 line 840-851 缺）。906 单元测试通过（895 原有 + 11 新增回归），0 回归。
 
 **已知限制**:
 - Issue 1（/card）的懒重打补丁仅在 `pre_gateway_dispatch` 触发时生效。若用户首条交互是点击卡片（而非发消息），懒重打不会运行；但 v1.4.0 的 2s/10s 固定调度仍作为兜底。服务器 v0.18.0 实测 deferred repatch 正常，bug 报告者 v0.17.0 环境建议升级到 v0.18.0+

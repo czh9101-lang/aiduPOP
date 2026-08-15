@@ -14,7 +14,7 @@
 美不是装饰，而是信息该在的位置，刚好在那里。
 ```
 
-[![Version](https://img.shields.io/badge/version-2.1.3-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.2.0-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
@@ -35,6 +35,7 @@
 
 | 层级 | 做什么 | 核心特性 |
 |------|--------|----------|
+| 🫧 **泡波** | 出厂即萌化视觉 | v2.2.0 主题层：工具 emoji、思考波浪 🌊、统计气泡 🫧✨，零配置开箱即用 |
 | ⚡ **即时** | 第一个 token 就见卡片 | 无「正在输入」提示，无「回复：」狗皮膏药 |
 | 🎨 **水晶** | 每个元素都有理由 | Answer 在上、Panel 在下，footer 默认清空 |
 | 🚦 **状态** | 一眼看清结果 | 绿色完成 / 红色中止 / 黄色报错，颜色编码 |
@@ -260,11 +261,22 @@ aiduPOP/
 
 ## CHANGELOG
 
+### v2.2.0 (2026-08-16) — 爱嘟波泡卡 · 泡波样式主题化
+
+* 🎨 **泡波样式主题层 `cardkit/theme.py`**：新增 `BUBBLE_WAVE` 出厂默认主题 + `get_theme()` 深度合并机制（配置键 `hermes_lark_streaming.theme` 覆盖）。零配置开箱即用泡波视觉，进阶用户可覆盖任意图标/文本而不改源码。
+* 🧰 **工具图标全面 emoji 化**：13 个工具描述符从飞书官方 token 替换为泡波 emoji 图标群（👩🏻‍🏫/👩🏻‍🎨/👩🏻‍💻/🕵🏻‍♀️/👩🏻‍🔬/👮🏻‍♀️/🥷🏻/👷🏻‍♀️/👩🏻‍⚖️/👩🏻‍🎓/🤹🏻‍♀️），`is_emoji_icon()` 分类器智能分流 emoji/token 渲染路径。
+* 💬 **i18n 文本泡波化**：5 处中文文本键萌化（`processing_prefix`→`⚕Hermesing…`、`agent_process`→`🫧`、`rounds`→`🫧{}`、`tools_count`→`✨{}`、`round_n`→`第 {} 波`），英文键保持不动。
+* 🐛 **工具别名漏配修复**：补齐嘟嘟 Hermes 0.20 真实工具名别名（terminal/execute_code/read_file/patch/search_files/web_extract/browser_exec/delegate_task/vision_analyze/skill_view 等），杜绝 terminal 误显兜底 emoji；移除裸 `search` 前缀歧义别名。
+* 🧪 **v2.2.0 锁定测试**：新增 `tests/test_v220.py`，逐字断言泡波决策 + 嘟嘟五大结构定制守卫（无 header / 无 reaction 拦截 / answer 在 panel 之上 / panel 默认收起 / 无 footer）。
+* 🏗️ **纯换皮不改结构**：仅触碰 i18n/tooluse/elements/adapter 的图标与文本，零触碰 `_model_cache`、贝氏防爆、长文切片、`batch_update` 原子回滚等稳定核心。
+
+完整版本历史见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+
 ### v2.1.3 (2026-08-14)
 
-* 🐛 **Hermes CLI 导入死锁根治 (P0)**: 修复在 Hermes Agent 启动时，`model_tools` 模块级导入与后台插件发现线程之间的 Python `import_lock` 死锁。将 `apply_patches()` 从同步调用改为异步守护线程延迟执行，彻底消除 `hermes` CLI 终端启动卡死问题。
-* 🏷️ **飞书品牌表述统一**: 中文名称统一为“Hermes爱嘟飞书流式卡片”，英文品牌文案统一使用 “Lark (Feishu)”。
-* 📱 **设备差异化字号 (Issue #4)**: 支持通过 `hermes_lark_streaming.text_sizes` 配置 PC 与手机端差异化字号。
+* 🐛 **Hermes CLI 导入死锁根治 (P0)**：修复 `model_tools` 模块级导入与后台插件发现线程之间的 Python `import_lock` 死锁。将 `apply_patches()` 改为异步守护线程延迟执行，彻底消除 `hermes` CLI 终端启动卡死。
+* 🏷️ **飞书品牌表述统一**：中英文名称统一为 “Lark (Feishu)”。
+* 📱 **设备差异化字号 (Issue #4)**：新增 `hermes_lark_streaming.text_sizes`，支持 PC 与手机端差异化字号。
 
 ### v2.1.2 (2026-08-07)
 

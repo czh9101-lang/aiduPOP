@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-2.1.3-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.0-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 
 为 Hermes Agent 提供飞书 CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、统一可折叠面板、按时间线交错显示推理与工具调用等。
 
-> 当前版本：**2.1.3**。这是补丁修复版本，重点根除 Hermes CLI 终端启动时的 import_lock 导入死锁问题，统一飞书品牌表述并支持设备差异化字号。
+> 当前版本：**2.2.0**。泡波样式主题化版本：新增可配置 theme 层，工具图标/i18n/面板视觉全面 emoji 化（出厂默认即泡波样式）。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >
@@ -126,7 +126,7 @@ $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py doctor
 
 ```yaml
 hermes_lark_streaming:
-  enabled: true                    # 启用流式卡片
+  enabled: true                    # 启用泡波卡
   linear: true                     # 线性模式：单卡片原地更新（统一面板架构）
   panel_expanded: false            # 完成态卡片中面板是否保持展开
   streaming_panel_expanded: false  # 流式态卡片中面板是否保持展开
