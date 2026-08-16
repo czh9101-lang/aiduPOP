@@ -17,6 +17,10 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.scripts]
+aidupop = "hermes_lark_streaming.__main__:main"
+aidupop-studio = "hermes_lark_streaming.studio.server:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
@@ -46,13 +50,19 @@ packages = [
     "hermes_lark_streaming.patching",
     "hermes_lark_streaming.plugin",
     "hermes_lark_streaming.state",
+    "hermes_lark_streaming.studio",
 ]
 
 [tool.setuptools.package-dir]
 hermes_lark_streaming = "."
 
 [tool.setuptools.package-data]
-hermes_lark_streaming = ["plugin.yaml"]
+hermes_lark_streaming = [
+    "plugin.yaml",
+    "studio/web/*",
+    "studio/web/css/*",
+    "studio/web/js/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,10 +1,10 @@
 # aiduPOP⚕爱嘟泡波卡 — Hermes Agent 飞书泡波卡
 
 <p align="center">
-  <img src="docs/images/aidupop-banner-wide.jpg" alt="aiduPOP Gem Banner" width="100%">
+  <img src="docs/images/aidupop-banner-wide.jpg" alt="aiduPOP 爱嘟波泡卡 · 泡波样式横幅" width="100%">
 </p>
 
-> **水晶与蓝宝石理念——够简洁，够透明，够美**
+> **泡波样式（Bubble Wave）——够灵动，够透明，够治愈**
 >
 > **不只是卡片 — 是对话本身。**
 
@@ -14,7 +14,7 @@
 美不是装饰，而是信息该在的位置，刚好在那里。
 ```
 
-[![Version](https://img.shields.io/badge/version-2.2.1-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
@@ -31,19 +31,20 @@
 
 **aiduPOP⚕爱嘟泡波卡**是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书泡波卡插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
 
-基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduPOP 在其之上做了一套完整的**水晶化改造**：
+基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduPOP 在其之上做了一套完整的**泡波样式（Bubble Wave）改造**：
 
 | 层级 | 做什么 | 核心特性 |
 |------|--------|----------|
 | 🫧 **泡波** | 出厂即萌化视觉 | v2.2.0 主题层：工具 emoji、思考波浪 🌊、统计气泡 🫧✨，零配置开箱即用 |
 | ⚡ **即时** | 第一个 token 就见卡片 | 无「正在输入」提示，无「回复：」狗皮膏药 |
-| 🎨 **水晶** | 每个元素都有理由 | Answer 在上、Panel 在下，footer 默认清空 |
+| 🎨 **可视化配置（v2.3.0 新增）** | 挑 emoji / 排布 panel 与 footer 不改代码 | `aidupop studio` 打开可视化工作坊，所见即所得预览飞书卡片，保存即热生效 |
+| 💠 **极简** | 每个元素都有理由 | Answer 在上、Panel 在下，footer 默认清空 |
 | 🚦 **状态** | 一眼看清结果 | 绿色完成 / 红色中止 / 黄色报错，颜色编码 |
 | 🔍 **透明** | 看清 AI 每一步 | 可展开面板：思考轮次、工具调用、时间戳 |
 | 🃏 **交互** | 卡片里直接回答 | 原生 Cardsuit 2.0 clarify 选项卡 + 回调 |
 | 🛡️ **韧性** | 失败不掉回纯文本 | Phase 2 原子回滚补救、卡片重建自动重试 |
 
-> Crystal — 爱嘟宝石系列的第一颗 💎
+> 🫧 泡波样式 · 爱嘟波泡卡 —— 让 AI 的每一步思考，都像水面上的泡泡一样清澈可见
 
 ---
 
@@ -198,13 +199,47 @@ hermes_lark_streaming:
 
 ---
 
+## 🎨 可视化配置工作坊（v2.3.0 · 可选）
+
+不想手写 YAML？`aidupop studio` 提供一个**纯本地、零第三方依赖**的可视化配置工作坊，让你像挑贴纸一样调整泡波卡外观。
+
+```bash
+aidupop studio                 # 默认 127.0.0.1:8765，自动打开浏览器
+aidupop studio --port 8770     # 指定端口
+aidupop studio --no-browser    # 不自动打开浏览器
+# 或：python -m hermes_lark_streaming studio
+```
+
+能配什么：
+
+- **工具 Emoji**：13 个工具图标（读/写/搜/执行/浏览器/子代理…）逐项「当前 → 替换」，手动输入或点选，仅接受 Emoji
+- **Panel 统计栏**：模型前缀、轮次、工具数、耗时图标与分隔符
+- **Footer 矩阵**：勾选 `model` / `tokens` / `elapsed` / `status` / `context` 的行列排布与标签开关
+- **流式与字号**：面板默认展开、打字机步长、刷新节流、CardKit 2.0 字号
+- **一键预设**：泡波样式 / 经典工作流 / 极简极客，随时一键换肤或重置
+- **所见即所得预览**：内置 1:1 飞书 CardKit 2.0 卡片仿真，改动实时重绘
+
+保存后：写入 `~/.hermes/config.yaml` 并触发 `Config().reload()`，**秒级热生效、无需重启网关**。
+
+安全设计（面向开源用户）：
+
+- 仅监听回环地址（loopback-only），拒绝非本机 `Host` 请求，无通配 CORS，防 CSRF / DNS-rebinding
+- 只深合并 UI 管理的键，`feishu` 凭证与其它自定义键**原样保留、绝不覆盖**
+- 现有配置无法解析时**拒绝写入**并报错，先备份再原子写回（`~/.hermes/backups/`）
+- 服务端复核 Emoji 取值与结构，非法请求返回 400
+
+> 这是**可选工具**：杭州生产网关不使用；开源用户按需启用即可。
+
+---
+
 ## 🔧 定制说明
 
 相对上游 v1.6.0 的完整定制清单详见 [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md)，版本演进见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ### 核心特性
 
-- **🎨 水晶设计** — 简洁美观，没有多余元素
+- **🫧 泡波样式** — 出厂即萌化视觉，emoji 工具图标 + 水波气泡意象，`aidupop studio` 可视化自定义
+- **💠 极简设计** — 简洁美观，没有多余元素
 - **⚡ 即时响应** — 没有「正在输入」提示，卡片即时出现
 - **🚦 颜色编码面板** — 绿色（完成）、红色（中止）、黄色（报错）
 - **🔍 透明追踪** — 可展开面板，显示完整推理和工具调用
@@ -260,6 +295,15 @@ aiduPOP/
 </p>
 
 ## CHANGELOG
+
+### v2.3.0 (2026-08-17) — 爱嘟波泡卡 · 可视化配置工作坊（Visual Card Studio）
+
+* 🎨 **可视化配置工作坊 `studio/`**：新增 `aidupop studio` 命令，启动纯本地零第三方依赖的 Web 工作坊。可视化配置工具 Emoji、Panel 统计栏、Footer 矩阵、流式与字号，内置 1:1 飞书 CardKit 2.0 卡片实时仿真预览（所见即所得），品牌视觉对齐 aiduMEI（纯白纸底 + 深蓝点睛 + 三原色随机六边形背景 + 双侧 slogan）。
+* ⚡ **保存即热生效**：写入 `~/.hermes/config.yaml` 后触发 `Config().reload()`，秒级生效、无需重启网关；亦提供尽力而为的 `systemctl` 重启入口（如实回报结果）。
+* 🛡️ **安全加固（面向开源）**：仅监听回环地址并校验本机 `Host`（防 CSRF / DNS-rebinding），去除通配 CORS；POST 结构与 Emoji 取值服务端复核。
+* 🔒 **配置零丢失**：只深合并 UI 管理的键，`feishu` 凭证及 `print_strategy`、`reactions`、用户自定义键原样保留；现有配置无法解析时拒绝写入并报错，先备份、后原子写回。
+* 🧪 **测试**：新增 `tests/test_v230_studio.py`（22 项），覆盖深合并保配置、读失败拒写、payload/Emoji 校验、Host 门禁、静态资源与无 Header 残留；全量测试通过。
+* 🏗️ **纯增量不改核心**：Studio 为独立可选模块，杭州生产网关不加载；泡波样式与五大结构定制守卫全部不动。
 
 ### v2.2.1 (2026-08-16) — 爱嘟波泡卡 · 工程卫生加固
 

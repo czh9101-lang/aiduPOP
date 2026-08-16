@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>aiduPOP⚕爱嘟波泡卡</title>
+<meta name="description" content="aiduPOP Studio — Lark CardKit v2.0 Visual Config & Realtime Simulator" />
+<meta name="author" content="monkey²" />
+<meta name="theme-color" content="#1f4e79" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%AB%A7%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- random hexagon backdrop (aiduMEI DNA), filled by JS -->
+  <div class="hex-bg" id="hexBg"></div>
+
+  <!-- Brandbar (centered, aiduMEI) -->
+  <header class="brandbar">
+    <div class="brandbar-inner">
+      <span class="foot-left">
+        <span class="badge-version">v2.3.0</span>
+      </span>
+      <span class="foot-right">
+        Powered by <b>monkey²</b>
+        <a class="gh-link" href="https://github.com/monkey2jack/aiduPOP" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </span>
+    </div>
+  </header>
+
+  <!-- Masthead: bilateral slogans + centered logo+name in single line (aiduMEI DNA) -->
+  <div class="masthead">
+    <div class="slogan slogan-cn" aria-hidden="true">
+      <span class="row row--1">爱嘟</span>
+      <span class="row row--2">唯吾</span>
+      <span class="row row--3">智助</span>
+    </div>
+
+    <div class="mast-center">
+      <div class="site-brand">
+        <span class="brand-logo-bubble">🫧</span>
+        <span class="wordmark"><span class="lbl">aidu</span><b>POP</b><i class="sep">⚕</i><span class="lbl">爱嘟</span><span class="cn">波泡卡</span></span>
+      </div>
+      <div class="site-tagline">流式卡片可视化工作坊</div>
+    </div>
+
+    <div class="slogan slogan-en" aria-hidden="true">
+      <span class="row row--1">aidu</span>
+      <span class="row row--2">I do</span>
+      <span class="row row--3">AI do</span>
+    </div>
+  </div>
+
+  <!-- Main Stage -->
+  <main class="stage">
+    <div class="preset-bar">
+      <span class="label">一键预设:</span>
+      <div id="presetBtns"></div>
+    </div>
+
+    <section class="config-box">
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="tabTools">工具 Emoji</button>
+        <button class="tab-btn" data-tab="tabPanel">Panel 统计栏</button>
+        <button class="tab-btn" data-tab="tabFooter">Footer 矩阵</button>
+        <button class="tab-btn" data-tab="tabAdvanced">流式与字号</button>
+      </nav>
+
+      <!-- Tab: Tools Emoji (Compact 1-Page Layout) -->
+      <div class="tab-content active" id="tabTools">
+        <p class="section-hint">左「当前」为生效图标，右「替换」框可手动输入 Emoji 或点 🎨 挑选。支持一屏快速完成配置。</p>
+        <div class="emoji-grid-2col" id="toolRows"></div>
+        <div class="form-section-title" style="margin-top:10px;">🌊 轮次与折叠</div>
+        <div class="emoji-grid-2col" id="miscIconRows"></div>
+      </div>
+
+      <!-- Tab: Panel -->
+      <div class="tab-content" id="tabPanel">
+        <div class="form-section-title">🫧 统计栏图标与前缀 (Panel Header)</div>
+        <p class="section-hint">面板头部统计行的组装：⚕模型 · 🫧轮次 · ✨工具 · 🎶耗时。</p>
+        <div id="panelIconRows"></div>
+
+        <div class="field-row">
+          <div>
+            <span class="field-label">模型前缀符号 (model_prefix)</span>
+            <span class="field-hint">纯文本前缀，紧贴模型名（默认 ⚕）</span>
+          </div>
+          <input type="text" class="text-input" data-prop="theme.panel.model_prefix" value="⚕" />
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-label">项目分隔符 (separator)</span>
+            <span class="field-hint">各统计项之间的连接符（默认 · ）</span>
+          </div>
+          <input type="text" class="text-input" data-prop="theme.panel.separator" value=" · " />
+        </div>
+      </div>
+
+      <!-- Tab: Footer -->
+      <div class="tab-content" id="tabFooter">
+        <div class="form-section-title">📋 卡片底部字段 (Footer Matrix)</div>
+        <p class="section-hint">点击勾选/取消字段，即刻改变卡片底部展示（嘟嘟定制版默认隐藏）。</p>
+        <div class="footer-tags" id="footerTagsWrap"></div>
+
+        <div class="field-row" style="margin-top:18px;">
+          <div>
+            <span class="field-label">显示字段标签 (show_label)</span>
+            <span class="field-hint">是否带「耗时:」「上下文:」等中英文描述</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" data-bool="footer.show_label" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="form-section-title">🫧 Footer 图标</div>
+        <div id="footerIconRows"></div>
+      </div>
+
+      <!-- Tab: Advanced -->
+      <div class="tab-content" id="tabAdvanced">
+        <div class="form-section-title">⚙️ 面板展开与打字机</div>
+        <div class="field-row">
+          <div>
+            <span class="field-label">终态面板默认展开 (panel_expanded)</span>
+            <span class="field-hint">回答完成后面板是否默认展开</span>
+          </div>
+          <label class="switch"><input type="checkbox" data-bool="panel_expanded" /><span class="slider"></span></label>
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-label">流式中面板展开 (streaming_panel_expanded)</span>
+            <span class="field-hint">生成过程中面板是否实时展开</span>
+          </div>
+          <label class="switch"><input type="checkbox" data-bool="streaming_panel_expanded" /><span class="slider"></span></label>
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-label">打字机渲染步长 (print_step)</span>
+            <span class="field-hint">每次流式刷新字符数 (1~10，默认 4)</span>
+          </div>
+          <input type="number" min="1" max="10" class="text-input" style="width:80px;" data-prop="print_step" value="4" />
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-label">刷新节流间隔 (flush_interval_ms)</span>
+            <span class="field-hint">飞书 API 刷帧间隔毫秒 (70~2000，默认 200)</span>
+          </div>
+          <input type="number" min="70" max="2000" class="text-input" style="width:90px;" data-prop="flush_interval_ms" value="200" />
+        </div>
+
+        <div class="form-section-title">🔤 CardKit 2.0 字号</div>
+        <div class="field-row">
+          <div><span class="field-label">正文字号 (body)</span></div>
+          <input type="text" class="text-input" data-prop="text_sizes.body" value="normal_v2" />
+        </div>
+        <div class="field-row">
+          <div><span class="field-label">面板字号 (panel)</span></div>
+          <input type="text" class="text-input" data-prop="text_sizes.panel" value="notation" />
+        </div>
+        <div class="field-row">
+          <div><span class="field-label">提示字号 (notice)</span></div>
+          <input type="text" class="text-input" data-prop="text_sizes.notice" value="notation" />
+        </div>
+      </div>
+
+      <div class="action-bar">
+        <div class="action-bar-left">
+          <button class="btn btn-secondary" onclick="App.applyPreset('bubble_wave')">重置泡波默认</button>
+          <button class="btn btn-preview" onclick="App.openPreview()">🫧 预览飞书卡片效果</button>
+        </div>
+        <div class="action-bar-right">
+          <button class="btn btn-secondary" onclick="App.restartGateway()">重启网关</button>
+          <button class="btn btn-primary" onclick="App.saveConfig()">💾 保存并热生效</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Preview Modal -->
+  <div class="modal-overlay" id="previewModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>📱 飞书 CardKit 2.0 实时仿真</h3>
+        <button class="modal-close" onclick="App.closePreview()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-controls">
+          <button class="btn-mode active" data-mode="completed" onclick="CardPreview.setMode('completed')">终态卡片</button>
+          <button class="btn-mode" data-mode="streaming" onclick="CardPreview.setMode('streaming')">流式进行中</button>
+        </div>
+        <div class="feishu-simulator">
+          <div class="feishu-message-row">
+            <div class="feishu-avatar">🫧</div>
+            <div class="feishu-card" id="feishuCardContent"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Emoji Picker Modal -->
+  <div class="modal-overlay" id="emojiModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>挑选 Emoji 图标</h3>
+        <button class="modal-close" onclick="App.closeEmojiPicker()">✕</button>
+      </div>
+      <div class="modal-body" id="emojiModalBody"></div>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <script src="js/hexbg.js"></script>
+  <script src="js/emoji_data.js"></script>
+  <script src="js/card_preview.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

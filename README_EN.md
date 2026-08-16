@@ -1,6 +1,6 @@
 # aiduPOP⚕爱嘟泡波卡 — Hermes Aidu Streaming Card
 
-> **Crystal philosophy — clean enough, transparent enough, beautiful enough.**
+> **Bubble Wave style — lively enough, transparent enough, soothing enough.**
 >
 > **Not just a card — the conversation itself.**
 
@@ -10,7 +10,7 @@ Transparent is not dumping logs, but letting you see what the AI is thinking at 
 Beautiful is not decoration, but the right information being exactly where it belongs.
 ```
 
-[![Version](https://img.shields.io/badge/version-2.2.1-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -27,18 +27,19 @@ Beautiful is not decoration, but the right information being exactly where it be
 
 **aiduPOP⚕爱嘟泡波卡** is a streaming card plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) on Feishu/Lark — rendering the AI's answer and reasoning process in real time, clearly and elegantly.
 
-Built on top of [Aowen-Nowor's hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0, aiduPOP adds a complete **crystallization** layer:
+Built on top of [Aowen-Nowor's hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0, aiduPOP adds a complete **Bubble Wave** styling layer:
 
 | Layer | What it does | Key feature |
 |-------|-------------|-------------|
 | ⚡ **Instant** | Card appears on the first token | No typing indicator, no "replying to…" patch |
-| 🎨 **Crystal** | Every element has a reason | Answer on top, panel below, footer empty by default |
+| 🎨 **Visual config (new in v2.3.0)** | Pick emoji / arrange panel & footer without editing code | `aidupop studio` opens a visual studio with a live 1:1 Feishu card preview; save applies instantly (hot reload) |
+| 💠 **Minimal** | Every element has a reason | Answer on top, panel below, footer empty by default |
 | 🚦 **State** | Result at a glance | Color-coded: green done / red stopped / yellow error |
 | 🔍 **Transparent** | See every step | Expandable panel: thought rounds, tool calls, timestamps |
 | 🃏 **Interactive** | Answer inside the card | Native Cardsuit 2.0 clarify options + callback |
 | 🛡️ **Resilient** | Never falls back to plain text | Phase 2 rollback recovery, auto card recreation |
 
-> Crystal — the first gem in the Aidu collection 💎
+> 🫧 Bubble Wave · aiduPOP — every step of the AI's thinking, as clear as bubbles on water
 
 ---
 
@@ -185,13 +186,47 @@ The single source of truth for the version is the `version` field in `plugin.yam
 
 ---
 
+## 🎨 Visual Card Studio (v2.3.0 · optional)
+
+Don't want to hand-edit YAML? `aidupop studio` launches a **fully local, zero-third-party-dependency** visual studio to tune the Bubble Wave look like picking stickers.
+
+```bash
+aidupop studio                 # default 127.0.0.1:8765, opens the browser
+aidupop studio --port 8770     # custom port
+aidupop studio --no-browser    # do not open the browser
+# or: python -m hermes_lark_streaming studio
+```
+
+What you can configure:
+
+- **Tool emoji**: 13 tool icons (read/write/search/exec/browser/agent…) with a per-slot "current → replacement" swap; type an emoji or pick one (emoji-only)
+- **Panel stats bar**: model prefix, rounds, tool count, elapsed icons and separator
+- **Footer matrix**: toggle `model` / `tokens` / `elapsed` / `status` / `context` row/column layout and labels
+- **Streaming & sizes**: panel default-expand, typewriter step, flush throttle, CardKit 2.0 text sizes
+- **One-click presets**: Bubble Wave / Classic Workflow / Cyber Minimal, re-skin or reset anytime
+- **WYSIWYG preview**: built-in 1:1 Feishu CardKit 2.0 card simulator that redraws in real time
+
+On save: writes `~/.hermes/config.yaml` and triggers `Config().reload()` — **applies within seconds, no gateway restart needed**.
+
+Security by design (for open-source users):
+
+- Loopback-only; rejects non-local `Host` requests; no wildcard CORS (guards against CSRF / DNS-rebinding)
+- Deep-merges only UI-managed keys; `feishu` credentials and any custom keys are **preserved, never clobbered**
+- Refuses to write when the existing config cannot be parsed; backs up first, then writes atomically (`~/.hermes/backups/`)
+- Server-side re-validation of emoji values and payload structure; invalid requests return 400
+
+> This is an **optional tool**: the Hangzhou production gateway does not use it; open-source users enable it on demand.
+
+---
+
 ## 🔧 Customizations
 
 See [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the full list of customizations over upstream v1.6.0, and [docs/CHANGELOG.md](docs/CHANGELOG.md) for version history.
 
 ### Key Features
 
-- **🎨 Crystal Design** — Clean, minimal UI with no unnecessary elements
+- **🫧 Bubble Wave Style** — Cute-by-default visuals: emoji tool icons + water/bubble motifs, customizable via `aidupop studio`
+- **💠 Minimal Design** — Clean, minimal UI with no unnecessary elements
 - **⚡ Instant Response** — No typing indicators, cards appear immediately
 - **🚦 Color-Coded Panels** — Green (completed), Red (stopped), Yellow (error)
 - **🔍 Transparent Trace** — Expandable panel shows full reasoning and tool calls
@@ -201,6 +236,17 @@ See [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the full list of custom
 - **📊 Model Display** — Stable model name display without flickering
 
 ---
+
+## What's new in 2.3.0
+
+Visual Card Studio — an optional, fully local visual configuration UI.
+
+- **🎨 Visual Card Studio (`studio/`)**: New `aidupop studio` command launches a zero-third-party-dependency local web studio. Visually configure tool emoji, the panel stats bar, the footer matrix, and streaming/sizes, with a built-in 1:1 Feishu CardKit 2.0 live card preview (WYSIWYG). Brand visuals align with aiduMEI (paper-white base + deep-blue accents + tri-color random hexagon backdrop + bilateral slogans).
+- **⚡ Save = hot apply**: Writes `~/.hermes/config.yaml` then triggers `Config().reload()` — applies within seconds, no gateway restart; a best-effort `systemctl` restart entry is also provided (honestly reported).
+- **🛡️ Security hardening (open-source)**: Loopback-only with local `Host` validation (guards CSRF / DNS-rebinding), no wildcard CORS; server-side re-validation of POST structure and emoji values.
+- **🔒 Zero config loss**: Deep-merges only UI-managed keys; `feishu` credentials plus `print_strategy`, `reactions`, and user-authored keys are preserved; refuses to write when the existing config is unparseable; backs up then writes atomically.
+- **🧪 Tests**: New `tests/test_v230_studio.py` (22 cases) covering merge-preserves-config, refuse-write-on-read-error, payload/emoji validation, Host gate, static assets, and no-header residue; full suite passing.
+- **🏗️ Additive, non-invasive**: Studio is an independent optional module; the Hangzhou production gateway does not load it. Bubble Wave theme and the five structural guards are untouched.
 
 ## What's new in 2.2.1
 

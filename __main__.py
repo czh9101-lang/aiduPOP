@@ -128,16 +128,39 @@ def main() -> int:
         return _cmd_python()
     if cmd == "doctor":
         return _cmd_doctor()
+    if cmd == "studio":
+        return _cmd_studio(args[1:])
 
     print(f"Unknown command: {cmd}")
     _print_usage()
     return 1
+
+def _cmd_studio(extra_args: list[str]) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="aidupop studio",
+        description="aiduPOP Visual Studio (v2.3.0) — optional visual config UI",
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8765, help="Port to listen (default: 8765)")
+    parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
+    parsed = parser.parse_args(extra_args)
+
+    try:
+        from hermes_lark_streaming.studio.server import run_studio_server
+    except (ImportError, ValueError):
+        from studio.server import run_studio_server
+
+    return run_studio_server(
+        host=parsed.host, port=parsed.port, open_browser=not parsed.no_browser
+    )
 
 def _print_usage() -> None:
     print("Usage: python -m hermes_lark_streaming <command>")
     print("   or: python /path/to/hermes-lark-streaming/__main__.py <command>")
     print()
     print("Commands:")
+    print("  studio     Launch the Visual Card Studio web interface (v2.3.0)")
     print("  status     Show current configuration and credentials status")
     print("  verify     Verify environment compatibility")
     print("  doctor     Full diagnostic: version, config, credentials, patch status, log path")

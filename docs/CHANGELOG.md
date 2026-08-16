@@ -1,3 +1,34 @@
+## v2.3.0 (2026-08-17) — 爱嘟波泡卡 · 可视化配置工作坊（Visual Card Studio）
+
+### 🎨 Added — 可视化配置工作坊
+
+- **`studio/` 独立可选模块 + `aidupop studio` 命令**：启动纯本地、零第三方依赖（仅标准库 `http.server`）的 Web 配置工作坊。可视化配置工具 Emoji、Panel 统计栏、Footer 矩阵、流式与字号，内置 1:1 飞书 CardKit 2.0 卡片实时仿真预览（所见即所得，支持终态/流式两种视图）。
+- **品牌视觉对齐 aiduMEI**：纯白纸底（`#ffffff`）+ 墨黑（`#000000`）+ 深蓝点睛（`#1f4e79`）+ 冷灰（`#525252`），三原色随机六边形背景，单行 logo+站名（`🫧 aidu`(灰)`POP`(蓝)`⚕`(黑)`爱嘟`(灰)`波泡卡`(蓝)），双侧对称 slogan（爱嘟/唯吾/智助、aidu/I do/AI do）。
+- **一键预设**：泡波样式（Bubble Wave）/ 经典工作流 / 极简极客，随时换肤或重置为出厂泡波默认。
+- **「当前 → 替换」交互**：每个图标行左显生效值、右为手动输入框（仅接受 Emoji，实时校验并拒绝 ASCII token），并提供 🎨 分类挑选器。
+
+### ⚡ Added — 保存即热生效
+
+- 保存写入 `~/.hermes/config.yaml` 后触发 `Config().reload()`，秒级生效、无需重启网关；另提供尽力而为的 `systemctl --user restart hermes-gateway` 入口，如实回报（无 systemctl 返回 `restarted:false`，超时 504，失败带 exit code）。
+
+### 🛡️ Security — 面向开源用户的安全加固
+
+- **回环单机 + Host 校验**：服务仅监听 `127.0.0.1`，拒绝非本机 `Host` 请求（返回 403），移除通配 CORS，加 `X-Content-Type-Options: nosniff`，抵御 CSRF / DNS-rebinding。
+- **配置零丢失**：写回仅深合并 UI 管理的白名单键（`enabled`/`linear`/`panel_expanded`/`streaming_panel_expanded`/`max_tool_steps`/`flush_interval_ms`/`print_step`/`theme`/`footer`/`text_sizes`），`feishu` 凭证及 `print_strategy`、`max_reasoning_rounds`、`theme.reactions`、用户自定义键原样保留。
+- **读失败即拒写**：现有 `config.yaml` 存在但无法解析时抛 `ConfigReadError` 并拒绝写入，绝不覆盖无法解析的配置（保护凭证）；先备份至 `~/.hermes/backups/studio_config_baks/`，再临时文件 + `os.replace` 原子写回。
+- **服务端校验**：POST payload 结构校验 + Emoji 取值服务端复核（不信任前端），非法请求返回 400；请求体上限 1MB。
+
+### 🧪 Test
+
+- 新增 `tests/test_v230_studio.py`（22 项）：预设完整性、读缺失文件、深合并保配置与凭证、备份生成、读失败拒写、Emoji 检测、非法/合法 payload 校验、Host 门禁、静态资源存在性、无 Header 残留。
+
+### 🏗️ Architecture — 纯增量不改核心
+
+- Studio 为独立可选模块，杭州生产网关不加载；泡波样式与五大结构定制守卫（无 header / 无 reaction 拦截 / answer 在 panel 之上 / panel 默认收起 / 无 footer）全部不动；稳定核心零触碰。
+- `pyproject.toml` 打包补充 `hermes_lark_streaming.studio` 子包与 `studio/web/*` 静态资源；`aidupop-studio` 控制台入口指向 `studio.server:main`。
+
+---
+
 ## v2.2.1 (2026-08-16) — 爱嘟波泡卡 · 工程卫生加固
 
 ### 🐛 Fixed — 异常吞没可观测性
