@@ -26,7 +26,7 @@ class HermesCompat:
             from importlib.metadata import version
             self.hermes_version = version("hermes-agent")
         except Exception:
-            pass
+            _logger.debug("HLS: importlib.metadata version lookup failed", exc_info=True)
         
         # Try __version__ attribute
         if self.hermes_version == "unknown":
@@ -34,7 +34,7 @@ class HermesCompat:
                 import hermes_cli
                 self.hermes_version = getattr(hermes_cli, "__version__", "unknown")
             except Exception:
-                pass
+                _logger.debug("HLS: hermes_cli version lookup failed", exc_info=True)
         
         _logger.info("HLS: Hermes version detected: %s", self.hermes_version)
     

@@ -1,3 +1,24 @@
+## v2.2.1 (2026-08-16) — 爱嘟波泡卡 · 工程卫生加固
+
+### 🐛 Fixed — 异常吞没可观测性
+
+- **15 处裸 `except Exception: pass` 全部治理**：12 处核心路径（`aowen/__init__.py` 版本读取、`plugin/__init__.py` 注销清理、`feishu/client.py` log_id 兜底、`controller/core.py` 过期会话完成派发与文本 fallback、`patching/gateway.py` 卡片发送拦截、`patching/adapter.py` edit/add_reaction/delete_reaction 拦截、`patching/hermes_adapter.py` 版本探测 ×2）补 `_logger.debug(..., exc_info=True)` 上下文日志；3 处脚本路径（`scripts/notify_feishu.py` 变更文件/提交列表/测试报告读取）补 safe-to-ignore 注释说明。生产静默失败从此可排查。
+
+### ⏱️ Fixed — 脚本 HTTP timeout
+
+- **`scripts/notify_feishu.py`**：`urllib.request.urlopen(req)` 补 `timeout=60`，与 `scripts/create_release.py` 对齐，杜绝 CI 飞书通知卡线程。
+
+### 📄 Fixed — 文档版本同步
+
+- **README 徽章 / CHANGELOG 与 `plugin.yaml` 单一真相源对齐**：修复 v2.2.0 发布流程遗留的文档漂移（私有仓 README 徽章曾停留 2.1.2）。
+
+### 🏗️ Architecture — 纯加固不改结构
+
+- **零触碰稳定核心**：`_model_cache`、贝氏防爆拍扁降级、长文反引号智能切片、`batch_update` 原子回滚保护、controller↔patching 延迟导入全部不动。
+- **泡波样式与五大结构定制守卫不变**：无 header / 无 reaction 拦截 / answer 在 panel 之上 / panel 默认收起 / 无 footer，`tests/test_v220.py` 全部守卫继续锁死。
+
+---
+
 ## v2.2.0 (2026-08-16) — 爱嘟波泡卡 · 泡波样式主题化
 
 ### 🎨 Added — 泡波样式主题层（Bubble Wave Theme）

@@ -150,7 +150,7 @@ try:
             if line:
                 changed_files.append(line)
 except Exception:
-    pass
+    pass  # changed_files.txt missing/unreadable → skip section (safe to ignore)
 
 # 最多 10 条
 changed_files_display = changed_files[:10]
@@ -168,7 +168,7 @@ try:
             if line:
                 commit_lines.append(line)
 except Exception:
-    pass
+    pass  # commit list missing/unreadable → skip section (safe to ignore)
 
 # Gitee MR 合并去重
 import re as _re
@@ -356,7 +356,7 @@ for _label, _file in [("单元测试", "unit_test_output.txt"), ("E2E", "e2e_out
                 print(f"\n--- {_label} ---")
                 print(content[-3000:])  # 最多 3000 字符
     except Exception:
-        pass
+        pass  # report file missing/unreadable → skip section (safe to ignore)
 
 print("\n" + "=" * 60)
 print("🔄 变更文件:")
@@ -380,7 +380,7 @@ req = urllib.request.Request(
     headers={"Content-Type": "application/json"},
 )
 try:
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:
         print(f"\n✅ Feishu notified: {resp.read().decode()}")
 except Exception as e:
     print(f"\n❌ Failed to notify Feishu: {e}")

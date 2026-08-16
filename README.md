@@ -14,7 +14,7 @@
 美不是装饰，而是信息该在的位置，刚好在那里。
 ```
 
-[![Version](https://img.shields.io/badge/version-2.2.0-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.2.1-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
@@ -260,6 +260,13 @@ aiduPOP/
 </p>
 
 ## CHANGELOG
+
+### v2.2.1 (2026-08-16) — 爱嘟波泡卡 · 工程卫生加固
+
+* 🐛 **异常吞没可观测性**：15 处裸 `except Exception: pass` 全部治理——12 处核心路径补 `_logger.debug(..., exc_info=True)` 上下文日志，3 处脚本路径补 safe-to-ignore 注释说明，生产静默失败从此可排查。
+* ⏱️ **脚本 HTTP timeout 补齐**：`scripts/notify_feishu.py` 的 `urlopen` 补 `timeout=60`，与 `create_release.py` 对齐，杜绝 CI 通知卡线程。
+* 📄 **文档版本同步**：README 徽章 / CHANGELOG 与 `plugin.yaml` 单一真相源对齐（修复 v2.2.0 发布流程遗留的文档漂移）。
+* 🏗️ **纯加固不改结构**：零触碰 `_model_cache`、贝氏防爆、长文切片、`batch_update` 原子回滚、controller↔patching 延迟导入等稳定核心；泡波样式与五大结构定制守卫不变。
 
 ### v2.2.0 (2026-08-16) — 爱嘟波泡卡 · 泡波样式主题化
 

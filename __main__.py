@@ -254,7 +254,7 @@ def _cmd_doctor() -> int:
             txt = env_file.read_text(encoding="utf-8", errors="replace")
             has_dotenv = "FEISHU_APP_ID=" in txt and "FEISHU_APP_SECRET=" in txt
         except Exception:
-            pass
+            pass  # unreadable .env → treat as no dotenv (safe to ignore)
     print("[4/6] Feishu credentials:")
     print(f"      env vars:    {'configured' if has_env else 'not set'}")
     print(f"      config.yaml: {'configured' if has_cfg else 'not set'}")

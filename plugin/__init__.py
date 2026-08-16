@@ -222,5 +222,5 @@ def unregister(ctx: "PluginContext") -> None:
         ctrl = get_controller()
         ctrl._sess_clear()
     except Exception:
-        pass
+        _logger.debug("HLS: session clear on unregister failed", exc_info=True)
     _logger.info("hermes-lark-streaming: unregistered")

@@ -97,7 +97,7 @@ def _get_version() -> str:
                 if line.startswith("version:"):
                     return line.split(":", 1)[1].strip().strip('"').strip("'")
     except Exception:
-        pass
+        _logger.debug("HLS: plugin.yaml version read failed", exc_info=True)
     return "unknown"
 
 # Color: green=success, orange=warning, red=error, blue=info, grey=neutral.

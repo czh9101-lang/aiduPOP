@@ -284,7 +284,7 @@ def _wrap_feishu_adapter_edit(orig_edit: Callable) -> Callable:
                             except (ImportError, AttributeError):
                                 return None
             except Exception:
-                pass
+                _logger.debug("HLS: edit interception failed", exc_info=True)
 
         # ── Fallback: original edit_message ──
         _fallback_kwargs = {k: v for k, v in kwargs.items() if k != "metadata"}
@@ -345,7 +345,7 @@ def _wrap_feishu_adapter_add_reaction(orig_add_reaction: Callable) -> Callable:
                                 except (ImportError, AttributeError):
                                     return None
                 except Exception:
-                    pass
+                    _logger.debug("HLS: add_reaction interception failed", exc_info=True)
 
         # ── Fallback: original add_reaction ──
         return await orig_add_reaction(self_feishu, message_id, emoji, **kwargs)
@@ -388,7 +388,7 @@ def _wrap_feishu_adapter_delete_reaction(orig_delete_reaction: Callable) -> Call
                                 except (ImportError, AttributeError):
                                     return None
                 except Exception:
-                    pass
+                    _logger.debug("HLS: delete_reaction interception failed", exc_info=True)
 
         # ── Fallback: original delete_reaction ──
         return await orig_delete_reaction(self_feishu, message_id, emoji, **kwargs)

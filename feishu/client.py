@@ -276,7 +276,7 @@ class FeishuClient:
             try:
                 log_id = response.get_log_id() or ""
             except Exception:
-                pass
+                _logger.debug("HLS: get_log_id fallback failed", exc_info=True)
             if not log_id:
                 # SDK async 路径 bug 兜底：error 是 dict，含 log_id 字段
                 err = getattr(response, 'error', None)

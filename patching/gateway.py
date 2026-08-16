@@ -720,7 +720,7 @@ def _wrap_cron_deliver(orig: Callable) -> Callable:
                     except (ImportError, AttributeError):
                         return None
             except Exception:
-                pass
+                _logger.debug("HLS: card send interception failed", exc_info=True)
 
             # Fallback: send plain text via the original adapter
             return await original_send(chat_id, content, **send_kwargs)

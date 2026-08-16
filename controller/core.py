@@ -312,7 +312,7 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
                     stale_session._loop,
                 )
         except Exception:
-            pass
+            _logger.debug("HLS: stale session completion dispatch failed", exc_info=True)
 
         return new_session
 
@@ -1041,7 +1041,7 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
                 len(content),
             )
         except Exception:
-            pass
+            _logger.debug("HLS: text fallback send failed", exc_info=True)
 
     def _prune_stale_sessions(self) -> None:
         """v1.1.1: 只清理已终态的过期 session，保护活跃 session."""
