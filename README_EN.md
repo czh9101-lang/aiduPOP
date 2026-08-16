@@ -215,7 +215,7 @@ Security by design (for open-source users):
 - Refuses to write when the existing config cannot be parsed; backs up first, then writes atomically (`~/.hermes/backups/`)
 - Server-side re-validation of emoji values and payload structure; invalid requests return 400
 
-> This is an **optional tool**: the Hangzhou production gateway does not use it; open-source users enable it on demand.
+> This is an **optional tool**: production environments do not load it by default; open-source users enable it on demand.
 
 ---
 
@@ -246,7 +246,7 @@ Visual Card Studio — an optional, fully local visual configuration UI.
 - **🛡️ Security hardening (open-source)**: Loopback-only with local `Host` validation (guards CSRF / DNS-rebinding), no wildcard CORS; server-side re-validation of POST structure and emoji values.
 - **🔒 Zero config loss**: Deep-merges only UI-managed keys; `feishu` credentials plus `print_strategy`, `reactions`, and user-authored keys are preserved; refuses to write when the existing config is unparseable; backs up then writes atomically.
 - **🧪 Tests**: New `tests/test_v230_studio.py` (22 cases) covering merge-preserves-config, refuse-write-on-read-error, payload/emoji validation, Host gate, static assets, and no-header residue; full suite passing.
-- **🏗️ Additive, non-invasive**: Studio is an independent optional module; the Hangzhou production gateway does not load it. Bubble Wave theme and the five structural guards are untouched.
+- **🏗️ Additive, non-invasive**: Studio is an independent optional module; production environments do not load it by default. Bubble Wave theme and the five structural guards are untouched.
 
 ## What's new in 2.2.1
 

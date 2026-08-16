@@ -24,7 +24,7 @@
 
 ### 🏗️ Architecture — 纯增量不改核心
 
-- Studio 为独立可选模块，杭州生产网关不加载；泡波样式与五大结构定制守卫（无 header / 无 reaction 拦截 / answer 在 panel 之上 / panel 默认收起 / 无 footer）全部不动；稳定核心零触碰。
+- Studio 为独立可选模块，默认生产环境不加载；泡波样式与五大结构定制守卫（无 header / 无 reaction 拦截 / answer 在 panel 之上 / panel 默认收起 / 无 footer）全部不动；稳定核心零触碰。
 - `pyproject.toml` 打包补充 `hermes_lark_streaming.studio` 子包与 `studio/web/*` 静态资源；`aidupop-studio` 控制台入口指向 `studio.server:main`。
 
 ---
@@ -243,7 +243,7 @@ Clarify 卡片失效复发修复 — hermes v0.19.0 升级后 clarify 退回纯�
 | 🐛 Bug Fix (P1) | 飞书消息反复显示「正在加载上下文...」无法正常完成，日志每轮刷 `unified flush batch_update failed: code=300315, msg=ErrMsg: not find elementID : context_loading_hint;`（用户「诺玛🌙」反馈） | `controller/linear_mixin.py` Phase 3 batch_update 的 except 块有 `is_schema_error` 分支但**缺 `is_element_not_found_error` 分支**（Phase 2 有，line 645）。最常见场景：Phase 2 在飞书侧成功删除了 `context_loading_hint` 元素（例如 Phase 2 await 抛网络异常但飞书已处理 batch），本地 `_creation_stages` / `existing_elements` 未同步 → Phase 3 safety net（line 793-798）检测到 loading_hint 还在 `existing_elements` 中 → 添加 `delete_elements` 操作 → 飞书 API 返回 300315（元素已被删除）→ 错误落入通用 `warning` 分支（line 851）→ `hint_removed` 仍未同步 + `existing_elements` 未 discard → 下轮 safety net 再次添加 delete → **死循环** → batch 原子失败导致 partial_update（面板内容）丢失 → 卡片卡在「正在加载上下文...」 | Phase 3 except 块 `is_schema_error` 之后、通用 warning 之前，**新增 `is_element_not_found_error` 分支**（与 Phase 2 对齐）：300315 = 元素不存在 = 非致命。同步本地标志位（`_creation_stages.add("hint_removed")` + `existing_elements.discard(_LOADING_HINT_ELEMENT_ID)`）→ 下次 flush safety net 不再触发 delete，死循环打破。**保留** `panel_dirty` / `tool_steps_dirty` → batch 中其他操作（partial_update）下轮重试。`info` 级别日志（不是 warning/error）— 不是真正的故障 (`controller/linear_mixin.py`) |
 | 🧪 Test | 新增 11 个回归测试覆盖 v1.4.1 三个修复点 | 防御性拦截 / 懒重打 / Phase 3 element_not_found 均为用户反馈的生产问题，需回归保障 | `TestWrapFeishuCardActionTriggerV141`（5 个：unknown action 抑制、hermes_action 放行、hermes_update_prompt_action 放行、空 action_value 抑制、clarify 仍拦截）；`TestPhase3ElementNotFoundV141`（2 个：300315 同步 hint + 保留 dirty、二次 flush 不再添加 delete 验证死循环打破）；`TestLazyRepatchV141`（4 个：函数存在、60s 节流、force 跳过节流、None class 不崩溃）(`tests/test_clarify_card.py`, `tests/test_controller.py`, `tests/test_monkey_patch.py`) |
 
-**审计方法**: 三方对齐求证，未盲信 bug 报告根因分析。①克隆 Gitee DEV 分支（HEAD=v1.4.0）分析插件代码，确认插件无 `/card` 命令（grep 全仓 "Routing card action|synthetic command|/card " 无匹配），clarify 卡片 select_static/input 全部携带 `hermes_clarify_action`，streaming 卡片无交互元素。②SSH 服务器（47.239.x.x, hermes v0.18.0 + 插件 v1.4.0）取证：服务器 clarify 拦截正常工作（`callback received action=select` → `confirmed (hard lock)`），无 `/card` 错误，无 300315 错误；启动日志铁证 deferred repatch 工作正常——替身 class_id=94212263706992，真身 class_id=94212274640752（不同对象），两者都 patched ✓。bug 报告者环境（hermes v0.17.0）2s/10s repatch 可能未覆盖其真身加载时机。③读 hermes core 源码（`/usr/local/lib/hermes-agent/plugins/platforms/feishu/adapter.py`）：`_on_card_action_trigger`（:2582）检查 `hermes_action`/`hermes_update_prompt_action`，其余路由 `_handle_card_action_event`（:2913）生成 `f"/card {action_tag}"` 合成 COMMAND（:2933），Gateway 不认识 → "Unknown command /card"。Phase 3 300315 根因经代码行级确认（Phase 2 line 645 有 is_element_not_found_error，Phase 3 line 840-851 缺）。906 单元测试通过（895 原有 + 11 新增回归），0 回归。
+**审计方法**: 三方对齐求证，未盲信 bug 报告根因分析。①克隆 Gitee DEV 分支（HEAD=v1.4.0）分析插件代码，确认插件无 `/card` 命令（grep 全仓 "Routing card action|synthetic command|/card " 无匹配），clarify 卡片 select_static/input 全部携带 `hermes_clarify_action`，streaming 卡片无交互元素。②SSH 服务器（<SERVER_IP>, hermes v0.18.0 + 插件 v1.4.0）取证：服务器 clarify 拦截正常工作（`callback received action=select` → `confirmed (hard lock)`），无 `/card` 错误，无 300315 错误；启动日志铁证 deferred repatch 工作正常——替身 class_id=94212263706992，真身 class_id=94212274640752（不同对象），两者都 patched ✓。bug 报告者环境（hermes v0.17.0）2s/10s repatch 可能未覆盖其真身加载时机。③读 hermes core 源码（`/usr/local/lib/hermes-agent/plugins/platforms/feishu/adapter.py`）：`_on_card_action_trigger`（:2582）检查 `hermes_action`/`hermes_update_prompt_action`，其余路由 `_handle_card_action_event`（:2913）生成 `f"/card {action_tag}"` 合成 COMMAND（:2933），Gateway 不认识 → "Unknown command /card"。Phase 3 300315 根因经代码行级确认（Phase 2 line 645 有 is_element_not_found_error，Phase 3 line 840-851 缺）。906 单元测试通过（895 原有 + 11 新增回归），0 回归。
 
 **已知限制**:
 - Issue 1（/card）的懒重打补丁仅在 `pre_gateway_dispatch` 触发时生效。若用户首条交互是点击卡片（而非发消息），懒重打不会运行；但 v1.4.0 的 2s/10s 固定调度仍作为兜底。服务器 v0.18.0 实测 deferred repatch 正常，bug 报告者 v0.17.0 环境建议升级到 v0.18.0+
@@ -541,7 +541,7 @@ seal_ok = True → 全量重建 fallback 不触发
 |------|-----------|------|-----------|
 | ✨ Feature | Hermes v0.17.0 兼容性验证 | Hermes v0.17.0 (v2026.6.19) 发布，`_run_agent` 新增 `persist_user_message` 参数，`run_conversation` 内部重构 | 新增 3 个集成测试：验证 `_run_agent` 的 `persist_user_timestamp`/`persist_user_message` 参数存在，验证 `run_conversation` 仍可调用 |
 | 📝 Docs | inject_time 与 message_timestamps 关系说明 | Hermes v0.17.0 内置 `gateway.message_timestamps.enabled`，和插件 `inject_time` 功能重叠 | README/AGENT_GUIDE 补充说明：建议优先使用官方 `message_timestamps`，开启时关闭插件 `inject_time` |
-| 🔧 Fix | hermes-integration-test cron 时间调整 | `cron: '0 2 * * *'`（整点）GitHub Actions 延迟严重（5 小时） | 改为 `cron: '33 0 * * *'`（UTC 0:33 = 北京时间 8:33），避开整点高负载 |
+| 🔧 Fix | hermes-integration-test cron 时间调整 | `cron: '0 2 * * *'`（整点）GitHub Actions 延迟严重（5 小时） | 改为 `cron: '33 0 * * *'`（UTC 0:33 = UTC+8 8:33），避开整点高负载 |
 
 ---
 
@@ -634,7 +634,7 @@ seal_ok = True → 全量重建 fallback 不触发
 | 🔧 Fix | FeishuAdapter 反应拦截在 Hermes 新版本静默失效 | Hermes 新版本将 `add_reaction`/`delete_reaction` 改为私有方法 `_add_reaction`/`_remove_reaction`，插件补丁使用 `try/except AttributeError` 静默跳过 | 补丁逻辑增加 fallback：先尝试公共方法名，失败后尝试私有方法名，兼容新旧版本 |
 | 🔧 Fix | 3 个单元测试与 v1.0.5 Phase 2 拆分不同步 | Phase 2 拆分后简单对话不再创建空面板，新增 `_answer_element_created` 标志，部分测试缺少该标志导致测试路径错误 | 补全 `_answer_element_created = True`；修正 `_panel_element_created` 断言为 `_answer_element_created`；新增简单对话（无面板）完整生命周期测试 |
 | 🔧 Fix | 集成测试在 sync-from-gitee 工作流中 25 个 skipped | `pytest tests/` 包含集成测试目录，但该工作流不设置 `HERMES_SRC_DIR`，导致全部 skip | `pyproject.toml` 新增 `norecursedirs = ["tests/integration"]`，集成测试由 `hermes-integration-test.yml` 单独运行 |
-| ✨ Feature | Hermes Agent 集成测试工作流 | 需要自动检测 Hermes 新版本并验证插件兼容性 | 新增 GitHub Actions 工作流，每日上海时间 10:00 运行，检查 Hermes 新版本发布、运行兼容性测试、通知飞书 |
+| ✨ Feature | Hermes Agent 集成测试工作流 | 需要自动检测 Hermes 新版本并验证插件兼容性 | 新增 GitHub Actions 工作流，每日UTC+8 10:00 运行，检查 Hermes 新版本发布、运行兼容性测试、通知飞书 |
 | ✨ Feature | 飞书卡片模板导出 | 卡片模板分散在代码中，不便维护和复用 | 所有飞书卡片模板导出至 `assets/card_templates/` 目录，集中管理 |
 
 ## v1.0.4 (2026-06-13)

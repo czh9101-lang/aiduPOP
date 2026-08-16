@@ -1,7 +1,7 @@
 """aiduPOP Studio (Visual Card Studio) — Zero-dependency HTTP Backend.
 
 Optional visual configuration tool for open-source users. Not used by the
-Hangzhou (dudu) production gateway.
+production gateway.
 
 Provides:
 - GET  /api/config      -> Read effective config (BUBBLE_WAVE theme merged with user overrides)
