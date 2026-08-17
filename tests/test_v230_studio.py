@@ -6,10 +6,17 @@ Covers the safety-critical backend behaviours added in the v2.3.0 audit:
 - server-side payload validation (structure + emoji-only icon values)
 - preset integrity and static asset presence
 - loopback-only Host gate
+
+v2.3.1 additions:
+- text_sizes values validated against the runtime CardKit 2.0 whitelist
+  (regression guard: the UI default "normal_v2" is NOT a valid value and
+  used to corrupt card creation when saved)
+- backup rotation keeps only the newest 20 copies
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -103,6 +110,22 @@ class TestStudioConfigIO:
         assert backup_dir.exists()
         assert len(list(backup_dir.glob("config.yaml.bak_*"))) >= 1
 
+    def test_backup_rotation_keeps_newest_20(self, temp_hermes_home: Path) -> None:
+        # v2.3.1: 预置 25 份旧备份，再保存一次 → 轮转后只剩最近 20 份
+        backup_dir = temp_hermes_home / "backups" / "studio_config_baks"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(25):
+            old = backup_dir / f"config.yaml.bak_{1000 + i}"
+            old.write_text("old: true", encoding="utf-8")
+            os.utime(old, (1000 + i, 1000 + i))
+
+        ok, _ = write_plugin_config({"enabled": True})
+        assert ok is True
+        remaining = list(backup_dir.glob("config.yaml.bak_*"))
+        assert len(remaining) == 20
+        # 最新的一份是本次写入生成的（时间戳最大）
+        assert max(int(p.name.rsplit("_", 1)[1]) for p in remaining) > 1024
+
     def test_refuses_write_when_config_unparseable(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -158,6 +181,34 @@ class TestStudioValidation:
         ok, _ = write_plugin_config({"theme": {"tool_icons": {"read": "not_emoji"}}})
         assert ok is False
 
+    def test_rejects_invalid_text_size_value(self) -> None:
+        # v2.3.1 回归守卫：normal_v2 是历史直写默认，不在 CardKit 2.0 白名单内，
+        # 写入后会让网关建卡抛 ValueError（所有消息失去流式卡片）——必须拒写。
+        ok, why = _validate_ui_payload({"text_sizes": {"body": "normal_v2"}})
+        assert ok is False
+        assert "text_sizes.body" in why
+
+    def test_rejects_non_string_text_size(self) -> None:
+        ok, _ = _validate_ui_payload({"text_sizes": {"panel": 12}})
+        assert ok is False
+
+    def test_accepts_valid_text_sizes(self) -> None:
+        ok, why = _validate_ui_payload(
+            {"text_sizes": {"body": "large", "panel": "notation", "notice": "small"}}
+        )
+        assert ok is True
+        assert why == ""
+
+    def test_write_rejects_invalid_text_sizes(
+        self, temp_hermes_home: Path
+    ) -> None:
+        before = (temp_hermes_home / "config.yaml").read_text(encoding="utf-8")
+        ok, msg = write_plugin_config({"text_sizes": {"body": "normal_v2"}})
+        assert ok is False
+        assert "text_sizes" in msg
+        # 配置文件原样未动
+        assert (temp_hermes_home / "config.yaml").read_text(encoding="utf-8") == before
+
 
 class TestStudioMerge:
     def test_merge_only_touches_ui_keys(self) -> None:
@@ -204,7 +255,7 @@ class TestStudioStaticFiles:
     def test_html_contains_brand_elements(self) -> None:
         web_dir = Path(__file__).resolve().parent.parent / "studio" / "web"
         html = (web_dir / "index.html").read_text(encoding="utf-8")
-        for token in ("aiduPOP", "爱嘟波泡卡", "v2.3.0", "monkey²",
+        for token in ("aiduPOP", "爱嘟波泡卡", "v2.3.1", "monkey²",
                       "爱嘟", "唯吾", "智助", "aidu", "I do", "AI do", 'id="hexBg"'):
             assert token in html
 

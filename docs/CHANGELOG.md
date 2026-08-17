@@ -1,3 +1,31 @@
+## v2.3.1 (2026-08-17) — 爱嘟波泡卡 · Studio 审计修复（配置安全与如实文案）
+
+### 🐛 Fixed — text_sizes 非法值写入致卡片全灭（P0）
+
+- **根因**：Studio 前端字号默认值 `normal_v2` 不在运行时 CardKit 2.0 白名单（`config/reader.py` `_TEXT_SIZE_VALUES`）内，服务端又只校验结构不校验取值。用户保存默认配置后 `text_sizes.body: normal_v2` 写入 `config.yaml`，网关建卡时 `_normalize_text_sizes` 抛 `ValueError`，`_do_create_linear_card` 静默失败——**所有消息不再出流式卡片**。
+- **修复**：`_validate_ui_payload` 对 `text_sizes` 逐值对照运行时白名单校验，非法即拒写（400）；前端三个字号输入框改为下拉框（仅官方字号 +「默认」= 不写入该键），默认状态不再携带 `text_sizes`。
+- **回归守卫**：新增 4 项测试，含「`normal_v2` 必须被拒」与「端到端拒写后配置文件原样未动」。
+
+### 📢 Changed — 生效机制文案如实化（P1）
+
+- `Config().reload()` 是进程内单例缓存清理，只作用于 Studio 自身进程；网关为独立进程，需飞书群 `/aowen config reload` 或重启后新卡片才按新配置渲染。
+- 前端保存 toast、按钮文案（「保存并热生效」→「保存配置」）与三份 README 全部改为如实描述，不再宣称「秒级热生效」。
+
+### 🛡️ Security — 前端 XSS 加固（P2）
+
+- `app.js` / `card_preview.js` 新增 `escapeHtml()`，所有动态配置值（emoji 槽、预设按钮、footer 标签、卡片仿真区）转义后再进 innerHTML，杜绝配置值注入。
+
+### 🧹 Changed — 备份轮转与脱敏补漏
+
+- 配置备份写入后轮转，仅保留最近 20 份（`_prune_backups`），不再无限堆积。
+- 移除 v2.3.0 新增代码中遗留的内部称呼（预设描述与仿真卡片正文各 1 处）。
+
+### 🧪 Test
+
+- `tests/test_v230_studio.py` 新增 5 项：text_sizes 白名单校验（非法值/非字符串/合法值）、端到端拒写保原文件、备份轮转保留 20 份。全量测试通过。
+
+---
+
 ## v2.3.0 (2026-08-17) — 爱嘟波泡卡 · 可视化配置工作坊（Visual Card Studio）
 
 ### 🎨 Added — 可视化配置工作坊

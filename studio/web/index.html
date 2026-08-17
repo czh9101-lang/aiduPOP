@@ -19,7 +19,7 @@
   <header class="brandbar">
     <div class="brandbar-inner">
       <span class="foot-left">
-        <span class="badge-version">v2.3.0</span>
+        <span class="badge-version">v2.3.1</span>
       </span>
       <span class="foot-right">
         Powered by <b>monkey²</b>
@@ -152,17 +152,48 @@
         </div>
 
         <div class="form-section-title">🔤 CardKit 2.0 字号</div>
+        <p class="section-hint">仅可选飞书 CardKit 2.0 官方字号；留空「默认」则不写入配置，沿用插件内置默认。</p>
         <div class="field-row">
           <div><span class="field-label">正文字号 (body)</span></div>
-          <input type="text" class="text-input" data-prop="text_sizes.body" value="normal_v2" />
+          <select class="text-input" data-prop="text_sizes.body">
+            <option value="">默认</option>
+            <option value="heading-0">heading-0</option><option value="heading-1">heading-1</option>
+            <option value="heading-2">heading-2</option><option value="heading-3">heading-3</option>
+            <option value="heading-4">heading-4</option><option value="heading">heading</option>
+            <option value="normal">normal</option><option value="notation">notation</option>
+            <option value="xxxx-large">xxxx-large</option><option value="xxx-large">xxx-large</option>
+            <option value="xx-large">xx-large</option><option value="x-large">x-large</option>
+            <option value="large">large</option><option value="medium">medium</option>
+            <option value="small">small</option><option value="x-small">x-small</option>
+          </select>
         </div>
         <div class="field-row">
           <div><span class="field-label">面板字号 (panel)</span></div>
-          <input type="text" class="text-input" data-prop="text_sizes.panel" value="notation" />
+          <select class="text-input" data-prop="text_sizes.panel">
+            <option value="">默认</option>
+            <option value="heading-0">heading-0</option><option value="heading-1">heading-1</option>
+            <option value="heading-2">heading-2</option><option value="heading-3">heading-3</option>
+            <option value="heading-4">heading-4</option><option value="heading">heading</option>
+            <option value="normal">normal</option><option value="notation">notation</option>
+            <option value="xxxx-large">xxxx-large</option><option value="xxx-large">xxx-large</option>
+            <option value="xx-large">xx-large</option><option value="x-large">x-large</option>
+            <option value="large">large</option><option value="medium">medium</option>
+            <option value="small">small</option><option value="x-small">x-small</option>
+          </select>
         </div>
         <div class="field-row">
           <div><span class="field-label">提示字号 (notice)</span></div>
-          <input type="text" class="text-input" data-prop="text_sizes.notice" value="notation" />
+          <select class="text-input" data-prop="text_sizes.notice">
+            <option value="">默认</option>
+            <option value="heading-0">heading-0</option><option value="heading-1">heading-1</option>
+            <option value="heading-2">heading-2</option><option value="heading-3">heading-3</option>
+            <option value="heading-4">heading-4</option><option value="heading">heading</option>
+            <option value="normal">normal</option><option value="notation">notation</option>
+            <option value="xxxx-large">xxxx-large</option><option value="xxx-large">xxx-large</option>
+            <option value="xx-large">xx-large</option><option value="x-large">x-large</option>
+            <option value="large">large</option><option value="medium">medium</option>
+            <option value="small">small</option><option value="x-small">x-small</option>
+          </select>
         </div>
       </div>
 
@@ -173,7 +204,7 @@
         </div>
         <div class="action-bar-right">
           <button class="btn btn-secondary" onclick="App.restartGateway()">重启网关</button>
-          <button class="btn btn-primary" onclick="App.saveConfig()">💾 保存并热生效</button>
+          <button class="btn btn-primary" onclick="App.saveConfig()">💾 保存配置</button>
         </div>
       </div>
     </section>

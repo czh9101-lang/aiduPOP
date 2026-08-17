@@ -14,6 +14,16 @@ function isEmojiOnly(str) {
   return true;
 }
 
+// v2.3.1: HTML escape — 配置值一律转义后再进 innerHTML，杜绝注入
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 window.App = {
   state: {
     enabled: true, linear: true,
@@ -30,7 +40,9 @@ window.App = {
       footer: { model_prefix: "⚕", reasoning_icon: "🫧" }
     },
     footer: { show_label: false, fields: [] },
-    text_sizes: { body: "normal_v2", panel: "notation", notice: "notation" }
+    // v2.3.1: 空映射 = 不写入 text_sizes，沿用插件内置默认（normal_v2 等
+    // 历史默认值不在 CardKit 2.0 白名单内，写入会被运行时拒绝）
+    text_sizes: {}
   },
 
   presets: {},
@@ -54,18 +66,20 @@ window.App = {
 
   // ── Emoji swap widget: 当前 → 替换 ──
   emojiSwapHtml(slotId, currentVal) {
+    const safeSlot = escapeHtml(slotId);
+    const safeVal = escapeHtml(currentVal || "");
     return `
       <div class="emoji-current">
         <span class="emoji-mini-label now">当前</span>
-        <span class="emoji-display-now" data-now="${slotId}">${currentVal || "—"}</span>
+        <span class="emoji-display-now" data-now="${safeSlot}">${safeVal || "—"}</span>
       </div>
       <span class="emoji-arrow">→</span>
       <div class="emoji-next">
         <span class="emoji-mini-label next">替换</span>
-        <input type="text" class="emoji-input" data-emoji-slot="${slotId}" value="${currentVal || ""}"
+        <input type="text" class="emoji-input" data-emoji-slot="${safeSlot}" value="${safeVal}"
                placeholder="😀" title="仅接受 Emoji，可手动输入" />
       </div>
-      <button class="btn-pick" data-pick="${slotId}" title="打开 Emoji 挑选器">🎨</button>
+      <button class="btn-pick" data-pick="${safeSlot}" title="打开 Emoji 挑选器">🎨</button>
     `;
   },
 
@@ -144,9 +158,9 @@ window.App = {
     const body = document.getElementById("emojiModalBody");
     if (!body) return;
     body.innerHTML = EMOJI_CATEGORIES.map(cat => `
-      <div class="emoji-cat-title">${cat.name}</div>
+      <div class="emoji-cat-title">${escapeHtml(cat.name)}</div>
       <div class="emoji-grid">
-        ${cat.emojis.map(e => `<button class="emoji-btn" data-emoji="${e}">${e}</button>`).join("")}
+        ${cat.emojis.map(e => `<button class="emoji-btn" data-emoji="${escapeHtml(e)}">${escapeHtml(e)}</button>`).join("")}
       </div>
     `).join("");
     body.querySelectorAll(".emoji-btn").forEach(btn => {
@@ -259,7 +273,11 @@ window.App = {
       this.state.print_step = d.print_step;
       this.state.theme = d.theme || this.state.theme;
       this.state.footer = d.footer || this.state.footer;
-      this.state.text_sizes = d.text_sizes || this.state.text_sizes;
+      // v2.3.1: 只保留非空字号值；空映射 = 下拉框显示「默认」
+      const ts = d.text_sizes || {};
+      this.state.text_sizes = Object.fromEntries(
+        Object.entries(ts).filter(([, v]) => typeof v === "string" && v !== "")
+      );
       this.renderEmojiRows();
       this.syncFormFromState();
       this.onStateChange();
@@ -275,7 +293,7 @@ window.App = {
       const wrap = document.getElementById("presetBtns");
       if (wrap) {
         wrap.innerHTML = Object.values(this.presets).map(p =>
-          `<button class="preset-btn" data-preset="${p.id}" title="${p.desc}">${p.name}</button>`
+          `<button class="preset-btn" data-preset="${escapeHtml(p.id)}" title="${escapeHtml(p.desc)}">${escapeHtml(p.name)}</button>`
         ).join("");
         wrap.querySelectorAll(".preset-btn").forEach(btn => {
           btn.addEventListener("click", () => this.applyPreset(btn.dataset.preset));
@@ -328,7 +346,7 @@ window.App = {
       if (Array.isArray(row)) row.forEach(f => active.add(f));
     });
     container.innerHTML = allFields.map(f =>
-      `<span class="footer-tag ${active.has(f.id) ? 'active' : ''}" data-field="${f.id}">${active.has(f.id) ? '✓ ' : '+ '}${f.name} (${f.id})</span>`
+      `<span class="footer-tag ${active.has(f.id) ? 'active' : ''}" data-field="${escapeHtml(f.id)}">${active.has(f.id) ? '✓ ' : '+ '}${escapeHtml(f.name)} (${escapeHtml(f.id)})</span>`
     ).join("");
     container.querySelectorAll(".footer-tag").forEach(tag => {
       tag.addEventListener("click", () => this.toggleFooterField(tag.dataset.field));
@@ -374,6 +392,10 @@ window.App = {
 
   async saveConfig() {
     try {
+      // v2.3.1: 字号「默认」（空值）不进 payload，避免把非法/冗余值写进配置
+      const textSizes = Object.fromEntries(
+        Object.entries(this.state.text_sizes || {}).filter(([, v]) => v)
+      );
       const payload = {
         enabled: this.state.enabled, linear: this.state.linear,
         panel_expanded: this.state.panel_expanded,
@@ -381,13 +403,20 @@ window.App = {
         max_tool_steps: parseInt(this.state.max_tool_steps) || 20,
         flush_interval_ms: parseFloat(this.state.flush_interval_ms) || 200,
         print_step: parseInt(this.state.print_step) || 4,
-        theme: this.state.theme, footer: this.state.footer, text_sizes: this.state.text_sizes
+        theme: this.state.theme, footer: this.state.footer, text_sizes: textSizes
       };
       const res = await fetch("/api/config", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
       });
       const json = await res.json();
-      this.toast(json.ok ? (json.message || "保存成功并热生效！") : (json.error || "保存失败"), json.ok ? "success" : "error");
+      // v2.3.1: 如实文案——配置写入磁盘即成功，但网关是独立进程，
+      // 需 /aowen config reload 或重启网关后新卡片才按新配置渲染。
+      this.toast(
+        json.ok
+          ? "✅ 配置已保存。在飞书群发送 /aowen config reload（或重启网关）后生效"
+          : (json.error || "保存失败"),
+        json.ok ? "success" : "error"
+      );
     } catch (e) {
       this.toast(`保存请求失败: ${e.message}`, "error");
     }

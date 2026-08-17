@@ -2,6 +2,16 @@
  * aiduPOP Visual Studio — 1:1 Feishu CardKit 2.0 DOM Simulator
  */
 
+// v2.3.1: HTML escape — 配置值一律转义后再进 innerHTML，杜绝注入
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 const CardPreview = {
   mode: "completed", // 'completed' | 'streaming'
   panelExpanded: false,
@@ -50,8 +60,8 @@ const CardPreview = {
       const icon = toolIcons[s.tool] || "👩🏻‍🔧";
       stepsHtml += `
         <div class="tool-step-item">
-          <span class="tool-step-icon">${icon}</span>
-          <span class="tool-step-text"><b class="tool-step-title">${s.title}</b> <code>${s.detail}</code></span>
+          <span class="tool-step-icon">${escapeHtml(icon)}</span>
+          <span class="tool-step-text"><b class="tool-step-title">${escapeHtml(s.title)}</b> <code>${escapeHtml(s.detail)}</code></span>
         </div>
       `;
     });
@@ -74,7 +84,7 @@ const CardPreview = {
     } else {
       bodyHtml = `
         <div class="card-content-body">
-          <p>猴哥好！aiduPOP v2.3.0 可视化配置工作坊已就绪。所有 Emoji、Panel 统计栏及 Footer 排布已实时同步。</p>
+          <p>你好！aiduPOP v2.3.1 可视化配置工作坊已就绪。所有 Emoji、Panel 统计栏及 Footer 排布已实时同步。</p>
         </div>
       `;
     }
@@ -85,12 +95,12 @@ const CardPreview = {
         <div class="card-panel-header" onclick="CardPreview.togglePanel()">
           <span class="card-panel-title">
             <span class="card-panel-arrow">▶</span>
-            <span>${statsText}</span>
+            <span>${escapeHtml(statsText)}</span>
           </span>
           <span>展开 / 收起</span>
         </div>
         <div class="card-panel-body">
-          <div class="card-collapse-hint">${collapseIcon} 还有 0 项已折叠</div>
+          <div class="card-collapse-hint">${escapeHtml(collapseIcon)} 还有 0 项已折叠</div>
           <div class="tool-steps-wrap">
             ${stepsHtml}
           </div>
@@ -131,7 +141,7 @@ const CardPreview = {
         footerHtml = `
           <div class="card-hr"></div>
           <div class="card-footer">
-            ${footerLines.map(l => `<div>${l}</div>`).join("")}
+            ${footerLines.map(l => `<div>${escapeHtml(l)}</div>`).join("")}
           </div>
         `;
       }

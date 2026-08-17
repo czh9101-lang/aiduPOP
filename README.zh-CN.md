@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/项目-Vibe%20Coding-ff69b4" alt="Vibe Coding">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-4caf50.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/version-2.3.0-ff9800.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.3.1-ff9800.svg" alt="Version">
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 
 为 Hermes Agent 提供飞书 CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、统一可折叠面板、按时间线交错显示推理与工具调用等。
 
-> 当前版本：**2.3.0**。新增可视化配置工作坊 `aidupop studio`（可选模块）：纯本地零第三方依赖，可视化配置工具 Emoji / Panel / Footer / 字号，内置 1:1 飞书卡片实时预览，保存即热生效；泡波样式与嘟嘟结构守卫不变，默认生产环境不加载本模块。
+> 当前版本：**2.3.1**。可视化配置工作坊 `aidupop studio`（可选模块）：纯本地零第三方依赖，可视化配置工具 Emoji / Panel / Footer / 字号，内置 1:1 飞书卡片实时预览，保存后 `/aowen config reload` 生效；泡波样式与嘟嘟结构守卫不变，默认生产环境不加载本模块。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
 >
@@ -37,6 +37,20 @@
     <td><img src="assets/screenshots/img4.png" width="200px" /></td>
   </tr>
 </table>
+
+---
+
+## 🎨 可视化配置工作坊（可选）
+
+> 🏆 **全网首创**：aiduPOP 是首个为 Hermes Agent 飞书流式卡片插件打造「可视化配置工作坊」的开源项目——纯本地运行、零第三方依赖、内置 1:1 CardKit 2.0 实时仿真预览，改完即见，无需触碰一行代码。
+
+不想手写 YAML？运行 `aidupop studio` 即可打开可视化工作坊，像挑贴纸一样调整泡波卡外观（工具 Emoji / Panel / Footer / 字号），保存后在飞书群发送 `/aowen config reload` 生效。
+
+<p align="center">
+  <img src="assets/screenshots/07-visual-card-studio.png" width="860" alt="Visual Card Studio 可视化配置工作坊">
+  <br>
+  <sub>Visual Card Studio 工作坊：品牌区 / 一键预设 / 工具 Emoji 配置 / 1:1 飞书卡片实时预览</sub>
+</p>
 
 ---
 

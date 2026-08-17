@@ -10,7 +10,7 @@ Transparent is not dumping logs, but letting you see what the AI is thinking at 
 Beautiful is not decoration, but the right information being exactly where it belongs.
 ```
 
-[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.3.1-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -32,7 +32,7 @@ Built on top of [Aowen-Nowor's hermes-lark-streaming](https://gitee.com/Aowen-No
 | Layer | What it does | Key feature |
 |-------|-------------|-------------|
 | ⚡ **Instant** | Card appears on the first token | No typing indicator, no "replying to…" patch |
-| 🎨 **Visual config (new in v2.3.0)** | Pick emoji / arrange panel & footer without editing code | `aidupop studio` opens a visual studio with a live 1:1 Feishu card preview; save applies instantly (hot reload) |
+| 🎨 **Visual config (new in v2.3.0)** | Pick emoji / arrange panel & footer without editing code | `aidupop studio` opens a visual studio with a live 1:1 Feishu card preview; takes effect after `/aowen config reload` |
 | 💠 **Minimal** | Every element has a reason | Answer on top, panel below, footer empty by default |
 | 🚦 **State** | Result at a glance | Color-coded: green done / red stopped / yellow error |
 | 🔍 **Transparent** | See every step | Expandable panel: thought rounds, tool calls, timestamps |
@@ -186,9 +186,17 @@ The single source of truth for the version is the `version` field in `plugin.yam
 
 ---
 
-## 🎨 Visual Card Studio (v2.3.0 · optional)
+## 🎨 Visual Card Studio (v2.3.1 · optional)
 
 Don't want to hand-edit YAML? `aidupop studio` launches a **fully local, zero-third-party-dependency** visual studio to tune the Bubble Wave look like picking stickers.
+
+> 🏆 **A first on the web**: aiduPOP is the first open-source project to ship a visual configuration studio for a Hermes Agent Feishu streaming-card plugin — fully local, zero third-party dependencies, with a built-in 1:1 CardKit 2.0 live preview. What you see is what you get, without touching a single line of code.
+
+<p align="center">
+  <img src="assets/screenshots/07-visual-card-studio.png" width="860" alt="Visual Card Studio">
+  <br>
+  <sub>Visual Card Studio: brand banner / one-click presets / tool-emoji config / 1:1 live Feishu card preview — takes effect after <code>/aowen config reload</code></sub>
+</p>
 
 ```bash
 aidupop studio                 # default 127.0.0.1:8765, opens the browser
@@ -206,7 +214,7 @@ What you can configure:
 - **One-click presets**: Bubble Wave / Classic Workflow / Cyber Minimal, re-skin or reset anytime
 - **WYSIWYG preview**: built-in 1:1 Feishu CardKit 2.0 card simulator that redraws in real time
 
-On save: writes `~/.hermes/config.yaml` and triggers `Config().reload()` — **applies within seconds, no gateway restart needed**.
+On save: writes `~/.hermes/config.yaml` (backup first, atomic write). The gateway is a separate process — send `/aowen config reload` in Feishu or restart the gateway, and new cards render with the new config.
 
 Security by design (for open-source users):
 
@@ -236,6 +244,17 @@ See [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the full list of custom
 - **📊 Model Display** — Stable model name display without flickering
 
 ---
+
+## What's new in 2.3.1
+
+Studio audit fixes — config safety and honest messaging.
+
+- **🐛 Fix: invalid `text_sizes` value broke all cards (P0)**: The Studio UI defaulted the body text size to `normal_v2`, which the runtime CardKit 2.0 whitelist rejects — saving it made the gateway raise `ValueError` on card creation, silently dropping streaming cards for every message. The server now validates every `text_sizes` value against the runtime whitelist and refuses invalid writes; the UI uses dropdowns limited to official sizes plus "default" (= do not write the key).
+- **📢 Honest messaging (P1)**: `Config().reload()` only clears the Studio process's own cache; the gateway picks up changes after `/aowen config reload` or a restart — toasts, buttons and READMEs now say so.
+- **🛡️ Frontend XSS hardening (P2)**: All dynamic config values pass through `escapeHtml()` before entering the DOM.
+- **🧹 Backup rotation (P3)**: Config backups keep only the newest 20 copies.
+- **🔒 Desensitization**: Removed internal nicknames left in v2.3.0 code.
+- **🧪 Tests**: 5 new cases in `test_v230_studio.py` (text_sizes whitelist regression guard, end-to-end refuse-write preserves the file, backup rotation); full suite passing.
 
 ## What's new in 2.3.0
 

@@ -41,12 +41,14 @@ import yaml
 try:
     from ..cardkit.theme import BUBBLE_WAVE
     from ..config import Config, _get_hermes_config_path
+    from ..config.reader import _TEXT_SIZE_VALUES
 except (ImportError, ValueError):
     # Fallback when running directly as standalone script
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from cardkit.theme import BUBBLE_WAVE
     from config import Config, _get_hermes_config_path
+    from config.reader import _TEXT_SIZE_VALUES
 
 _logger = logging.getLogger("aidupop_studio")
 
@@ -55,7 +57,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "bubble_wave": {
         "id": "bubble_wave",
         "name": "泡波样式 (Bubble Wave)",
-        "desc": "出厂默认。猴哥拍板的浪潮泡泡视觉，活泼可爱",
+        "desc": "出厂默认。浪潮泡泡视觉，活泼可爱",
         "theme": copy.deepcopy(BUBBLE_WAVE),
     },
     "classic_workflow": {
@@ -184,8 +186,17 @@ def _validate_ui_payload(cfg: dict[str, Any]) -> tuple[bool, str]:
                     return False, "footer.fields 必须是二维字符串数组"
 
     text_sizes = cfg.get("text_sizes")
-    if text_sizes is not None and not isinstance(text_sizes, dict):
-        return False, "text_sizes 必须是对象"
+    if text_sizes is not None:
+        if not isinstance(text_sizes, dict):
+            return False, "text_sizes 必须是对象"
+        # v2.3.1: 取值必须与运行时白名单一致（config.reader._TEXT_SIZE_VALUES）。
+        # 非法值（如历史默认 normal_v2）写入后会让网关建卡抛 ValueError，
+        # 导致所有消息静默失去流式卡片——必须在写入前拦截。
+        for role, size in text_sizes.items():
+            if not isinstance(size, str) or size not in _TEXT_SIZE_VALUES:
+                return False, (
+                    f"text_sizes.{role} 不是合法的 CardKit 2.0 字号（收到: {size!r}）"
+                )
 
     for int_key in ("max_tool_steps", "flush_interval_ms", "print_step"):
         if int_key in cfg and not isinstance(cfg[int_key], (int, float)):
@@ -290,6 +301,20 @@ def _merge_ui_plugin_section(
     return merged
 
 
+def _prune_backups(backup_dir: Path, keep: int = 20) -> None:
+    """v2.3.1: 备份轮转——只保留最近 ``keep`` 份，防止无限堆积."""
+    backups = sorted(
+        backup_dir.glob("config.yaml.bak_*"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for old in backups[keep:]:
+        try:
+            old.unlink()
+        except OSError:
+            pass  # 清理失败不影响主流程
+
+
 def write_plugin_config(ui_cfg: dict[str, Any]) -> tuple[bool, str]:
     """安全写回 ~/.hermes/config.yaml，并触发热重载.
 
@@ -321,6 +346,7 @@ def write_plugin_config(ui_cfg: dict[str, Any]) -> tuple[bool, str]:
             backup_dir.mkdir(parents=True, exist_ok=True)
             backup_file = backup_dir / f"config.yaml.bak_{int(time.time())}"
             shutil.copy2(cfg_path, backup_file)
+            _prune_backups(backup_dir)
         except OSError as e:
             _logger.warning("Studio: backup creation failed: %s", e)
 
@@ -361,7 +387,7 @@ class StudioRequestHandler(http.server.SimpleHTTPRequestHandler):
     so other origins cannot read/POST to this config-writing service.
     """
 
-    server_version = "aiduPOP-Studio/2.3.0"
+    server_version = "aiduPOP-Studio/2.3.1"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         web_dir = Path(__file__).resolve().parent / "web"
@@ -393,7 +419,7 @@ class StudioRequestHandler(http.server.SimpleHTTPRequestHandler):
         elif route == "/api/presets":
             self._handle_get_presets()
         elif route == "/api/health":
-            self._send_json(200, {"status": "ok", "version": "2.3.0", "time": time.time()})
+            self._send_json(200, {"status": "ok", "version": "2.3.1", "time": time.time()})
         elif route.startswith("/api/"):
             self._send_json(404, {"ok": False, "error": "Not Found"})
         else:
@@ -555,7 +581,7 @@ def run_studio_server(host: str = "127.0.0.1", port: int = 8765, open_browser: b
     with httpd:
         url = f"http://{host}:{port}"
         print("\n=======================================================")
-        print("  🎨 aiduPOP Visual Studio (v2.3.0)")
+        print("  🎨 aiduPOP Visual Studio (v2.3.1)")
         print("  🌊 爱嘟波泡卡 · 流式卡片可视化工作坊")
         print("  -----------------------------------------------------")
         print(f"  🌐 服务地址: {url}")
@@ -582,7 +608,7 @@ def main() -> int:
     import argparse
 
     logging.basicConfig(level=logging.INFO)
-    parser = argparse.ArgumentParser(description="aiduPOP Visual Studio (v2.3.0)")
+    parser = argparse.ArgumentParser(description="aiduPOP Visual Studio (v2.3.1)")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen (default: 8765)")
     parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")

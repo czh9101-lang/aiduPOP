@@ -14,7 +14,7 @@
 美不是装饰，而是信息该在的位置，刚好在那里。
 ```
 
-[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.3.1-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
@@ -37,7 +37,7 @@
 |------|--------|----------|
 | 🫧 **泡波** | 出厂即萌化视觉 | v2.2.0 主题层：工具 emoji、思考波浪 🌊、统计气泡 🫧✨，零配置开箱即用 |
 | ⚡ **即时** | 第一个 token 就见卡片 | 无「正在输入」提示，无「回复：」狗皮膏药 |
-| 🎨 **可视化配置（v2.3.0 新增）** | 挑 emoji / 排布 panel 与 footer 不改代码 | `aidupop studio` 打开可视化工作坊，所见即所得预览飞书卡片，保存即热生效 |
+| 🎨 **可视化配置（v2.3.0 新增）** | 挑 emoji / 排布 panel 与 footer 不改代码 | `aidupop studio` 打开可视化工作坊，所见即所得预览飞书卡片，保存后 `/aowen config reload` 生效 |
 | 💠 **极简** | 每个元素都有理由 | Answer 在上、Panel 在下，footer 默认清空 |
 | 🚦 **状态** | 一眼看清结果 | 绿色完成 / 红色中止 / 黄色报错，颜色编码 |
 | 🔍 **透明** | 看清 AI 每一步 | 可展开面板：思考轮次、工具调用、时间戳 |
@@ -199,9 +199,17 @@ hermes_lark_streaming:
 
 ---
 
-## 🎨 可视化配置工作坊（v2.3.0 · 可选）
+## 🎨 可视化配置工作坊（v2.3.1 · 可选）
 
 不想手写 YAML？`aidupop studio` 提供一个**纯本地、零第三方依赖**的可视化配置工作坊，让你像挑贴纸一样调整泡波卡外观。
+
+> 🏆 **全网首创**：aiduPOP 是首个为 Hermes Agent 飞书流式卡片插件打造「可视化配置工作坊」的开源项目——纯本地运行、零第三方依赖、内置 1:1 CardKit 2.0 实时仿真预览，改完即见，无需触碰一行代码。
+
+<p align="center">
+  <img src="assets/screenshots/07-visual-card-studio.png" width="860" alt="Visual Card Studio 可视化配置工作坊">
+  <br>
+  <sub>Visual Card Studio 工作坊：品牌区 / 一键预设 / 工具 Emoji 配置 / 1:1 飞书卡片实时预览，保存后 <code>/aowen config reload</code> 生效</sub>
+</p>
 
 ```bash
 aidupop studio                 # 默认 127.0.0.1:8765，自动打开浏览器
@@ -219,7 +227,7 @@ aidupop studio --no-browser    # 不自动打开浏览器
 - **一键预设**：泡波样式 / 经典工作流 / 极简极客，随时一键换肤或重置
 - **所见即所得预览**：内置 1:1 飞书 CardKit 2.0 卡片仿真，改动实时重绘
 
-保存后：写入 `~/.hermes/config.yaml` 并触发 `Config().reload()`，**秒级热生效、无需重启网关**。
+保存后：写入 `~/.hermes/config.yaml`（先备份、原子写回）。网关是独立进程，在飞书群发送 `/aowen config reload` 或重启网关后，新卡片即按新配置渲染。
 
 安全设计（面向开源用户）：
 
@@ -295,6 +303,15 @@ aiduPOP/
 </p>
 
 ## CHANGELOG
+
+### v2.3.1 (2026-08-17) — 爱嘟波泡卡 · Studio 审计修复（配置安全与如实文案）
+
+* 🐛 **text_sizes 非法值写入致卡片全灭修复（P0）**：Studio 前端默认字号 `normal_v2` 不在运行时 CardKit 2.0 白名单内，保存后网关建卡抛 `ValueError`、所有消息静默失去流式卡片。服务端新增逐值白名单校验、非法即拒写；前端字号改为下拉框（仅官方字号 +「默认」= 不写入）。
+* 📢 **文案如实化（P1）**：`Config().reload()` 仅刷新 Studio 自身进程缓存，网关需 `/aowen config reload` 或重启后生效——toast、按钮与 README 全部改为如实描述。
+* 🛡️ **前端 XSS 加固（P2）**：所有动态配置值经 `escapeHtml()` 转义后再进 DOM。
+* 🧹 **备份轮转（P3）**：配置备份仅保留最近 20 份，不再无限堆积。
+* 🔒 **脱敏补漏**：移除 v2.3.0 新增代码中遗留的内部称呼。
+* 🧪 **测试**：`test_v230_studio.py` 新增 5 项（text_sizes 白名单回归守卫、端到端拒写保原文件、备份轮转），全量测试通过。
 
 ### v2.3.0 (2026-08-17) — 爱嘟波泡卡 · 可视化配置工作坊（Visual Card Studio）
 
