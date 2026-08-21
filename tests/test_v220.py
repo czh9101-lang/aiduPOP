@@ -360,8 +360,8 @@ class TestVersion:
 
     def test_plugin_yaml_bumped(self) -> None:
         yaml_text = (_REPO_ROOT / "plugin.yaml").read_text(encoding="utf-8")
-        assert 'version: "2.3.1"' in yaml_text
+        assert 'version: "2.3.2"' in yaml_text
 
     def test_package_version_matches_yaml(self) -> None:
         import hermes_lark_streaming
-        assert hermes_lark_streaming.__version__ == "2.3.1"
+        assert hermes_lark_streaming.__version__ == "2.3.2" 

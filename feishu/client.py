@@ -121,6 +121,8 @@ CARDKIT_TRANSIENT_CODES = {
     1663,     # CardKit 服务端瞬态错误
     300000,   # CardKit 通用内部错误
     99991400, # 接口频率限制（per-API rate limit，HTTP 400）
+    300309,   # streaming 已关闭（间歇性时序竞态，单次重试可救）
+    300317,   # sequence 冲突（同上）
 }
 
 # 瞬态错误重试策略 — 指数退避
@@ -228,6 +230,8 @@ class FeishuClient:
             except FeishuAPIError as e:
                 last_error = e
                 if not _is_transient_error(e):
+                    if is_schema_error(e):
+                        _logger.warning("card schema error not retryable code=%s detail=%s op=%s", e.code, e.extract_schema_detail()[:120], operation)
                     raise
                 if attempt < max_retries:
                     delay = _TRANSIENT_RETRY_DELAYS[attempt]

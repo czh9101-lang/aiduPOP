@@ -43,6 +43,14 @@ def record_card_failed() -> None:
     with _metrics_lock:
         _metrics["cards_failed"] += 1
 
+def record_text_fallback(code: int = 0) -> None:
+    """流式失败回退纯文本 — 用于统计间歇性纯文本发生率。"""
+    with _metrics_lock:
+        _metrics["text_fallbacks"] = _metrics.get("text_fallbacks", 0) + 1
+        if code:
+            _error_codes[code] = _error_codes.get(code, 0) + 1
+
+
 def record_card_aborted() -> None:
     with _metrics_lock:
         _metrics["cards_aborted"] += 1
@@ -450,6 +458,7 @@ def build_monitor_card() -> dict[str, Any]:
             _metric_block("流式失败", m["stream_element_failures"], icon_key="locked", color=stream_fail_color),
         ),
         _two_col(
+            _metric_block("纯文本回退", m.get("text_fallbacks", 0), icon_key="warning", color="orange" if m.get("text_fallbacks",0)>0 else "default"),
             _metric_block("批量更新", m["batch_update_calls"], icon_key="info", color="default"),
             _metric_block("活跃会话", m["active_sessions"], icon_key="agent", color="orange" if m["active_sessions"] > 0 else "default"),
         ),
@@ -663,6 +672,7 @@ def _do_reset() -> None:
             "cards_completed": 0,
             "cards_failed": 0,
             "cards_aborted": 0,
+            "text_fallbacks": 0,
             "api_calls": 0,
             "api_errors": 0,
             "stream_element_calls": 0,

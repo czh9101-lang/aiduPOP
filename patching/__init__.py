@@ -383,7 +383,8 @@ def apply_patches() -> None:
             "has no" if not compat.has_conversation_loop else "has incompatible",
         )
 
-    _apply_direct_agent_patch()
+    aiagent_direct_patched = _apply_direct_agent_patch()
+    aiagent_direct_delayed = not aiagent_direct_patched
 
     cron_patched = False
     if compat.has_cron_scheduler:
@@ -428,7 +429,7 @@ def apply_patches() -> None:
         "version": __version__,
         "gateway_runner": "✓" if gw_patched else ("pending" if gw_delayed else "✗"),
         "conversation_loop": "✓" if _module_patch_applied else "n/a (direct AIAgent)",
-        "aiagent_direct": "applied",
+        "aiagent_direct": "applied" if aiagent_direct_patched else "pending",
         "cron_scheduler": "✓" if cron_patched else "n/a",
         "background_task": "✓" if gw_patched else ("pending" if gw_delayed else "n/a"),
         "feishu_adapter": "✓" if feishu_patched else "✗",
@@ -437,10 +438,11 @@ def apply_patches() -> None:
     }
     _logger.info(
         "HLS: patch summary v%s — GatewayRunner=%s conversation_loop=%s "
-        "AIAgent=applied cron=%s background=%s FeishuAdapter=%s create_adapter_hook=%s layout=%s",
+        "AIAgent=%s cron=%s background=%s FeishuAdapter=%s create_adapter_hook=%s layout=%s",
         __version__,
         _patch_status["gateway_runner"],
         _patch_status["conversation_loop"],
+        _patch_status["aiagent_direct"],
         _patch_status["cron_scheduler"],
         _patch_status["background_task"],
         _patch_status["feishu_adapter"],
@@ -449,7 +451,43 @@ def apply_patches() -> None:
     )
 
     # Deferred direct patch: retry AIAgent.run_conversation after Hermes
-    # finishes loading all modules (belt-and-suspenders for lazy imports)
+    # finishes loading all modules (belt-and-suspenders for lazy imports).
+    # 2026-08-17 deadlock fix: on the CLI/TUI path run_agent is NOT loaded when
+    # apply_patches() runs (plugin discovery happens before AIAgent construction),
+    # and we must not import it eagerly (that is the deadlock edge).  So the
+    # immediate attempt above returns False, and we poll sys.modules here until
+    # run_agent appears — mirroring the GatewayRunner delayed-patch poll.  On the
+    # gateway path run_agent is already loaded, aiagent_direct_patched is True,
+    # and this thread is never started (behavior unchanged).
+    if aiagent_direct_delayed:
+        _logger.info(
+            "hermes-lark-streaming: run_agent not loaded yet — "
+            "starting deferred AIAgent direct-patch poll (2s interval, 60s timeout)",
+        )
+
+        def _delayed_agent_patch():
+            """Poll for run_agent and apply the AIAgent direct patch once available."""
+            deadline = time.monotonic() + 60.0  # 60-second timeout
+            while time.monotonic() < deadline:
+                time.sleep(2.0)  # Poll every 2 seconds
+                if _apply_direct_agent_patch():
+                    _logger.info(
+                        "hermes-lark-streaming: AIAgent.run_conversation patched directly (delayed) ✓"
+                    )
+                    # Reflect success in the doctor-facing status dict.
+                    _patch_status["aiagent_direct"] = "applied"
+                    return
+            # Timeout — run_agent never became available in this process
+            _logger.error(
+                "hermes-lark-streaming: run_agent NOT FOUND after 60s — "
+                "AIAgent.run_conversation direct patch NOT applied. "
+                "If this is a CLI/TUI session the agent may still work via the "
+                "conversation_loop module patch; check 'hermes doctor' if streaming "
+                "misbehaves.",
+            )
+
+        _delayed_agent_thread = threading.Thread(target=_delayed_agent_patch, daemon=True)
+        _delayed_agent_thread.start()
 
 def _apply_feishu_adapter_patches(FeishuAdapter, *, is_repatch: bool = False) -> bool:
     """Apply all FeishuAdapter method patches to the given class."""
@@ -644,12 +682,17 @@ def _apply_create_adapter_hook() -> bool:
     )
     return True
 
-def _apply_direct_agent_patch() -> None:
-    """Directly patch AIAgent.run_conversation as belt-and-suspenders."""
+def _apply_direct_agent_patch() -> bool:
+    """Directly patch AIAgent.run_conversation as belt-and-suspenders.
+
+    Returns True if the patch is in place after this call (either freshly
+    applied or already applied), False if it is still deferred/failed — the
+    deferred-retry poll thread uses this to know when to stop.
+    """
     AIAgent = HermesCompat().aiagent_class
     if AIAgent is None:
         _logger.info("hermes-lark-streaming: AIAgent.run_conversation direct patch deferred (run_agent not yet loaded)")
-        return
+        return False
 
     try:
         _orig_method = AIAgent.run_conversation
@@ -657,7 +700,7 @@ def _apply_direct_agent_patch() -> None:
         # Guard: skip if already patched
         if getattr(_orig_method, "_hls_direct_patched", False):
             _logger.info("hermes-lark-streaming: AIAgent.run_conversation already directly patched, skip")
-            return
+            return True
 
         # v1.3.4 fix (P1): inspect.signature 可能对 C 扩展/wrapped callable 抛异常
         import inspect
@@ -703,5 +746,7 @@ def _apply_direct_agent_patch() -> None:
         _patched_run_conversation._hls_direct_patched = True
         AIAgent.run_conversation = _patched_run_conversation
         _logger.info("hermes-lark-streaming: AIAgent.run_conversation patched directly")
+        return True
     except AttributeError as e:
         _logger.info("hermes-lark-streaming: AIAgent.run_conversation direct patch deferred (run_agent not yet loaded: %s)", e)
+        return False

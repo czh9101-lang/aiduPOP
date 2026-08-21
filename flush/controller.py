@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 _logger = logging.getLogger("hermes_lark_streaming")
 
 CARDKIT_MS = 0.080  # CardKit 流式 API 的刷新间隔（80ms：≥官方默认 print_frequency_ms 70ms，留余量给 API 往返）
-LONG_GAP_MS = 1.000  # 超过此间隔 → 认为是长时间空闲
+LONG_GAP_MS = 2.000  # 超过此间隔 → 认为是长时间空闲（2026-08: 1.0s太紧，LLM重试>1s易切段，调至2.0s）
 BATCH_AFTER_GAP_MS = 0.100  # 长时间空闲后等待这个时间再 flush
 
 class FlushController:
@@ -144,7 +144,7 @@ class FlushController:
         try:
             await do_flush()
         except Exception:
-            _logger.debug("flush error suppressed", exc_info=True)
+            _logger.info("flush error suppressed (will reflush if needed)", exc_info=True)
         finally:
             self._flush_in_progress = False
             self._last_update_time = time.monotonic()

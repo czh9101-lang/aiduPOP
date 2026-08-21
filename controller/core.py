@@ -382,6 +382,20 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
 
         self._prune_stale_sessions()
 
+        # 2026-08: 启动窗口抢打 — 若 AIAgent direct patch 仍 pending（轮询间隙），
+        # 首包到达时同步抢一次，避免冷启动60s窗口内纯文本
+        try:
+            from ..patching import _apply_direct_agent_patch
+            from ..patching import _patch_status as _ps2
+            if _ps2.get("aiagent_direct") == "pending":
+                ok = _apply_direct_agent_patch()
+                if ok:
+                    _logger.info("HLS: on_message_started抢打AIAgent direct patch成功 msg=%s", (message_id or "?")[:12])
+                else:
+                    _logger.warning("HLS: on_message_started时AIAgent direct patch仍pending msg=%s chat=%s (可能走纯文本)", (message_id or "?")[:12], chat_id[:12])
+        except Exception:
+            _logger.debug("HLS: on_message_started抢打direct patch探查失败", exc_info=True)
+
         # v1.3.6 fix: 用 seen set 跟踪已处理的 session 对象，防止同一 session
         seen_sessions: set[int] = set()
         for existing_msg_id, existing_session in self._sess_canonical_items_snapshot():
@@ -1019,6 +1033,12 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
             await self._send_text_fallback(session, fallback_text=_fallback_text)
 
     async def _send_text_fallback(self, session: CardSession, *, fallback_text: str = "") -> None:
+        # 可观测：统计纯文本回退
+        try:
+            from ..aowen import record_text_fallback
+            record_text_fallback()
+        except Exception:
+            pass
         """卡片不可用时，通过飞书 API 发送文本回复作为兜底."""
         if not self._client:
             return
