@@ -209,3 +209,24 @@ class HermesCompat:
             "has_conversation_loop": self.has_conversation_loop,
             "hermes_version": self.hermes_version,
         }
+
+
+def patch_finish_reason_guard() -> bool:
+    """
+    Auto-patch Hermes chat_completion_helpers to properly handle Responses API /
+    relayed models (like muse-spark) that end stream with terminal usage instead of finish_reason.
+    """
+    try:
+        import agent.chat_completion_helpers as cch
+        # Check if file has patch
+        import inspect
+        src_file = inspect.getfile(cch)
+        with open(src_file, "r", encoding="utf-8") as f:
+            code = f.read()
+        if "_saw_terminal_usage" not in code:
+            import subprocess
+            subprocess.run(["/root/.hermes/scripts/fix_muse_finish_reason.py"], check=False)
+            return True
+        return True
+    except Exception:
+        return False
