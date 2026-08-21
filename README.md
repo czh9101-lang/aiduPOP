@@ -14,7 +14,7 @@
 美不是装饰，而是信息该在的位置，刚好在那里。
 ```
 
-[![Version](https://img.shields.io/badge/version-2.3.1-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.3.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
@@ -303,6 +303,13 @@ aiduPOP/
 </p>
 
 ## CHANGELOG
+
+### v2.3.2 (2026-08-21) — 爱嘟波泡卡 · 稳定性与可观测性加固
+
+* 🛡️ **冷启动流式防丢失**：`hermes_adapter` 与 `__init__` 探测逻辑对齐，冷启动期间接收首条消息时同步执行补丁加载，彻底根除冷启动 60s 窗口内偶发降级纯文本的问题。
+* 🌊 **长间隙节流优化**：`flush` 阈值 `LONG_GAP_MS` 由 1.0s 放宽至 2.0s，大幅降低上游 LLM 抖动重试时的误切段概率。
+* 🔄 **卡片瞬态错误重试补全**：将飞书 CardKit `300309` (streaming_closed) 与 `300317` (sequence_conflict) 纳入瞬态自动重试；`300315` 细分非法属性告警，防止卡片意外回退。
+* 📊 **可观测性增强**：监控面板新增「纯文本回退」独立统计格，异常降级实时透明可查。
 
 ### v2.3.1 (2026-08-17) — 爱嘟波泡卡 · Studio 审计修复（配置安全与如实文案）
 

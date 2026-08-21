@@ -1,3 +1,21 @@
+## v2.3.2 (2026-08-21) — 爱嘟波泡卡 · 稳定性与可观测性加固
+
+### 🛡️ Fixed — 冷启动与时序竞态防纯文本（P0）
+
+- **修复**：`patching/__init__.py` 与 `patching/hermes_adapter.py` 使用 `sys.modules.get` 安全探测 + 60s 守护轮询。
+- **加固**：首包消息到达触发 `on_message_started` 时立即执行一次同步抢打，消除轮询间隙导致的消息纯文本兜底。
+
+### 🌊 Changed — 节流分段保护与卡片重试（P1）
+
+- **节流**：`flush/controller.py` 的 `LONG_GAP_MS` 由 1.0s 调宽至 2.0s，容忍思考模型与网关重试引起的短暂停顿，避免卡片切段。
+- **重试**：`feishu/client.py` 将 `300309` (streaming_closed) 与 `300317` (sequence_conflict) 纳入瞬态自动重试白名单；`300315` 细化非法属性提取日志。
+
+### 📊 Added — 纯文本回退可观测性（P2）
+
+- `aowen/__init__.py` 监控面板新增「纯文本回退」指标格，并在 `_send_text_fallback` 关键路径打点透传。
+
+---
+
 ## v2.3.1 (2026-08-17) — 爱嘟波泡卡 · Studio 审计修复（配置安全与如实文案）
 
 ### 🐛 Fixed — text_sizes 非法值写入致卡片全灭（P0）

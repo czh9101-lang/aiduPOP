@@ -10,7 +10,7 @@ Transparent is not dumping logs, but letting you see what the AI is thinking at 
 Beautiful is not decoration, but the right information being exactly where it belongs.
 ```
 
-[![Version](https://img.shields.io/badge/version-2.3.1-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/version-2.3.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
 [![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -244,6 +244,13 @@ See [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the full list of custom
 - **📊 Model Display** — Stable model name display without flickering
 
 ---
+
+## What's new in 2.3.2
+
+- **🛡️ Cold-start patch guard**: Synchronized `hermes_adapter` detection logic to greedily patch direct agent runners on first incoming message, eliminating plain-text fallback during the 60s cold-start window.
+- **🌊 Flush gap tolerance**: Raised `LONG_GAP_MS` from 1.0s to 2.0s to prevent unintentional message segmentation during upstream model retries.
+- **🔄 Transient error retry**: Added Feishu CardKit `300309` (streaming_closed) and `300317` (sequence_conflict) to transient retries; refined `300315` logging for invalid schema attributes.
+- **📊 Observability**: Added a dedicated `text_fallbacks` counter in the aowen monitor panel to track fallback events cleanly.
 
 ## What's new in 2.3.1
 
