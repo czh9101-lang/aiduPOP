@@ -11,6 +11,43 @@ _MAX_CARD_TABLES = 20  # 流式卡片：20表降级阈值（流式增量内容�
 _MAX_CRON_TABLES = 5   # 静态卡片：5表降级阈值（飞书 Card 2.0 单卡硬限）
 _MAX_CHUNK_CHARS = 2400
 
+# 【嘟嘟定制 v23.3】通用内容钳制（防爆）— 单块显示上限，头尾保留中段省略
+_MAX_DISPLAY_CHARS = 3000
+_CLAMP_HEAD = 2200
+_CLAMP_TAIL = 600
+
+def clamp_content(content: str, max_chars: int = _MAX_DISPLAY_CHARS) -> str:
+    """超限内容保留头尾、中段省略 — 防止单个元素撑爆整卡（飞书 ~30K JSON 上限，溢出断屏根因）."""
+    if len(content) <= max_chars:
+        return content
+    omitted = len(content) - _CLAMP_HEAD - _CLAMP_TAIL
+    return (
+        content[:_CLAMP_HEAD]
+        + f"\n\n…（中段省略 {omitted} 字符，防卡片溢出）…\n\n"
+        + content[-_CLAMP_TAIL:]
+    )
+
+_ANSWER_MAX_BYTES = 13000   # 【嘟嘟定制 v23.3】answer 总预算（UTF-8 字节，≈4300汉字）— 中文 24K 字符=72KB 是断屏元凶之一；与 panel 保底(~13KB)+结构开销合计 <30KB 硬限
+
+def clamp_utf8(text: str, max_bytes: int = _ANSWER_MAX_BYTES) -> str:
+    """按 UTF-8 字节钳制长文 — len() 对中文会低估 3 倍体积（1 汉字=3 字节）.
+
+    二分找字节安全边界，头尾保留 + 省略标记。用于 answer 正文防爆。
+    """
+    raw_len = len(text.encode("utf-8"))
+    if raw_len <= max_bytes:
+        return text
+    suffix = "\n\n…（内容过长已截断，防卡片溢出）…"
+    budget = max_bytes - len(suffix.encode("utf-8"))
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(text[:mid].encode("utf-8")) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo] + suffix
+
 # ── Pre-compiled regex patterns (P2-01: avoid recompilation on every call) ──
 _RE_FENCED_CODE = re.compile(r'```[\s\S]*?```')
 _RE_INLINE_CODE = re.compile(r'`[^`]+`')
@@ -35,6 +72,8 @@ __all__ = [
     "_split_long_text",
     "_strip_invalid_image_keys",
     "escape_markdown_asterisks",
+    "clamp_content",
+    "clamp_utf8",
     "optimize_markdown_style",
 ]
 

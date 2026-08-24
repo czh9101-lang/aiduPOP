@@ -670,8 +670,9 @@ class TestDoUnifiedFlush:
         await ctrl._do_unified_flush(session)
 
         content = ctrl._client.cardkit_stream_element.await_args.args[2]
+        # 【v23.3】answer 截断升级为字节级 clamp_utf8（中文 3 字节膨胀根治），标记文案同步更换
         assert len(content) < 25000
-        assert content.endswith("...(过长截断)")
+        assert content.endswith("…（内容过长已截断，防卡片溢出）…")
         assert session.unified_state.answer_dirty is False
 
     @pytest.mark.asyncio

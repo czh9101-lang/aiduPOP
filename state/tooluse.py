@@ -189,6 +189,15 @@ def _humanize_tool_name(name: str) -> str:
 def _format_duration_label(ms: float) -> str:
     return f"{ms:.0f} ms" if ms < 1000 else f"{(ms / 1000):.1f} s"
 
+_MAX_DISPLAY_CHARS = 5000   # 【嘟嘟定制 v23.3】工具输出防爆截断 — 单块显示上限
+_CLAMP_HEAD = 3800          # 保留头部
+_CLAMP_TAIL = 800           # 保留尾部
+
+def _clamp_content(content: str) -> str:
+    """超限内容保留头尾、中段省略 — 委托 cardkit.md.clamp_content（v23.3 统一防爆引擎）."""
+    from ..cardkit.md import clamp_content  # lazy: 避免 state→cardkit 顶层耦合（同 get_theme 模式）
+    return clamp_content(content)
+
 def _build_display_block(
     value: Any,
     fallback_lang: str = "json",
@@ -208,17 +217,17 @@ def _build_display_block(
             try:
                 parsed = json.loads(normalized)
                 pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
-                return _fenced_block("json", pretty)
+                return _fenced_block("json", _clamp_content(pretty))
             except json.JSONDecodeError:
                 pass
-        return _fenced_block("text" if fallback_lang == "json" else fallback_lang, normalized)
+        return _fenced_block("text" if fallback_lang == "json" else fallback_lang, _clamp_content(normalized))
     if isinstance(value, (dict, list)):
         try:
-            return _fenced_block("json", json.dumps(value, ensure_ascii=False, indent=2))
+            return _fenced_block("json", _clamp_content(json.dumps(value, ensure_ascii=False, indent=2)))
         except (TypeError, ValueError):
             pass
     normalized = str(value).strip()
-    return _fenced_block("text", normalized) if normalized else None
+    return _fenced_block("text", _clamp_content(normalized)) if normalized else None
 
 def _fenced_block(language: str, content: str) -> dict[str, Any]:
     fence = "`" * max(3, max((len(m) for m in re.findall(r"`+", content)), default=0) + 1)
@@ -246,7 +255,7 @@ class ToolUseTracker:
             ToolStep(
                 name=name,
                 status="running",
-                detail=detail,
+                detail=_clamp_content(detail) if detail else detail,  # 【嘟嘟定制 v23.3】detail 防爆
                 started_at=time.time(),
             )
         )

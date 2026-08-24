@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -9,6 +10,7 @@ from .i18n import _LOCALES, _T, _i18n, _t
 from .md import (
     _downgrade_tables,
     _split_long_text,
+    clamp_content,
     optimize_markdown_style,
 )
 from .theme import get_theme, is_emoji_icon
@@ -306,6 +308,37 @@ def build_panel_children(*, reasoning_rounds: list, current_reasoning_text: str 
         trimmed_tools = len(tool_steps) - max_tool_steps
         tool_steps = tool_steps[-max_tool_steps:]
 
+    # ── 【嘟嘟定制 v23.3】panel 全局体积预算（防爆第二层）─────────────────
+    # 单块钳制(clamp_content)只防"单工具巨无霸"，防不住 N 个中等输出积少成多。
+    # 按 UTF-8 字节计量（中文 3 字节/字），从最老的内容开始收纳：
+    # 先折旧工具步骤（保留最近2步），不够再折旧推理轮次（保留最近1轮）。
+    # 保证 panel 恒定在安全区内 → 根治溢出断屏。
+    _PANEL_BUDGET = 8000    # panel children 总字节预算（answer 另有 24K 字符独立预算）
+    def _el_size(el_list) -> int:
+        return sum(len(json.dumps(e, ensure_ascii=False).encode("utf-8")) for e in el_list)
+
+    tool_steps = list(tool_steps)   # 拷贝，严禁 pop 上游 state 原始列表
+    reasoning_rounds = list(reasoning_rounds)
+    while len(tool_steps) > 2 and _el_size(
+        [e for s in tool_steps for e in _build_tool_step_elements(s)]
+    ) > _PANEL_BUDGET:
+        tool_steps.pop(0)
+        trimmed_tools += 1
+
+    def _reasoning_bytes() -> int:
+        return sum(
+            len(json.dumps({"t": r.text[:_REASONING_DISPLAY_LIMIT]}, ensure_ascii=False).encode("utf-8"))
+            for r in reasoning_rounds
+        )
+
+    while (
+        len(reasoning_rounds) > 1
+        and _el_size([e for s in tool_steps for e in _build_tool_step_elements(s)]) + _reasoning_bytes() > _PANEL_BUDGET
+    ):
+        reasoning_rounds.pop(0)
+        trimmed_rounds += 1
+    # ────────────────────────────────────────────────────────
+
     num_rounds = len(reasoning_rounds) + (1 if current_reasoning_text else 0)
 
     # Filter panel_events to match trimmed items (offset mapping).
@@ -572,15 +605,20 @@ def _build_tool_step_output(step: dict) -> dict | None:
     lines: list[str] = []
     if error_block:
         lines.append("**Error**")
+        # 【嘟嘟定制 v23.3】渲染层兜底钳制 — 纵深防御：无论 block 从哪条路径构造，出卡前必钳
         lines.append(
-            error_block.get("fenced")
-            or _format_code_block(error_block.get("content", ""), error_block.get("language", "text"))
+            clamp_content(
+                error_block.get("fenced")
+                or _format_code_block(error_block.get("content", ""), error_block.get("language", "text"))
+            )
         )
     elif result_block:
         lines.append("**Result**")
         lines.append(
-            result_block.get("fenced")
-            or _format_code_block(result_block.get("content", ""), result_block.get("language", "json"))
+            clamp_content(
+                result_block.get("fenced")
+                or _format_code_block(result_block.get("content", ""), result_block.get("language", "json"))
+            )
         )
 
     if not lines:
@@ -634,6 +672,9 @@ def _build_error_panel(error_message: str, *, is_aborted: bool = False, expanded
             friendly_zh += "\n\n如果反复出错，请把调试 ID 反馈给开发者。"
 
         tech_detail = error_message.strip() if error_message else ""
+        if tech_detail:
+            # 【嘟嘟定制 v23.3】技术详情防爆钳制 — 超长堆栈也会撑爆整卡
+            tech_detail = clamp_content(tech_detail)
         if tech_detail:
             body_content = f"{friendly_zh}\n\n---\n**技术详情**\n```\n{tech_detail}\n```"
             body_content_en = f"{friendly_en}\n\n---\n**Technical Details**\n```\n{tech_detail}\n```"

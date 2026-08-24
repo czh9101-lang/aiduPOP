@@ -24,6 +24,7 @@ from ..cardkit import (
 from ..cardkit.md import (
     _downgrade_tables,
     _split_long_text,
+    clamp_utf8,
     escape_markdown_asterisks,
     optimize_markdown_style,
 )
@@ -515,10 +516,8 @@ class UnifiedControllerMixin:
 
             # Note: skip markdown optimization during streaming for performance;
             if state.answer_dirty:
-                # 【嘟嘟定制 v23.2】长内容防爆截断
-                _raw = state.answer_text or " "
-                if len(_raw) > 24000:
-                    _raw = _split_long_text(_raw, limit=24000)[0] + "\n\n...(过长截断)"
+                # 【嘟嘟定制 v23.2→v23.3】长内容防爆截断（v23.3: 字节级，根治中文3倍膨胀）
+                _raw = clamp_utf8(state.answer_text or " ")
                 content = escape_markdown_asterisks(_raw)
                 session.sequence += 1
                 try:
@@ -656,10 +655,8 @@ class UnifiedControllerMixin:
 
         # Note: skip markdown optimization during streaming for performance;
         if state.answer_dirty and "answer" in session._creation_stages:
-            # 【嘟嘟定制 v23.2】长内容防爆截断
-            _raw = state.answer_text or " "
-            if len(_raw) > 24000:
-                _raw = _split_long_text(_raw, limit=24000)[0] + "\n\n...(过长截断)"
+            # 【嘟嘟定制 v23.2→v23.3】长内容防爆截断（v23.3: 字节级，根治中文3倍膨胀）
+            _raw = clamp_utf8(state.answer_text or " ")
             content = escape_markdown_asterisks(_raw)
             session.sequence += 1
             try:
@@ -870,10 +867,8 @@ class UnifiedControllerMixin:
 
                 # ── Flush remaining answer text ──
                 if state.answer_dirty and "answer" in session._creation_stages and not session._streaming_closed:
-                    # 【嘟嘟定制 v23.2】长内容防爆截断
-                    _raw = state.answer_text or " "
-                    if len(_raw) > 24000:
-                        _raw = _split_long_text(_raw, limit=24000)[0] + "\n\n...(过长截断)"
+                    # 【嘟嘟定制 v23.2→v23.3】长内容防爆截断（v23.3: 字节级，根治中文3倍膨胀）
+                    _raw = clamp_utf8(state.answer_text or " ")
                     content = escape_markdown_asterisks(_raw)
                     try:
                         session.sequence += 1
@@ -938,10 +933,8 @@ class UnifiedControllerMixin:
             # v1.3.1 fix: Do NOT skip this step even when the answer was already fully
             # guard) is a minor visual issue; content truncation is a P0 data-loss bug.
             if state is not None and state.answer_text and "answer" in session._creation_stages:
-                # 【嘟嘟定制 v23.2】长内容防爆截断
-                _raw = state.answer_text or " "
-                if len(_raw) > 24000:
-                    _raw = _split_long_text(_raw, limit=24000)[0] + "\n\n...(过长截断)"
+                # 【嘟嘟定制 v23.2→v23.3】长内容防爆截断（v23.3: 字节级，根治中文3倍膨胀）
+                _raw = clamp_utf8(state.answer_text or " ")
                 optimized_content = escape_markdown_asterisks(_downgrade_tables(optimize_markdown_style(_raw))) or " "
                 seal_actions.append({
                     "action": "partial_update_element",
@@ -1142,10 +1135,8 @@ class UnifiedControllerMixin:
                             # v1.3.1: same fix as main seal path — always send final
                             # (see v1.3.1 fix comment in main seal path above).
                             if state.answer_text and "answer" in session._creation_stages:
-                                # 【嘟嘟定制 v23.2】长内容防爆截断
-                                _raw = state.answer_text or " "
-                                if len(_raw) > 24000:
-                                    _raw = _split_long_text(_raw, limit=24000)[0] + "\n\n...(过长截断)"
+                                # 【嘟嘟定制 v23.2→v23.3】长内容防爆截断（v23.3: 字节级，根治中文3倍膨胀）
+                                _raw = clamp_utf8(state.answer_text or " ")
                                 optimized_content = escape_markdown_asterisks(_downgrade_tables(optimize_markdown_style(_raw))) or " "
                                 retry_actions.append({
                                     "action": "partial_update_element",
@@ -1286,10 +1277,8 @@ class UnifiedControllerMixin:
 
             # ── Drain answer text ──
             if state.answer_dirty and "answer" in session._creation_stages:
-                # 【嘟嘟定制 v23.2】长内容防爆截断
-                _raw = state.answer_text or " "
-                if len(_raw) > 24000:
-                    _raw = _split_long_text(_raw, limit=24000)[0] + "\n\n...(过长截断)"
+                # 【嘟嘟定制 v23.2→v23.3】长内容防爆截断（v23.3: 字节级，根治中文3倍膨胀）
+                _raw = clamp_utf8(state.answer_text or " ")
                 content = escape_markdown_asterisks(_raw)
                 try:
                     session.sequence += 1

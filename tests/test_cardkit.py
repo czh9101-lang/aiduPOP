@@ -981,11 +981,13 @@ class TestBuildUnifiedPanelTrimming:
         title_content = panel["header"]["title"]["content"]
         assert "30" in title_content
         # Collapse hint should mention trimmed tools
+        # 【v23.3】字节预算会额外折叠超体积的旧步骤，故只断言机制不断言精确数字
         children = panel["elements"]
         first = children[0]
         assert first["tag"] == "markdown"
-        assert "10 步早期操作" in first["content"]
+        assert "步早期操作" in first["content"]
         assert "已折叠" in first["content"]
+        assert int(first["content"].split("还有 ")[1].split(" 步")[0]) >= 10
 
     def test_trim_both(self):
         """Both reasoning and tools are trimmed when both exceed limits."""
@@ -1000,8 +1002,9 @@ class TestBuildUnifiedPanelTrimming:
         )
         children = panel["elements"]
         first = children[0]
-        assert "10 轮早期推理" in first["content"]
-        assert "10 步早期操作" in first["content"]
+        # 【v23.3】字节预算会额外折叠超体积的旧步骤，只断言机制不断言精确数字
+        assert "轮早期推理" in first["content"]
+        assert "步早期操作" in first["content"]
 
     def test_no_trim_when_within_limit(self):
         """No trimming when counts are within limits."""
@@ -1226,7 +1229,8 @@ class TestEnforceCardElementLimit:
         result = _enforce_card_element_limit(card)
         post_count = _count_tag_objects(result)
         assert post_count <= 195, f"Post-enforce count {post_count} exceeds 195"
-        assert post_count < pre_count, "Element count should have decreased after enforcement"
+        # 【v23.3】panel 字节预算已在源头收敛元素数，_enforce 可能已无需再裁剪
+        assert post_count <= pre_count, "Element count should not grow after enforcement"
 
     def test_enforce_does_nothing_when_under_limit(self):
         """_enforce_card_element_limit is a no-op when under 195."""
