@@ -15,8 +15,6 @@
 ```
 
 [![Version](https://img.shields.io/badge/version-2.3.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
-[![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
-[![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
@@ -24,6 +22,8 @@
 [![Aidu](https://img.shields.io/badge/aiduPOP-⚕️爱嘟泡波卡-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
 
 **中文** | **[📖 English](README_EN.md)**
+
+> **分发说明（GitHub/Gitee + GHCR）**：aiduPOP 不再通过 PyPI 发布或维护新的安装包。请使用 Hermes 插件从 GitHub/Gitee 安装，或使用 GHCR 镜像；源码目录中的本地开发安装不代表 PyPI 发布。
 
 ---
 
@@ -141,16 +141,7 @@
 
 ### 安装
 
-方式一 · pip（两个包名等价，装的是同一份代码）：
-
-```bash
-pip install aidupop                 # 爱嘟家族品牌名
-pip install hermes-lark-streaming   # 上游规范名
-```
-
-两者都提供同一个可导入包 `hermes_lark_streaming`，版本号同步发布。
-
-方式二 · 作为 Hermes 目录插件：
+方式一 · 作为 Hermes 目录插件（GitHub，推荐）：
 
 ```bash
 git clone https://github.com/monkey2jack/aiduPOP.git
@@ -158,7 +149,7 @@ cp -r aiduPOP ~/.hermes/plugins/hermes-lark-streaming
 hermes gateway restart
 ```
 
-方式三 · Docker（GHCR）：
+方式二 · Docker（GHCR）：
 
 ```bash
 docker pull ghcr.io/monkey2jack/aidupop:latest
@@ -370,4 +361,3 @@ aiduPOP/
 * 📊 **无损表格降级 (Compact Mode)**: 当卡片中 Markdown 表格数量超出飞书单卡限制 (最大 5-20 个) 时，不再粗暴转为代码块，而是无损压扁为带有黑体子标题和字段列表的 `Table N · Row M` 形式，彻底杜绝复杂表格引发的崩溃。
 * ✂️ **智能长文断层保护**: 当内容超过飞书安全红线 (24KB+) 触发截断时，算法将智能回退至段落或闭合符边缘，严密保护 Markdown 代码块围栏 (` ``` `) 以及行内变量 (\` \`)，坚决杜绝代码块“腰斩”与排版错乱。
 * 💎 **aiduPOP 核心守护**: 所有截断与降级拦截均在底层 (`md.py` 与 `linear_mixin.py` 的最后一公里) 进行，0 侵入，0 UI 改变，完美保持 aiduPOP 定制的 `_model_cache` 及 (⚕️💭🛠️⏱) 原生布局。
-

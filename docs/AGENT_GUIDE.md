@@ -3,6 +3,8 @@
 > 高信息密度参考文档，专为 Agent 自动解析设计
 > 最后更新: 2026-07-21 (v1.6.0)
 
+> **分发政策**：本项目不再通过 PyPI 发布或维护安装包。Agent 应使用下方的 Hermes CLI、GitHub/Gitee 源码方式安装；`pip install` 仅适用于源码目录中的开发环境，不应作为用户安装路径。
+
 ## 快速概览
 
 | 项目 | 值 |
@@ -46,12 +48,6 @@ git clone https://gitee.com/Aowen-Nowor/hermes-lark-streaming.git
 cd hermes-lark-streaming
 hermes plugins add .
 hermes gateway restart
-```
-
-### 方式三：pip 安装
-
-```bash
-pip install hermes-lark-streaming
 ```
 
 ## 卸载

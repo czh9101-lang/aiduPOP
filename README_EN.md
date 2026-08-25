@@ -11,8 +11,6 @@ Beautiful is not decoration, but the right information being exactly where it be
 ```
 
 [![Version](https://img.shields.io/badge/version-2.3.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
-[![PyPI aidupop](https://img.shields.io/pypi/v/aidupop.svg?label=pypi%20aidupop&color=ff9800)](https://pypi.org/project/aidupop/)
-[![PyPI hermes-lark-streaming](https://img.shields.io/pypi/v/hermes-lark-streaming.svg?label=pypi%20hermes--lark--streaming&color=3776AB)](https://pypi.org/project/hermes-lark-streaming/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg?logo=docker)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
@@ -20,6 +18,8 @@ Beautiful is not decoration, but the right information being exactly where it be
 [![Aidu](https://img.shields.io/badge/aiduPOP-⚕️爱嘟泡波卡-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
 
 **[📖 中文文档](README.md)** | **English**
+
+> **Distribution (GitHub/Gitee + GHCR):** aiduPOP no longer publishes or maintains new packages on PyPI. Install it as a Hermes plugin from GitHub/Gitee, or use the GHCR image. Local editable installs from a cloned source tree are for development only and are not PyPI distribution.
 
 ---
 
@@ -135,16 +135,7 @@ Built on top of [Aowen-Nowor's hermes-lark-streaming](https://gitee.com/Aowen-No
 
 ### Installation
 
-Option 1 · pip (both names are equivalent — same source, same version):
-
-```bash
-pip install aidupop                 # aidu-family brand name
-pip install hermes-lark-streaming   # upstream canonical name
-```
-
-Both provide the same importable package `hermes_lark_streaming`.
-
-Option 2 · as a Hermes directory plugin:
+Option 1 · as a Hermes directory plugin (GitHub, recommended):
 
 ```bash
 git clone https://github.com/monkey2jack/aiduPOP.git
@@ -152,7 +143,7 @@ cp -r aiduPOP ~/.hermes/plugins/hermes-lark-streaming
 hermes gateway restart
 ```
 
-Option 3 · Docker (GHCR):
+Option 2 · Docker (GHCR):
 
 ```bash
 docker pull ghcr.io/monkey2jack/aidupop:latest

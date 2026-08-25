@@ -19,6 +19,8 @@
 
 为 Hermes Agent 提供飞书 CardKit v2.0 流式消息卡片插件 — 实时 AI 响应展示，支持打字机效果、统一可折叠面板、按时间线交错显示推理与工具调用等。
 
+> **分发说明**：本项目已停止 PyPI 官方分发，不再维护新的 PyPI 安装包。请通过 GitHub/Gitee 的 Hermes 插件方式安装；需要容器时使用 GHCR 镜像。源码目录中的本地开发安装仅用于开发与测试。
+
 > 当前版本：**2.3.2**。可视化配置工作坊 `aidupop studio`（可选模块）：纯本地零第三方依赖，可视化配置工具 Emoji / Panel / Footer / 字号，内置 1:1 飞书卡片实时预览，保存后 `/aowen config reload` 生效；泡波样式与嘟嘟结构守卫不变，默认生产环境不加载本模块。
 
 > 基于 [Cheerwhy/hermes-lark-streaming](https://github.com/Cheerwhy/hermes-lark-streaming) v0.7.0 版本 fork 后进行改造和优化
