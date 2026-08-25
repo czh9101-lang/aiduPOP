@@ -15,7 +15,6 @@
 ```
 
 [![Version](https://img.shields.io/badge/version-2.3.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
-[![Docker GHCR](https://img.shields.io/badge/docker-ghcr.io%2Fmonkey2jack%2Faidupop-2496ed.svg)](https://github.com/monkey2jack/aiduPOP/pkgs/container/aidupop)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
 [![Built on hermes-lark-streaming](https://img.shields.io/badge/built%20on-hermes--lark--streaming-orange.svg)](https://gitee.com/Aowen-Nowor/hermes-lark-streaming)
@@ -23,7 +22,8 @@
 
 **中文** | **[📖 English](README_EN.md)**
 
-> **分发说明（GitHub/Gitee + GHCR）**：aiduPOP 不再通过 PyPI 发布或维护新的安装包。请使用 Hermes 插件从 GitHub/Gitee 安装，或使用 GHCR 镜像；源码目录中的本地开发安装不代表 PyPI 发布。
+<!-- distribution-policy: github-source-only -->
+> **分发说明（GitHub/Gitee）**：aiduPOP 不再通过 PyPI 或 GHCR 发布和维护安装包。请使用 Hermes 插件从 GitHub/Gitee 安装；源码目录中的本地开发安装仅用于开发与测试。
 
 ---
 
@@ -147,12 +147,6 @@
 git clone https://github.com/monkey2jack/aiduPOP.git
 cp -r aiduPOP ~/.hermes/plugins/hermes-lark-streaming
 hermes gateway restart
-```
-
-方式二 · Docker（GHCR）：
-
-```bash
-docker pull ghcr.io/monkey2jack/aidupop:latest
 ```
 
 ### 配置
