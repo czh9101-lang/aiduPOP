@@ -6,6 +6,19 @@
 
 ---
 
+## v2.4.1 (2026-09-02) — 爱嘟波泡卡 · 大师重构与开源大赛就绪版
+
+### 🛡️ Hardening & Governance — 发布护栏与治理完善 (P0)
+
+- **护栏移植**：移植 `release_scan.py` 七面敏感信息扫描器与 `push_gate.sh` 四道关推送闸门，词表外置，自检不过拒绝出结果。
+- **环境修复**：`pyproject.toml` dev extras 补齐 `setuptools>=68`，根治 Python 3.12+ 纯净 venv 下运行 `test_version.py` 的测试红灯。
+- **治理完备**：补充 `SECURITY.md`、`CODE_OF_CONDUCT.md`、`.github/ISSUE_TEMPLATE/` 与 PR 模板；新增 PR 触发轻量 CI 工作流。
+- **分发收尾**：清理历史孤儿构建脚本、Dockerfile 与 Gitee Go 配置，明确全渠道统一通过 Hermes 源码/目录插件安装。
+- **文档整理**：清理上游孤儿文档与外部群 token，独有运维指南迁移至 `docs/USER_GUIDE.md`；LICENSE 规范并列增加 monkey2jack 版权行。
+- **单一真相源**：Studio 后端 / CLI / 前端 / README 徽章全面接入 `plugin.yaml` 动态版本单一真相源，彻底杜绝文档版本漂移。
+
+---
+
 ## v2.4.0 (2026-08-24) — 爱嘟波泡卡 · 三层体积防爆引擎（溢出断屏根治）
 
 ### 🛡️ Added — 卡片体积三层防爆（P0）

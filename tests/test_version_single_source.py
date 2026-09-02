@@ -43,6 +43,21 @@ def _tracked_text_files() -> list[Path]:
         files.append(p)
     return files
 
+def _strip_comments_and_docstrings(text: str, ext: str) -> str:
+    """剥离注释行，避免注释中的历史解释与叙述（如 `# v2.4.1 修复`）触发假红灯。
+    （记忆 feedback_guard_judgment_ast_not_string 铁律实战落地）"""
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if ext in {".py", ".yaml", ".toml", ".sh"} and stripped.startswith("#"):
+            continue
+        if ext in {".js", ".css"} and (stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*")):
+            continue
+        if ext == ".html" and (stripped.startswith("<!--") or stripped.endswith("-->")):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
 def test_current_version_not_hardcoded_outside_source() -> None:
     v = _current_version()
     assert v and v != "unknown", f"真相源读出的版本不可信：{v!r}"
@@ -55,18 +70,18 @@ def test_current_version_not_hardcoded_outside_source() -> None:
             text = p.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        # 精确匹配版本字面量（带词边界，避免 2.4.0.1 之类误伤，也避免把 12.4.0 当命中）
-        if _contains_version(text, v):
+        clean_text = _strip_comments_and_docstrings(text, p.suffix.lower())
+        if _contains_version(clean_text, v):
             offenders.append(rel)
     assert not offenders, (
-        f"当前版本 {v!r} 被硬编码在真相源之外（SOP 铁律违反，坑6 累犯）：\n  "
+        f"当前版本 {v!r} 被硬编码在真相源之外的代码/配置有效内容中（SOP 铁律违反，坑6 累犯）：\n  "
         + "\n  ".join(offenders)
         + "\n改为从 plugin.yaml 读取（Python: from .. import __version__；"
           "前端: /api/health；README: shields dynamic badge）。"
     )
 
 def _contains_version(text: str, v: str) -> bool:
-    """词边界匹配：v 前后不能是数字或点，否则 2.4.0 会误命中 12.4.0 / 2.4.0.1。"""
+    """词边界匹配：v 前后不能是数字或点，否则 2.4.0 会误命中 12.4.0 / 2.4.0.X。"""
     import re
     return re.search(rf"(?<![\d.]){re.escape(v)}(?![\d.])", text) is not None
 
