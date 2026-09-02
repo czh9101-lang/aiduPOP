@@ -11,7 +11,7 @@ body:
     attributes:
       label: aiduPOP 版本
       description: 可查看 plugin.yaml 中的 version 或运行 aidupop doctor
-      placeholder: 如 2.4.0
+      placeholder: 如 2.x.x
     validations:
       required: true
   - type: input
