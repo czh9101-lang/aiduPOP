@@ -315,8 +315,8 @@ tests/
 ## 11. 开发环境
 
 ```bash
-# 克隆
-git clone -b DEV https://gitee.com/Aowen-Nowor/hermes-lark-streaming.git
+# 克隆（aiduPOP 本仓；上游 hermes-lark-streaming 仅供溯源，见 README 致谢）
+git clone https://github.com/monkey2jack/aiduPOP.git
 
 # 安装到 Hermes
 hermes plugins install /path/to/hermes-lark-streaming
@@ -337,7 +337,8 @@ $HERMES_PYTHON -m pytest tests/e2e/ -v
 # 清理 + 重装
 $HERMES_PYTHON ~/.hermes/plugins/hermes-lark-streaming/__main__.py cleanup
 hermes plugins uninstall hermes-lark-streaming
-hermes plugins install https://gitee.com/Aowen-Nowor/hermes-lark-streaming
+git clone https://github.com/monkey2jack/aiduPOP.git
+cp -r aiduPOP ~/.hermes/plugins/hermes-lark-streaming
 hermes gateway restart
 ```
 

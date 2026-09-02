@@ -149,6 +149,8 @@ cp -r aiduPOP ~/.hermes/plugins/hermes-lark-streaming
 hermes gateway restart
 ```
 
+中文用户指南（更新 / 卸载 / 命令 / 配置 / 凭据）见 [docs/USER_GUIDE.md](docs/USER_GUIDE.md)。
+
 ### 配置
 
 插件使用与上游 `hermes-lark-streaming` 相同的配置。爱嘟定制部分详见 [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md)。
