@@ -40,12 +40,12 @@ AIDUPOP_SCAN_WORDLIST="$WORDLIST" \
   || fail "脱密关·面①未过：$(grep '总计硬敏感命中' /tmp/g_s.log)"
 echo "  ✅ 脱密关面①：$(grep '总计硬敏感命中' /tmp/g_s.log)（射程 ${#txt[@]}）"
 
-# 面②基线 = 大仓公开 tip（big_local/main），不是小仓 origin/main。
-# 理由（aiduMEI 同类裁决）：大仓历史已公开是既成事实，扫它只会造永久红灯、
-# 逼人绕闸 —— 判据太粗的闸门等于没有闸门。只扫「还没在任何公开面出现过」的提交。
-git rev-parse --verify -q big_local/main >/dev/null \
-  || fail "脱密关·面②：基线 big_local/main 不存在 —— 先 git remote add big_local <大仓路径> && git fetch big_local main"
-git log --format='%B' big_local/main..HEAD > /tmp/g_m.txt 2>/dev/null || true
+# 面②基线：在大仓时取 origin/main，在小仓时取 big_local/main（未公开提交）。
+BASE_REF="origin/main"
+if git rev-parse --verify -q big_local/main >/dev/null 2>&1; then
+    BASE_REF="big_local/main"
+fi
+git log --format='%B' "$BASE_REF"..HEAD > /tmp/g_m.txt 2>/dev/null || true
 if [ -s /tmp/g_m.txt ]; then
   AIDUPOP_SCAN_WORDLIST="$WORDLIST" \
     $PY scripts/release_scan.py /tmp/g_m.txt > /tmp/g_m.log 2>&1 \
