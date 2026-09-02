@@ -20,6 +20,7 @@ _ALLOWED = {
     "plugin.yaml",              # 单一真相源
     "docs/CHANGELOG.md",        # 历史叙述：每个版本的发布说明
     "tests/test_version_single_source.py",  # 本守卫（读逻辑里会提到字段名）
+    "tests/test_fork_version_guard.py",     # 双向版本分叉策略守卫（显式允许策略值）
 }
 
 def _current_version() -> str:
