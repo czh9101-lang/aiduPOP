@@ -1,3 +1,11 @@
+# 分发现状（v2.4 起）
+
+> 自 v2.4 起，aiduPOP **不再通过 PyPI 或 GHCR 发布与维护安装包**；唯一官方安装方式为
+> Hermes 插件（GitHub/Gitee 源码安装）。下方历史条目中关于 PyPI 双包名、GHCR Docker
+> 三方式安装的记录，描述的是**当时**的事实，相关管道已随停止分发一并退役。
+
+---
+
 ## v2.4.0 (2026-08-24) — 爱嘟波泡卡 · 三层体积防爆引擎（溢出断屏根治）
 
 ### 🛡️ Added — 卡片体积三层防爆（P0）
@@ -168,7 +176,7 @@
 ### Security / Release Engineering
 
 - GitHub 同步工作流改为候选代码先测试、后推送；分支改写使用 `--force-with-lease`，关键 Ruff 错误不再静默放行。
-- GHCR Docker 发布前增加依赖安装、关键静态检查和完整测试质量门。
+- **（当时）**GHCR Docker 发布前增加依赖安装、关键静态检查和完整测试质量门。**（GHCR 分发已随 v2.4 停止，此管道与 Dockerfile 一并退役）**
 - 发布前敏感信息扫描未发现真实私钥、API Key、Token 或 App Secret 硬编码。
 
 ---
@@ -209,7 +217,7 @@ aiduPOP 专属补丁发布。
 - **双包名同版发布**：`aidupop` 与 `hermes-lark-streaming` 从同一份源码、同一个版本号（`plugin.yaml`）发布，两者都提供可导入包 `hermes_lark_streaming`。`aidupop` 从 1.1.1 直接跃迁到 2.0.1 与主线对齐。
 - **别名打包脚本**：新增 `scripts/build_aidupop.py` + `packaging/pyproject.aidupop.toml`。脚本在临时目录暂存源码后再构建，工作区永不被改名污染；使用 `--no-isolation` 式直调 setuptools，避免小内存机器上 `python -m build` 建隔离环境导致的 OOM。
 - **仓库单主线**：历史上并行的 aidupop 1.x 独立 git 线（与主线为 unrelated histories）已归档到 tag `legacy-aidupop-1.1.1-20260805`，`main` 现为唯一主线。GHCR 工作流、Dockerfile、CONTRIBUTING、英文 README 一并回植到主线；`CUSTOMIZATIONS.md` 与 1.x 变更日志迁入 `docs/`。
-- **README 三方式安装**：pip（双包名）/ Hermes 目录插件 / GHCR Docker，中英文 README 同步并补齐 PyPI + Docker 动态徽章。
+- **README 三方式安装（当时）**：pip（双包名）/ Hermes 目录插件 / GHCR Docker，中英文 README 同步并补齐 PyPI + Docker 动态徽章。**（v2.4 起已停 PyPI/GHCR，徽章随退役移除）**
 
 ---
 

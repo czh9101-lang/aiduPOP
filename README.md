@@ -31,7 +31,7 @@
 
 **aiduPOP⚕爱嘟泡波卡**是 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的飞书泡波卡插件 —— 让 AI 的回答和思考过程在飞书里实时、清晰、优雅地呈现。
 
-基于 [Aowen-Nowor 的 hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0 构建，aiduPOP 在其之上做了一套完整的**泡波样式（Bubble Wave）改造**：
+**aiduPOP 是一个独立项目**（不是上游的 fork 镜像）—— 起源并致谢 [Aowen-Nowor/hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0，在其代码基础之上做了一套完整的**泡波样式（Bubble Wave）改造**：
 
 | 层级 | 做什么 | 核心特性 |
 |------|--------|----------|
@@ -277,7 +277,7 @@ aiduPOP/
 ## 🙏 致谢
 
 - **上游**：[Aowen-Nowor/hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0
-- **作者**：敖文大佬
+- **上游作者**：Aowen (敖文)
 - **框架**：[Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research
 - **定制**：aidu
 
@@ -346,7 +346,7 @@ aiduPOP/
 * 修复 24,000 字以上回答调用未导入 `_split_long_text` 导致的隐藏 `NameError`。
 * 修复 message/anchor 双键导致的活动会话重复计数和跨话题错误封卡，并为过期 Clarify 卡片恢复 Hermes 原生回退路径。
 * 恢复表格扫描兼容接口，收口测试包名、异步任务清理与 885 项回归测试。
-* 加固发布链路：候选代码先测试后推送，Docker 发布前强制通过关键静态检查与测试。
+* 加固发布链路：候选代码先测试后推送（Docker 发布管道已随 GHCR 停止分发退役）。
 
 完整版本历史见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 

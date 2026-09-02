@@ -27,7 +27,7 @@ Beautiful is not decoration, but the right information being exactly where it be
 
 **aiduPOP⚕爱嘟泡波卡** is a streaming card plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) on Feishu/Lark — rendering the AI's answer and reasoning process in real time, clearly and elegantly.
 
-Built on top of [Aowen-Nowor's hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0, aiduPOP adds a complete **Bubble Wave** styling layer:
+**aiduPOP is an independent project** (not an upstream fork mirror). It originates from — and credits — [Aowen-Nowor/hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0, on top of which it adds a complete **Bubble Wave** styling layer:
 
 | Layer | What it does | Key feature |
 |-------|-------------|-------------|
@@ -293,7 +293,7 @@ This is a patch release of aiduPOP; the English name and card design remain unch
 - Fixes a hidden `NameError` for responses longer than 24,000 characters.
 - Deduplicates message/anchor session aliases, preserves unrelated topic cards, and safely falls back for stale Clarify actions.
 - Restores the table-scanner compatibility API and makes the 885-test suite portable and warning-clean.
-- Adds test gates before GitHub synchronization and GHCR publication.
+- Adds test gates before GitHub synchronization (the GHCR/Docker publication pipeline was retired when distribution stopped).
 
 See [docs/CHANGELOG.md](docs/CHANGELOG.md) for the complete history.
 
@@ -333,7 +333,7 @@ This project is licensed under the MIT License — see [LICENSE](LICENSE) for de
 ## 🙏 Credits
 
 - **Upstream**: [Aowen-Nowor/hermes-lark-streaming](https://gitee.com/Aowen-Nowor/hermes-lark-streaming) v1.6.0
-- **Original author**: Boss Aowen
+- **Upstream author**: Aowen
 - **Framework**: [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research
 - **Customization**: Aidu
 

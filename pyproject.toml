@@ -10,7 +10,8 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [
-    {name = "Aowen-Nowor"},
+    {name = "Aowen-Nowor", role = "upstream"},
+    {name = "monkey2jack", role = "aiduPOP layers"},
 ]
 dependencies = [
     "lark-oapi>=1.4.0",
