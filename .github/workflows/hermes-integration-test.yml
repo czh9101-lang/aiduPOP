@@ -12,7 +12,7 @@ jobs:
   integration-test:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       # ── 1. Checkout plugin repo ──────────────────────────────────────

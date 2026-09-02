@@ -1,0 +1,36 @@
+name: Bug 报告
+description: 提交功能异常、报错或卡片显示错误
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢提交 Bug 报告！请提供完整信息以便快速定位。
+  - type: input
+    id: version
+    attributes:
+      label: aiduPOP 版本
+      description: 可查看 plugin.yaml 中的 version 或运行 aidupop doctor
+      placeholder: 如 2.4.0
+    validations:
+      required: true
+  - type: input
+    id: hermes_version
+    attributes:
+      label: Hermes Agent 版本
+      placeholder: 如 0.6.x
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 发生了什么？与期望的行为有何不同？
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 请附上 ~/.hermes/logs/agent.log 中的关键日志（请务必移除 app_secret 等敏感凭据）
+      render: shell

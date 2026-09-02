@@ -47,36 +47,30 @@ class HermesCompat:
         self.conversation_loop_module: Any | None = None
         self.conversation_loop_func: Any | None = None
         self.run_agent_module: Any | None = None
-        
-        # GatewayRunner — resolve from sys.modules ONLY (2026-08-17 deadlock fix).
-        # Eagerly importing gateway.run during plugin discovery could trigger a
-        # cross-thread import deadlock on CLI startup: MainThread holds the
-        # model_tools import lock while model_tools' import-time discover_plugins()
-        # joins the plugin-discovery thread, which would block here importing a
-        # module that needs that same lock.  In the gateway path gateway.run is
-        # ALWAYS already in sys.modules by the time apply_patches() runs (it is
-        # imported before discover_plugins()), so behavior there is unchanged.
-        _gw_mod = sys.modules.get("gateway.run")
-        if _gw_mod is not None:
-            self.gateway_runner_class = getattr(_gw_mod, "GatewayRunner", None)
-        else:
+
+        # GatewayRunner — resolve from sys.modules and known aliases (deadlock-safe)
+        for _name, _mod in list(sys.modules.items()):
+            if _mod is None:
+                continue
+            if _name == "gateway.run" or _name.endswith(".gateway.run"):
+                _cls = getattr(_mod, "GatewayRunner", None)
+                if _cls is not None:
+                    self.gateway_runner_class = _cls
+                    break
+        if self.gateway_runner_class is None:
             _logger.debug("HLS: GatewayRunner not available yet (gateway.run not in sys.modules)")
-        
-        # AIAgent — resolve from sys.modules ONLY (2026-08-17 deadlock fix).
-        # Eagerly importing run_agent here is the confirmed deadlock edge:
-        # run_agent.py imports model_tools at module level, and on CLI startup
-        # MainThread already holds the model_tools import lock while waiting on
-        # plugin discovery.  Importing run_agent from the discovery thread would
-        # block forever on that lock.  A sys.modules lookup never triggers an
-        # import, so it is deadlock-free.  On the CLI path run_agent is imported
-        # shortly after startup (AIAgent construction in cli_agent_setup_mixin),
-        # and the deferred retry poll in patching/__init__.py applies the direct
-        # patch once it appears.  On the gateway path run_agent is always already
-        # loaded, so behavior is unchanged.
-        self.run_agent_module = sys.modules.get("run_agent")
-        if self.run_agent_module is not None:
-            self.aiagent_class = getattr(self.run_agent_module, "AIAgent", None)
-        else:
+
+        # AIAgent — resolve from sys.modules and known aliases (deadlock-safe)
+        for _name, _mod in list(sys.modules.items()):
+            if _mod is None:
+                continue
+            if _name == "run_agent" or _name.endswith(".run_agent"):
+                _cls = getattr(_mod, "AIAgent", None)
+                if _cls is not None:
+                    self.run_agent_module = _mod
+                    self.aiagent_class = _cls
+                    break
+        if self.aiagent_class is None:
             _logger.debug("HLS: AIAgent not available yet (run_agent not in sys.modules)")
         
         # FeishuAdapter — 抽取到 _resolve_feishu_adapter()，

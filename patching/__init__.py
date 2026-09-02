@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import sys
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -123,6 +124,25 @@ _gw_runner_patched: bool = False
 _patch_status: dict[str, Any] = {}
 
 _patched_feishu_classes: set[int] = set()
+
+
+def _is_gateway_run_process() -> bool:
+    """Return whether this process was launched as the Hermes gateway."""
+    argv = sys.argv[1:]
+    return any(a == "gateway" and b == "run" for a, b in zip(argv, argv[1:]))
+
+
+def _find_gateway_runner_class() -> Any | None:
+    """Find GatewayRunner even when Hermes loaded it through an alias."""
+    for name, module in list(sys.modules.items()):
+        if module is None:
+            continue
+        if name == "gateway.run" or name.endswith(".gateway.run"):
+            runner = getattr(module, "GatewayRunner", None)
+            if runner is not None:
+                return runner
+    return None
+
 
 # When both the module-level patch and the direct AIAgent patch are active,
 # The guard prevents the second call from injecting the prefix again.
@@ -325,13 +345,13 @@ def apply_patches() -> None:
     # This is the core patch — without it, streaming cards cannot work.
     gw_patched = False
     gw_delayed = False
-    if compat.has_gateway_runner:
+    if compat.has_gateway_runner or _gw_runner_patched:
         # gateway.run already loaded — patch immediately
         if _apply_gateway_runner_patches():
             gw_patched = True
             _logger.info("hermes-lark-streaming: GatewayRunner patched ✓")
-    else:
-        # gateway.run not yet loaded — start delayed-patch poll thread
+    elif _is_gateway_run_process():
+        # gateway.run not yet loaded — start delayed-patch poll thread ONLY in actual gateway process
         _logger.info(
             "hermes-lark-streaming: gateway.run not loaded yet — "
             "starting delayed patch poll (2s interval, 60s timeout)",
@@ -349,17 +369,20 @@ def apply_patches() -> None:
                     )
                     return
             # Timeout — gateway.run never became available
-            _logger.error(
-                "hermes-lark-streaming: gateway.run NOT FOUND after 60s — "
-                "this Hermes version may be too old or installed incorrectly. "
-                "Streaming cards will NOT work. "
-                "Please check: 1) Hermes is running via gateway mode, "
-                "2) Hermes version >= v0.5.0, "
-                "3) Re-run: hermes setup && hermes gateway start",
-            )
+            if not _gw_runner_patched:
+                _logger.error(
+                    "hermes-lark-streaming: gateway.run NOT FOUND after 60s — "
+                    "this Hermes version may be too old or installed incorrectly. "
+                    "Streaming cards will NOT work. "
+                    "Please check: 1) Hermes is running via gateway mode, "
+                    "2) Hermes version >= v0.5.0, "
+                    "3) Re-run: hermes setup && hermes gateway start",
+                )
 
         _delayed_thread = threading.Thread(target=_delayed_gw_patch, daemon=True)
         _delayed_thread.start()
+    else:
+        _logger.debug("hermes-lark-streaming: skipping GatewayRunner delayed poll in non-gateway process")
 
     _module_patch_applied = False
     if compat.has_conversation_loop:
@@ -427,11 +450,11 @@ def apply_patches() -> None:
     global _patch_status
     _patch_status = {
         "version": __version__,
-        "gateway_runner": "✓" if gw_patched else ("pending" if gw_delayed else "✗"),
+        "gateway_runner": "✓" if (gw_patched or _gw_runner_patched) else ("pending" if gw_delayed else "n/a"),
         "conversation_loop": "✓" if _module_patch_applied else "n/a (direct AIAgent)",
-        "aiagent_direct": "applied" if aiagent_direct_patched else "pending",
+        "aiagent_direct": "applied" if aiagent_direct_patched else ("pending" if aiagent_direct_delayed else "n/a"),
         "cron_scheduler": "✓" if cron_patched else "n/a",
-        "background_task": "✓" if gw_patched else ("pending" if gw_delayed else "n/a"),
+        "background_task": "✓" if (gw_patched or _gw_runner_patched) else ("pending" if gw_delayed else "n/a"),
         "feishu_adapter": "✓" if feishu_patched else "✗",
         "create_adapter_hook": "✓" if create_adapter_hooked else "✗",
         "hermes_layout": layout,
@@ -459,7 +482,7 @@ def apply_patches() -> None:
     # run_agent appears — mirroring the GatewayRunner delayed-patch poll.  On the
     # gateway path run_agent is already loaded, aiagent_direct_patched is True,
     # and this thread is never started (behavior unchanged).
-    if aiagent_direct_delayed:
+    if aiagent_direct_delayed and _is_gateway_run_process():
         _logger.info(
             "hermes-lark-streaming: run_agent not loaded yet — "
             "starting deferred AIAgent direct-patch poll (2s interval, 60s timeout)",
@@ -488,6 +511,8 @@ def apply_patches() -> None:
 
         _delayed_agent_thread = threading.Thread(target=_delayed_agent_patch, daemon=True)
         _delayed_agent_thread.start()
+    elif aiagent_direct_delayed:
+        _logger.debug("hermes-lark-streaming: skipping AIAgent delayed poll in non-gateway process")
 
 def _apply_feishu_adapter_patches(FeishuAdapter, *, is_repatch: bool = False) -> bool:
     """Apply all FeishuAdapter method patches to the given class."""
