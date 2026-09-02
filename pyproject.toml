@@ -26,6 +26,10 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
+    # Python >=3.12 的 venv 不再预置 setuptools（PEP 632 后续效应），
+    # 而 tests/test_version.py::TestSetupVersion 需要 patch("setuptools.setup")。
+    # 缺了它，贡献者照 CONTRIBUTING 跑 pytest 即见红（v2.4.1 审计实锤）。
+    "setuptools>=68",
 ]
 
 # The plugin code lives at the repo root (alongside plugin.yaml).

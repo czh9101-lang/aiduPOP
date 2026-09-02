@@ -16,7 +16,7 @@
 
 [![Version](https://img.shields.io/badge/version-2.3.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-yellow.svg)](https://www.python.org/)
 [![Built on hermes-lark-streaming](https://img.shields.io/badge/built%20on-hermes--lark--streaming-orange.svg)](https://gitee.com/Aowen-Nowor/hermes-lark-streaming)
 [![Aidu](https://img.shields.io/badge/aiduPOP-⚕️爱嘟泡波卡-ff69b4.svg)](https://github.com/monkey2jack/aiduPOP)
 
@@ -137,7 +137,7 @@
 
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) 已安装
 - 飞书（Lark）机器人已配置
-- Python 3.10+
+- Python 3.11+
 
 ### 安装
 
