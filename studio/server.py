@@ -52,6 +52,21 @@ except (ImportError, ValueError):
 
 _logger = logging.getLogger("aidupop_studio")
 
+# ── 版本单一真相源：plugin.yaml（SOP 铁律，禁止别处硬编码）──
+try:
+    from .. import __version__ as _VERSION
+except (ImportError, ValueError):
+    def _read_plugin_version() -> str:
+        try:
+            _raw = (Path(__file__).resolve().parent.parent / "plugin.yaml").read_text(encoding="utf-8")
+        except OSError:
+            return "unknown"
+        for _line in _raw.splitlines():
+            if _line.startswith("version:"):
+                return _line.split(":", 1)[1].strip().strip('"').strip("'")
+        return "unknown"
+    _VERSION = _read_plugin_version()
+
 # ── 预设主题库 (Presets) ──────────────────────────────────────────────
 PRESETS: dict[str, dict[str, Any]] = {
     "bubble_wave": {
@@ -387,7 +402,7 @@ class StudioRequestHandler(http.server.SimpleHTTPRequestHandler):
     so other origins cannot read/POST to this config-writing service.
     """
 
-    server_version = "aiduPOP-Studio/2.3.1"
+    server_version = f"aiduPOP-Studio/{_VERSION}"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         web_dir = Path(__file__).resolve().parent / "web"
@@ -419,7 +434,7 @@ class StudioRequestHandler(http.server.SimpleHTTPRequestHandler):
         elif route == "/api/presets":
             self._handle_get_presets()
         elif route == "/api/health":
-            self._send_json(200, {"status": "ok", "version": "2.3.1", "time": time.time()})
+            self._send_json(200, {"status": "ok", "version": _VERSION, "time": time.time()})
         elif route.startswith("/api/"):
             self._send_json(404, {"ok": False, "error": "Not Found"})
         else:
@@ -581,7 +596,7 @@ def run_studio_server(host: str = "127.0.0.1", port: int = 8765, open_browser: b
     with httpd:
         url = f"http://{host}:{port}"
         print("\n=======================================================")
-        print("  🎨 aiduPOP Visual Studio (v2.3.1)")
+        print(f"  🎨 aiduPOP Visual Studio (v{_VERSION})")
         print("  🌊 爱嘟波泡卡 · 流式卡片可视化工作坊")
         print("  -----------------------------------------------------")
         print(f"  🌐 服务地址: {url}")
@@ -608,7 +623,7 @@ def main() -> int:
     import argparse
 
     logging.basicConfig(level=logging.INFO)
-    parser = argparse.ArgumentParser(description="aiduPOP Visual Studio (v2.3.1)")
+    parser = argparse.ArgumentParser(description=f"aiduPOP Visual Studio (v{_VERSION})")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen (default: 8765)")
     parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")

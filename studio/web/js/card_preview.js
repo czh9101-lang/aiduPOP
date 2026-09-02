@@ -84,7 +84,7 @@ const CardPreview = {
     } else {
       bodyHtml = `
         <div class="card-content-body">
-          <p>你好！aiduPOP v2.3.1 可视化配置工作坊已就绪。所有 Emoji、Panel 统计栏及 Footer 排布已实时同步。</p>
+          <p>你好！aiduPOP v${window.AIDUPOP_VERSION || "…"} 可视化配置工作坊已就绪。所有 Emoji、Panel 统计栏及 Footer 排布已实时同步。</p>
         </div>
       `;
     }

@@ -10,6 +10,16 @@ from pathlib import Path
 # ── 包目录（本文件所在目录） ──
 _HERE = Path(__file__).resolve().parent
 
+def _plugin_version() -> str:
+    """版本单一真相源：plugin.yaml（SOP 铁律，禁止别处硬编码）。"""
+    try:
+        for _line in (_HERE / "plugin.yaml").read_text(encoding="utf-8").splitlines():
+            if _line.startswith("version:"):
+                return _line.split(":", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return "unknown"
+
 def _bootstrap_package() -> None:
     """手动注册 hermes_lark_streaming 到 sys.modules (当不可导入时)."""
     try:
@@ -139,7 +149,7 @@ def _cmd_studio(extra_args: list[str]) -> int:
     import argparse
     parser = argparse.ArgumentParser(
         prog="aidupop studio",
-        description="aiduPOP Visual Studio (v2.3.0) — optional visual config UI",
+        description=f"aiduPOP Visual Studio (v{_plugin_version()}) — optional visual config UI",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen (default: 8765)")
@@ -160,7 +170,7 @@ def _print_usage() -> None:
     print("   or: python /path/to/hermes-lark-streaming/__main__.py <command>")
     print()
     print("Commands:")
-    print("  studio     Launch the Visual Card Studio web interface (v2.3.0)")
+    print(f"  studio     Launch the Visual Card Studio web interface (v{_plugin_version()})")
     print("  status     Show current configuration and credentials status")
     print("  verify     Verify environment compatibility")
     print("  doctor     Full diagnostic: version, config, credentials, patch status, log path")

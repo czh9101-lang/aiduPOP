@@ -10,7 +10,7 @@ Transparent is not dumping logs, but letting you see what the AI is thinking at 
 Beautiful is not decoration, but the right information being exactly where it belongs.
 ```
 
-[![Version](https://img.shields.io/badge/version-2.3.2-brightgreen.svg)](https://github.com/monkey2jack/aiduPOP)
+[![Version](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com/monkey2jack/aiduPOP/main/plugin.yaml&query=%24.version&label=version&color=brightgreen)](https://github.com/monkey2jack/aiduPOP)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-yellow.svg)](https://www.python.org/)
 [![Built on hermes-lark-streaming](https://img.shields.io/badge/built%20on-hermes--lark--streaming-orange.svg)](https://gitee.com/Aowen-Nowor/hermes-lark-streaming)

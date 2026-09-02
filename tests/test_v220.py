@@ -358,10 +358,18 @@ class TestStructuralGuards:
 
 class TestVersion:
 
-    def test_plugin_yaml_bumped(self) -> None:
+    def test_plugin_yaml_has_version(self) -> None:
+        # v2.4.1：不再锁死具体版本号（坑13 根治）——升版时此测试无需同步改。
+        # 版本值的正确性由 plugin.yaml 单一真相源 + test_version.py 保证。
         yaml_text = (_REPO_ROOT / "plugin.yaml").read_text(encoding="utf-8")
-        assert 'version: "2.4.0"' in yaml_text
+        assert any(l.startswith("version:") for l in yaml_text.splitlines())
 
     def test_package_version_matches_yaml(self) -> None:
         import hermes_lark_streaming
-        assert hermes_lark_streaming.__version__ == "2.4.0"
+        for line in (_REPO_ROOT / "plugin.yaml").read_text(encoding="utf-8").splitlines():
+            if line.startswith("version:"):
+                expected = line.split(":", 1)[1].strip().strip('"').strip("'")
+                break
+        else:
+            raise AssertionError("plugin.yaml 无 version: 字段")
+        assert hermes_lark_streaming.__version__ == expected

@@ -255,7 +255,9 @@ class TestStudioStaticFiles:
     def test_html_contains_brand_elements(self) -> None:
         web_dir = Path(__file__).resolve().parent.parent / "studio" / "web"
         html = (web_dir / "index.html").read_text(encoding="utf-8")
-        for token in ("aiduPOP", "爱嘟波泡卡", "v2.3.1", "monkey²",
+        # v2.4.1：徽章版本由 /api/health 运行时注入（单一真相源），
+        # 静态 html 里断言占位元素存在，不再锁版本字面量。
+        for token in ("aiduPOP", "爱嘟波泡卡", "badgeVersion", "monkey²",
                       "爱嘟", "唯吾", "智助", "aidu", "I do", "AI do", 'id="hexBg"'):
             assert token in html
 

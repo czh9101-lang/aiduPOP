@@ -1,5 +1,5 @@
 /**
- * aiduPOP Visual Studio — Application Controller (v2.3.0)
+ * aiduPOP Visual Studio — Application Controller
  */
 
 // Emoji-only validator: rejects plain ASCII tokens (feishu standard_icon tokens),
@@ -48,7 +48,23 @@ window.App = {
   presets: {},
   currentPickTarget: null,
 
+  async loadVersion() {
+    // 版本单一真相源 = plugin.yaml，经 /api/health 注入前端（禁止硬编码）
+    try {
+      const res = await fetch("/api/health");
+      const json = await res.json();
+      if (json && json.version) {
+        window.AIDUPOP_VERSION = json.version;
+        const badge = document.getElementById("badgeVersion");
+        if (badge) badge.textContent = "v" + json.version;
+      }
+    } catch (e) {
+      console.warn("version probe failed:", e);
+    }
+  },
+
   async init() {
+    this.loadVersion();
     this.renderPresetBtns();
     this.renderEmojiRows();
     this.renderEmojiModal();
