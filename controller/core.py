@@ -363,6 +363,58 @@ class StreamCardController(ControllerMixin, UnifiedControllerMixin):
         self._register_continuation(message_id, new_session.message_id)
         return new_session.message_id
 
+    def maybe_split_for_clarify(self, chat_id: str) -> str | None:
+        """clarify 解析后切卡（v2.6.0，借鉴 Cheerwhy PR #99）— clarify 前后输出分卡呈现.
+
+        与普通续写 (_maybe_reactivate_for_continuation) 的唯一区别：忽略
+        ``_streaming_closed`` 守卫 —— clarify 场景流式仍健康也强制切卡，让
+        clarify 前的正文封在旧卡、clarify 后的续写在新卡，中间天然分隔。
+        复用续写全链路：新卡创建 / 统计继承 / 旧卡 COMPLETING 封卡 / 300309 兜底。
+
+        Returns 新 session 的 message_id，无需切卡时返回 None。幂等：已注册的
+        continuation 直接返回 existing，防 clarify 回调重试重复切卡。
+        """
+        stale = None
+        stale_mid = None
+        with self._sessions_lock:
+            for mid, sess in self._sessions.items():
+                if sess.chat_id != chat_id or sess.is_terminal_phase:
+                    continue
+                if sess.state == COMPLETING:
+                    continue
+                # 已是某次 clarify/续写切过的卡也允许再切（续写卡自己遇到 clarify）
+                stale, stale_mid = sess, mid
+                break
+        if stale is None or stale_mid is None:
+            _logger.debug("clarify split: no active session for chat=%s", (chat_id or "?")[:12])
+            return None
+
+        # 幂等：本 session 已触发过 clarify 切卡则不重复
+        existing = self._resolve_continuation_id(stale_mid)
+        if existing is not None:
+            return existing
+
+        loop = self._get_loop()
+        if loop is None:
+            return None
+
+        # 切卡前把残余 dirty 写净（否则残留数据丢进旧卡终态）
+        if stale.unified_state is not None and stale.unified_state.has_dirty:
+            self._fire_and_forget(
+                self._do_unified_flush(stale),
+                stale._loop,
+            )
+
+        new_session = self._reactivate_session_for_continuation(stale)
+        if new_session is None:
+            return None
+        self._register_continuation(stale_mid, new_session.message_id)
+        _logger.info(
+            "HLS: clarify split done — old=%s new=%s chat=%s",
+            stale_mid[:12], new_session.message_id[:12], chat_id[:12],
+        )
+        return new_session.message_id
+
     def _fire_and_forget(self, coro: Coroutine[Any, Any, Any], loop: asyncio.AbstractEventLoop) -> None:
         """Schedule a coroutine for background execution without awaiting."""
         try:

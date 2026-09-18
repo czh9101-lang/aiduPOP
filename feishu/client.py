@@ -107,6 +107,7 @@ CARDKIT_SCHEMA_ERROR = 300315  # 卡片 Schema 非法属性 (unknown property) O
 CARDKIT_STREAMING_CLOSED = 300309  # 卡片流式模式已关闭
 CARDKIT_SEQUENCE_CONFLICT = 300317  # sequence 冲突
 CARDKIT_ELEMENT_NOT_FOUND = 300313  # 元素不存在（add_elements 后服务端尚未持久化时的竞态）
+TOKEN_INVALIDATED = 99991663  # Invalid access token — 飞书后台权限变更/发版会立即吊销已发出的 tenant_token
 CARDKIT_ELEMENT_NOT_FOUND_ALT = 300314  # delete_elements 不存在的元素
 CARDKIT_DUPLICATE_ID = 300301  # Duplicate ID：重复添加已存在的元素
 MSG_NOT_FOUND = 1000023  # 消息不存在/已删除
@@ -235,6 +236,7 @@ class FeishuClient:
     ) -> Any:
         """执行协程，遇到 CardKit 瞬态错误时自动重试."""
         last_error: FeishuAPIError | None = None
+        token_rescue_used = False  # 99991663 吊销恢复只允许一次
         for attempt in range(max_retries + 1):
             try:
                 result = await coro_factory()
@@ -247,6 +249,17 @@ class FeishuClient:
                 return result
             except FeishuAPIError as e:
                 last_error = e
+                # v2.6.0: token 吊销运行时恢复 — 飞书后台权限变更/发版会立即吊销已发出的
+                # tenant_token，但 SDK 进程内 LocalCache 的旧 token 在 TTL 内不会自动剔除，
+                # 导致持续 99991663 直到重启。清缓存后立即重试一次即可恢复（借鉴 fry-cards）。
+                if e.code == TOKEN_INVALIDATED and not token_rescue_used:
+                    token_rescue_used = True
+                    _logger.warning(
+                        "token invalidated (99991663) op=%s — clearing SDK token cache, retrying once",
+                        operation,
+                    )
+                    self.invalidate_token_cache()
+                    continue  # 不 sleep，立即用新 token 重试
                 if not _is_transient_error(e):
                     if is_schema_error(e):
                         _logger.warning("card schema error not retryable code=%s detail=%s op=%s", e.code, e.extract_schema_detail()[:120], operation)
@@ -286,6 +299,30 @@ class FeishuClient:
                     continue
                 raise
         raise last_error  # unreachable, but type-safe
+
+    def invalidate_token_cache(self) -> None:
+        """清空 lark-oapi SDK 进程内 token 缓存，下次请求强制重新获取 tenant_token.
+
+        SDK 的 TokenManager.cache 是类级 LocalCache 单例，按 app_id 为 key 缓存
+        self_tenant_token。飞书后台发版/权限变更会吊销旧 token，但缓存里的旧 token
+        在 TTL 内不会自动剔除，导致持续 99991663 直到进程重启。此方法提供运行时恢复路径。
+        兼容自定义 ICache 实现：inner 有 .cache dict 则按键删除，否则整体置空。
+        """
+        try:
+            from lark_oapi.core.token.manager import TokenManager
+
+            cache = getattr(TokenManager, "cache", None)
+            if cache is None:
+                return
+            key = f"self_tenant_token:{self.config.app_id}"
+            inner = getattr(cache, "cache", None)
+            if isinstance(inner, dict):
+                inner.pop(key, None)
+            elif hasattr(cache, "set"):
+                cache.set(key, "", 0)
+            _logger.info("HLS: SDK token cache cleared for app=%s", self.config.app_id[:8])
+        except Exception:
+            _logger.debug("invalidate_token_cache failed", exc_info=True)
 
     @staticmethod
     def _check(response: Any, operation: str) -> None:

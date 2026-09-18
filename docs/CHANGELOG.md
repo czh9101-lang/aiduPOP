@@ -6,9 +6,52 @@
 
 ---
 
-## v2.5 (2026-09-10) — 话题并发隔离 · 续卡竞态保护 · 300315 自愈版
+## v2.6.0 (2026-09-18) — Token 吊销运行时恢复 · lark-oapi 1.7.3 · Clarify 拆卡
 
-> **版本说明**：本版本在大仓库公开发行标签为 `v2.5`，内部及小仓库对应 `v2.5.0`。
+> 基座版本：Aowen upstream v1.8.2（继承 v2.5.0 全部定制）。
+> 本版为社区横向借鉴版：fry-cards (techysy) 与 Cheerwhy PR #99 的功能体验移植，
+> 遵循「保持 aiduPOP 定制、吸收功能体验」原则。
+
+### ✨ 新增
+
+- **Token 吊销运行时恢复 (P1)**（借鉴 fry-cards v0.2.0）：
+  - 飞书后台权限变更/发版会**立即吊销所有已发出的 tenant_token**（错误码 99991663），而 SDK 进程内
+    `LocalCache` 的旧 token 在 TTL 内不会自动剔除——此前唯一恢复手段是重启网关。
+  - 现在 `FeishuClient._retry_transient` 捕获 99991663 后调用新增的
+    `FeishuClient.invalidate_token_cache()`（按 app_id 精确清除 SDK `TokenManager.cache`
+    中的 `self_tenant_token:<app_id>` 键，兼容自定义 ICache 实现），随后立即重试一次。
+    恢复只允许一次（`token_rescue_used` 守卫），其余瞬态重试预算不受影响。
+  - 无需重启网关，权限变更后下一轮请求自动恢复。
+- **Clarify 拆卡 — clarify 前后输出分卡呈现 (P2)**（借鉴 Cheerwhy PR #99，实装复用自有续写链路）：
+  - 此前 clarify 问答与前后正文连在同一张流式卡，无视觉分隔。
+  - 现在 clarify resolve 成功（select / input_submit / 按钮提交三路径）后，
+    `_schedule_clarify_split` 调度 `StreamCardController.maybe_split_for_clarify(chat_id)`：
+    把残余 dirty flush 写净后强制切卡——旧卡（clarify 前正文）走 COMPLETING 全链路封卡，
+    新卡（clarify 后续写）继承统计/话题/anchor，clarify 前后天然分为两卡。
+  - 与普通续写 `_maybe_reactivate_for_continuation` 的唯一区别：忽略 `_streaming_closed`
+    守卫（clarify 场景流式仍健康也强制切卡）。幂等保护：continuation 映射已注册时直接返回，
+    防 clarify 回调重试重复切卡；切卡为非致命增强，任何失败不影响 resolve 主链路。
+
+### 🔧 变更
+
+- **lark-oapi 1.6.8 → 1.7.3（调研结论：暂缓实施）**：
+  - hermes 官方 fix 分支（`fix/platform-feishu-lark-oapi-1.7.3`）实锤：
+    **1.6.8 收不到 WebSocket 事件推送**，1.7.x 另带敏感日志脱敏、token 处理加固等收益。
+  - 但本机 hermes 的 `tools/lazy_deps.py`（platform.feishu）**硬钉 `lark-oapi==1.6.8`**：
+    venv 与 pin 不一致时，飞书适配器会在启动事件循环里同步跑 pip install 降级——
+    出网慢时超 60 秒触发 watchdog 自杀（exit 75），systemd 连续重启 8 次熔断（2026-09-18 生产实锤，小猴复盘）。
+  - **结论**：1.7.3 需等官方修复分支并入 main、`lazy_deps.py` 同步改 pin 后统一升级，
+    本版不单独动 SDK 版本（已实测回滚至 1.6.8，网关稳定）。
+
+### 📦 依赖
+
+- `lark-oapi>=1.4.0` 门槛不变（本环境维持 1.6.8，与 hermes pin 一致）。
+
+---
+
+## v2.5.0 (2026-09-10) — 话题并发隔离 · 续卡竞态保护 · 300315 自愈版
+
+> 基座版本：Aowen upstream v1.8.2（融合 Aowen-Nowor/hermes-lark-streaming v1.8.0~v1.8.2 核心稳定性修复）
 
 ### 🐛 Bug Fix — 核心时序稳定性与长任务保障
 - **话题并发隔离键升级 (P1)**：

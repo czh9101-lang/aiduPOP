@@ -640,6 +640,46 @@ def _wrap_handle_card_action_event(original_method: Callable) -> Callable:
 
     return _wrapped
 
+def _schedule_clarify_split(adapter_instance, data: Any) -> None:
+    """v2.6.0: clarify resolve 后调度流式卡切卡（clarify 前后输出分卡呈现）.
+
+    从回调事件取 chat_id，在 event loop 上 fire-and-forget controller 的
+    maybe_split_for_clarify。失败仅记 debug 日志（切卡是体验增强，不影响 resolve 主链路）。
+    """
+    try:
+        event = getattr(data, "event", None)
+        context = getattr(event, "context", None)
+        chat_id = str(getattr(context, "open_chat_id", "") or "")
+        if not chat_id:
+            return
+
+        from ..controller import get_controller
+        ctrl = get_controller()
+        if ctrl is None or not getattr(ctrl, "enabled", False):
+            return
+
+        loop = getattr(adapter_instance, "_loop", None) or ctrl._get_loop()
+        if loop is None:
+            return
+
+        from agent.async_utils import safe_schedule_threadsafe
+
+        def _do_split():
+            ctrl.maybe_split_for_clarify(chat_id)
+
+        # maybe_split_for_clarify 是同步方法（内部自行调度协程），包成协程跑在 loop 上
+        async def _do_split_async():
+            _do_split()
+
+        safe_schedule_threadsafe(
+            _do_split_async(), loop,
+            logger=_logger,
+            log_message="clarify split: schedule failed",
+        )
+        _logger.info("clarify split: scheduled chat=%s", chat_id[:12])
+    except Exception:
+        _logger.debug("clarify split: scheduling error (non-fatal)", exc_info=True)
+
 async def _schedule_confirm_card(*, cid: str) -> None:
     """Server-side card update: soft-lock → hard-lock (confirmed state)."""
     # v1.3.2 fix (B3-05): removed redundant local `import asyncio` —
@@ -853,6 +893,9 @@ def _handle_clarify_card_action(
         with _clarify_lock:
             _clarify_selections[clarify_id] = choice_text
 
+        # v2.6.0: clarify 拆卡 — resolve 后把流式卡切到新卡（clarify 前后输出分卡呈现）
+        _schedule_clarify_split(adapter_instance, data)
+
         # Resolve the clarify (schedule on event loop since we're in a sync callback)
         loop = getattr(adapter_instance, "_loop", None)
         if loop is not None:
@@ -908,6 +951,9 @@ def _handle_clarify_card_action(
         # Store selection for retry
         with _clarify_lock:
             _clarify_selections[clarify_id] = input_text
+
+        # v2.6.0: clarify 拆卡 — resolve 后把流式卡切到新卡（clarify 前后输出分卡呈现）
+        _schedule_clarify_split(adapter_instance, data)
 
         # Resolve the clarify
         loop = getattr(adapter_instance, "_loop", None)
@@ -965,6 +1011,9 @@ def _handle_clarify_card_action(
         # Store selection for retry
         with _clarify_lock:
             _clarify_selections[clarify_id] = input_text
+
+        # v2.6.0: clarify 拆卡 — resolve 后把流式卡切到新卡（clarify 前后输出分卡呈现）
+        _schedule_clarify_split(adapter_instance, data)
 
         # Resolve the clarify
         loop = getattr(adapter_instance, "_loop", None)
