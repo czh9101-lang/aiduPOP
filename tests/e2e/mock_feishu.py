@@ -98,10 +98,17 @@ class MockFeishuServer:
         })
         return msg_id
 
-    async def reply_card(self, message_id: str, card: dict[str, Any]) -> str:
+    async def reply_card(
+        self, message_id: str, card: dict[str, Any], *, reply_in_thread: bool = False
+    ) -> str:
         msg_id = f"om_mock_{self._next_msg_id}"
         self._next_msg_id += 1
-        self._call_log.append({"op": "reply_card", "message_id": message_id, "msg_id": msg_id})
+        self._call_log.append({
+            "op": "reply_card",
+            "message_id": message_id,
+            "msg_id": msg_id,
+            "reply_in_thread": reply_in_thread,
+        })
         return msg_id
 
     async def cardkit_stream_element(

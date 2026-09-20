@@ -303,8 +303,8 @@ class E2ETestRunner:
             return await srv.reply_card_by_id(mid, cid)
         async def _send_card_by_id_to_chat(chat_id, card_id):
             return await srv.send_card_by_id_to_chat(chat_id, card_id)
-        async def _reply_card(mid, card):
-            return await srv.reply_card(mid, card)
+        async def _reply_card(mid, card, *, reply_in_thread=False):
+            return await srv.reply_card(mid, card, reply_in_thread=reply_in_thread)
         async def _cardkit_stream_element(cid, eid, content, *, sequence=0):
             return await srv.cardkit_stream_element(cid, eid, content, sequence=sequence)
         async def _cardkit_batch_update(cid, actions, *, sequence=0):

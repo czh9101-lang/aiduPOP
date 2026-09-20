@@ -9,6 +9,9 @@ _schedule_clarify_resolve_and_confirm).
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -357,8 +360,12 @@ class TestWrapFeishuAdapterSendClarify:
         orig.assert_called_once()
 
     def test_stores_choices_for_callback(self) -> None:
-        """When card is sent, choices should be stored in _clarify_choices."""
-        from hermes_lark_streaming.patching import _clarify_choices, _clarify_questions, _wrap_feishu_adapter_send_clarify
+        """A verified single-select entry sends a native card and stores its id state."""
+        from hermes_lark_streaming.patching import (
+            _clarify_choices,
+            _clarify_questions,
+            _wrap_feishu_adapter_send_clarify,
+        )
 
         orig = AsyncMock()
         wrapped = _wrap_feishu_adapter_send_clarify(orig)
@@ -375,7 +382,23 @@ class TestWrapFeishuAdapterSendClarify:
         _clarify_choices.pop("test_clarify_id", None)
         _clarify_questions.pop("test_clarify_id", None)
 
+        # Hermes 0.21.3 keeps the authoritative select mode on its private
+        # Clarify entry.  v2.7 must read that flag rather than infer it from
+        # ``choices``; an unavailable entry correctly takes text fallback.
+        tools_module = types.ModuleType("tools")
+        tools_module.__path__ = []  # type: ignore[attr-defined]
+        clarify_gateway = types.ModuleType("tools.clarify_gateway")
+        clarify_gateway._entries = {
+            "test_clarify_id": SimpleNamespace(multi_select=False),
+        }
+        clarify_gateway.mark_awaiting_text = MagicMock()
+        tools_module.clarify_gateway = clarify_gateway  # type: ignore[attr-defined]
+
         with (
+            patch.dict(sys.modules, {
+                "tools": tools_module,
+                "tools.clarify_gateway": clarify_gateway,
+            }),
             patch("hermes_lark_streaming.controller.get_controller", return_value=mock_ctrl),
             patch("hermes_lark_streaming.patching._register_gateway_card"),
         ):
@@ -394,6 +417,13 @@ class TestWrapFeishuAdapterSendClarify:
         assert "test_clarify_id" in _clarify_choices
         assert _clarify_choices["test_clarify_id"] == ["Fast", "Slow"]
         assert _clarify_questions["test_clarify_id"] == "Which?"
+        mock_client.send_card_to_chat.assert_awaited_once()
+        card = mock_client.send_card_to_chat.await_args.args[1]
+        select = next(element for element in card["body"]["elements"] if element.get("tag") == "select_static")
+        assert select["behaviors"][0]["value"] == {
+            "hermes_clarify_action": "select",
+            "clarify_id": "test_clarify_id",
+        }
 
         # Cleanup
         _clarify_choices.pop("test_clarify_id", None)
@@ -521,8 +551,8 @@ class TestWrapHandleCardActionEventV142:
             _clarify_choices.pop("v142_cid", None)
 
     @pytest.mark.asyncio
-    async def test_clarify_action_without_live_state_falls_back_to_original(self) -> None:
-        """Clarify callbacks from stale cards should not be silently swallowed."""
+    async def test_clarify_action_without_live_state_fails_closed(self) -> None:
+        """A stale/unknown Clarify card must not enter Hermes's native /card route."""
         from hermes_lark_streaming.patching import _wrap_handle_card_action_event
 
         original = AsyncMock(return_value="native_result")
@@ -542,8 +572,8 @@ class TestWrapHandleCardActionEventV142:
 
         result = await wrapped(MagicMock(), mock_data)
 
-        assert result == "native_result"
-        original.assert_awaited_once()
+        assert result is None
+        original.assert_not_awaited()
 
 
 class TestStaleBoundMethodSimulation:

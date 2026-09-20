@@ -103,12 +103,10 @@ def on_feishu_normalize(
         reply_to,
     )
 
-    # 飞书适配器升级协同：严格限定仅原生的 real_thread_id 作为话题标识
-    # 当引用回复或非原生话题导致 source_thread_id 虚假存在时，清空以防会话撕裂
+    # Only a native message thread id may become the routing anchor.  A
+    # synthesized source value would otherwise split one conversation across
+    # unrelated topics.
     if source_thread_id and not real_thread_id:
-        source.thread_id = None
-        event.source = source
-    elif reply_to and source_thread_id and not real_thread_id:
         source.thread_id = None
         event.source = source
 

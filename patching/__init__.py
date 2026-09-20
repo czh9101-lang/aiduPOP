@@ -62,10 +62,15 @@ __all__ = [
     '_wrap_feishu_adapter_edit',
     '_wrap_feishu_adapter_add_reaction',
     '_wrap_feishu_adapter_delete_reaction',
+    '_wrap_feishu_adapter_send_slash_confirm',
     '_wrap_feishu_adapter_send_clarify',
-        '_wrap_handle_card_action_event',
+    '_wrap_handle_card_action_event',
+    '_handle_slash_confirm_card_action',
     '_handle_clarify_card_action',
+    'retire_clarify_card',
     '_REACTION_STATUS_MAP',
+    '_slash_confirms',
+    '_clarify_records',
     '_clarify_choices',
     '_clarify_questions',
     '_clarify_card_msg_ids',
@@ -179,10 +184,15 @@ from .adapter import (  # noqa: E402
     _wrap_feishu_adapter_edit,
     _wrap_feishu_adapter_add_reaction,
     _wrap_feishu_adapter_delete_reaction,
+    _wrap_feishu_adapter_send_slash_confirm,
     _wrap_feishu_adapter_send_clarify,
     _wrap_handle_card_action_event,
+    _handle_slash_confirm_card_action,
     _handle_clarify_card_action,
+    retire_clarify_card,
     _REACTION_STATUS_MAP,
+    _slash_confirms,
+    _clarify_records,
     _clarify_choices,
     _clarify_questions,
     _clarify_card_msg_ids,
@@ -529,6 +539,11 @@ def _apply_feishu_adapter_patches(FeishuAdapter, *, is_repatch: bool = False) ->
                 "hermes-lark-streaming: FeishuAdapter already patched, "
                 "skip re-wrap (class_id=%s)", cls_id,
             )
+        # ``retire_clarify_card`` is intentionally a direct class method, not
+        # a wrapper around a method Hermes may or may not have.  Reassert it on
+        # an already-known class as well, so a deferred import cannot leave an
+        # older identity without the host lifecycle seam.
+        FeishuAdapter.retire_clarify_card = retire_clarify_card
         return True
 
     try:
@@ -560,6 +575,17 @@ def _apply_feishu_adapter_patches(FeishuAdapter, *, is_repatch: bool = False) ->
         except AttributeError:
             _logger.debug("hermes-lark-streaming: FeishuAdapter.send_clarify not found, clarify card skipped")
         try:
+            FeishuAdapter.send_slash_confirm = _wrap_feishu_adapter_send_slash_confirm(
+                FeishuAdapter.send_slash_confirm
+            )
+            _logger.info("hermes-lark-streaming: FeishuAdapter.send_slash_confirm patched ✓ (native confirm card)")
+        except AttributeError:
+            _logger.debug("hermes-lark-streaming: FeishuAdapter.send_slash_confirm not found, text fallback retained")
+        # Hermes detects this capability on the concrete adapter class.  Do
+        # not wrap an optional original method: the method below is the full,
+        # idempotent lifecycle implementation and is safe for unknown ids.
+        FeishuAdapter.retire_clarify_card = retire_clarify_card
+        try:
             FeishuAdapter._handle_card_action_event = _wrap_handle_card_action_event(FeishuAdapter._handle_card_action_event)
             _logger.info("hermes-lark-streaming: FeishuAdapter._handle_card_action_event patched ✓ (card action /card suppression)")
         except AttributeError:
@@ -569,7 +595,7 @@ def _apply_feishu_adapter_patches(FeishuAdapter, *, is_repatch: bool = False) ->
         # so a failed attempt can be retried later in the deferred stage).
         _patched_feishu_classes.add(cls_id)
         _logger.info(
-            "hermes-lark-streaming: FeishuAdapter.send/edit/reaction/image/clarify patched ✓ "
+            "hermes-lark-streaming: FeishuAdapter.send/edit/reaction/image/clarify/slash patched ✓ "
             "(gateway message cards enabled, class_id=%s)",
             cls_id,
         )

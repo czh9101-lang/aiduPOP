@@ -579,8 +579,13 @@ class TestOnFeishuNormalize:
 
         assert source.thread_id == "thread_from_reply"
 
-    def test_does_not_clear_thread_id_when_no_reply_to(self) -> None:
-        """When no reply_to, don't clear thread_id even if source_thread_id exists."""
+    def test_clears_thread_id_without_real_thread_id_even_when_no_reply_to(self) -> None:
+        """A synthetic source thread must not survive without a native thread id.
+
+        The v2.6 native-thread normalization intentionally does not depend on
+        ``reply_to``: a missing raw thread id means the source value cannot be
+        trusted as a Feishu topic identifier.
+        """
         ctrl = _make_ctrl(enabled=True)
         source = self._make_source(thread_id="some_thread")
         event = self._make_event(
@@ -595,7 +600,7 @@ class TestOnFeishuNormalize:
                 event=event,
             )
 
-        assert source.thread_id == "some_thread"
+        assert source.thread_id is None
 
     def test_does_not_clear_thread_id_when_no_source_thread_id(self) -> None:
         """When source has no thread_id, no clearing needed."""

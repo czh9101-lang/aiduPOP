@@ -1,4 +1,4 @@
-"""CardKit v2.0 — Specialized card types: cron, gateway, clarify."""
+"""CardKit v2.0 — Specialized cards: cron, gateway, clarify, confirmation."""
 
 from __future__ import annotations
 
@@ -17,9 +17,12 @@ from .md import (
 __all__ = [
     'build_cron_card',
     'build_gateway_card',
+    'build_slash_confirm_card',
+    'build_slash_confirm_resolved_card',
     'build_clarify_card',
     'build_clarify_submitted_card',
     'build_clarify_confirmed_card',
+    'build_clarify_retired_card',
     'normalize_clarify_choices',
 ]
 
@@ -132,9 +135,178 @@ def build_gateway_card(content: str, *, category: str = "", status_label: str = 
 
     return card
 
-def build_clarify_card(*, question: str, choices: list[str] | None = None, clarify_id: str = "") -> dict[str, Any]:
+
+def build_slash_confirm_card(
+    *,
+    title: str,
+    message: str,
+    session_key: str,
+    confirm_id: str,
+) -> dict[str, Any]:
+    """Build a native pending slash confirmation card.
+
+    Feishu rejects the legacy action-plus-button combination for this callback
+    path. Keep this deliberately to one schema-2.0 select_static element: the
+    selected option is returned by Feishu while the callback value carries the
+    opaque session and confirmation identifiers.
+    """
+    en_once, zh_once = _T["slash_confirm_once"]
+    en_cancel, zh_cancel = _T["slash_confirm_cancel"]
+    en_placeholder, zh_placeholder = _T["slash_confirm_select_placeholder"]
+
+    elements: list[dict[str, Any]] = [
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": "info_outlined",
+                "size": "20px 20px",
+                "color": "blue",
+            },
+            "text": {
+                "tag": "lark_md",
+                "content": f"**{_escape_md(title)}**",
+            },
+        },
+    ]
+    if message:
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": _escape_md(message),
+            },
+        })
+
+    # Do not replace this select with an action/button group: that schema has
+    # been rejected by Feishu IM in the deployed Hermes callback path.
+    elements.append({
+        "tag": "select_static",
+        "element_id": "slash_confirm_select",
+        "placeholder": {
+            "tag": "plain_text",
+            "content": en_placeholder,
+            "i18n_content": _i18n(en_placeholder, zh_placeholder),
+        },
+        "options": [
+            {
+                "text": {
+                    "tag": "plain_text",
+                    "content": en_once,
+                    "i18n_content": _i18n(en_once, zh_once),
+                },
+                "value": "once",
+            },
+            {
+                "text": {
+                    "tag": "plain_text",
+                    "content": en_cancel,
+                    "i18n_content": _i18n(en_cancel, zh_cancel),
+                },
+                "value": "cancel",
+            },
+        ],
+        "behaviors": [{
+            "type": "callback",
+            "value": {
+                "hermes_slash_confirm_action": "select",
+                "session_key": session_key,
+                "confirm_id": confirm_id,
+            },
+        }],
+    })
+
+    return {
+        "schema": "2.0",
+        "config": {
+            "streaming_mode": False,
+            "locales": _LOCALES,
+        },
+        "body": {"elements": elements},
+    }
+
+
+def build_slash_confirm_resolved_card(
+    *,
+    title: str,
+    message: str,
+    choice: str,
+) -> dict[str, Any]:
+    """Build the immutable terminal state for a slash confirmation."""
+    choice_text = str(choice).strip()
+    if choice_text == "once":
+        en_choice, zh_choice = _T["slash_confirm_resolved_once"]
+        icon_token, icon_color = "resolve_filled", "green"
+    elif choice_text == "cancel":
+        en_choice, zh_choice = _T["slash_confirm_resolved_cancel"]
+        icon_token, icon_color = "info_outlined", "grey"
+    else:
+        # choice normally comes from the two fixed options above, but keep the
+        # builder safe and diagnosable if an old card supplies another value.
+        safe_choice = _escape_md(choice_text) if choice_text else "-"
+        en_template, zh_template = _T["slash_confirm_resolved"]
+        en_choice = en_template.format(safe_choice)
+        zh_choice = zh_template.format(safe_choice)
+        icon_token, icon_color = "info_outlined", "grey"
+
+    elements: list[dict[str, Any]] = [
+        {
+            "tag": "div",
+            "icon": {
+                "tag": "standard_icon",
+                "token": icon_token,
+                "size": "20px 20px",
+                "color": icon_color,
+            },
+            "text": {
+                "tag": "lark_md",
+                "content": f"**{_escape_md(title)}**",
+            },
+        },
+    ]
+    if message:
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": _escape_md(message),
+            },
+        })
+    elements.append({
+        "tag": "div",
+        "icon": {
+            "tag": "standard_icon",
+            "token": icon_token,
+            "size": "16px 16px",
+            "color": icon_color,
+        },
+        "text": {
+            "tag": "lark_md",
+            "content": en_choice,
+            "i18n_content": _i18n(en_choice, zh_choice),
+        },
+    })
+
+    return {
+        "schema": "2.0",
+        "config": {
+            "streaming_mode": False,
+            "locales": _LOCALES,
+        },
+        "body": {"elements": elements},
+    }
+
+
+def build_clarify_card(
+    *,
+    question: str,
+    choices: list[str] | None = None,
+    clarify_id: str = "",
+    multi_select: bool = False,
+) -> dict[str, Any]:
     """构建 Clarify 待选择态卡片 (State 1: Pending). 三态: 标题/选项列表/快速选择下拉/
-    自定义输入. choices 经 normalize + escape for lark_md. select_static 用 plain_text."""
+    自定义输入. choices 经 normalize + escape for lark_md. 单选使用 select_static；多选
+    使用飞书原生 multi_select_static + 根级 form，避免伪造 select_static 多选字段."""
     elements: list[dict] = []
 
     elements.append({
@@ -165,7 +337,7 @@ def build_clarify_card(*, question: str, choices: list[str] | None = None, clari
             "content": options_md,
         })
 
-        # select_static dropdown (plain_text, no markdown).
+        # All dropdown labels are plain_text, never lark_md.
         options: list[dict] = []
         for i, choice in enumerate(normalized_choices):
             label = chr(ord("A") + i) if i < 26 else str(i + 1)
@@ -175,24 +347,60 @@ def build_clarify_card(*, question: str, choices: list[str] | None = None, clari
             })
 
         en_placeholder, zh_placeholder = _T["clarify_select_placeholder"]
-        select_el: dict[str, Any] = {
-            "tag": "select_static",
-            "element_id": "clarify_select",
-            "placeholder": {
-                "tag": "plain_text",
-                "content": en_placeholder,
-                "i18n_content": _i18n(en_placeholder, zh_placeholder),
-            },
-            "options": options,
-            "behaviors": [{
-                "type": "callback",
-                "value": {
-                    "hermes_clarify_action": "select",
-                    "clarify_id": clarify_id,
+        if multi_select:
+            # CardKit 2.0 defines native multi-select as multi_select_static.
+            # It requires a form container and a submit button; a bare
+            # select_static with a made-up "multi_select" field is invalid.
+            en_submit, zh_submit = _T["clarify_multi_submit"]
+            elements.append({
+                "tag": "form",
+                "name": "clarify_multi_form",
+                "element_id": "clarify_multi_form",
+                "elements": [
+                    {
+                        "tag": "multi_select_static",
+                        "element_id": "clarify_multi_select",
+                        "name": "clarify_multi_select",
+                        "placeholder": {
+                            "tag": "plain_text",
+                            "content": en_placeholder,
+                            "i18n_content": _i18n(en_placeholder, zh_placeholder),
+                        },
+                        "options": options,
+                    },
+                    {
+                        "tag": "button",
+                        "element_id": "clarify_multi_submit",
+                        "name": "clarify_multi_submit",
+                        "form_action_type": "submit",
+                        "type": "primary",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": en_submit,
+                            "i18n_content": _i18n(en_submit, zh_submit),
+                        },
+                    },
+                ],
+            })
+        else:
+            select_el: dict[str, Any] = {
+                "tag": "select_static",
+                "element_id": "clarify_select",
+                "placeholder": {
+                    "tag": "plain_text",
+                    "content": en_placeholder,
+                    "i18n_content": _i18n(en_placeholder, zh_placeholder),
                 },
-            }],
-        }
-        elements.append(select_el)
+                "options": options,
+                "behaviors": [{
+                    "type": "callback",
+                    "value": {
+                        "hermes_clarify_action": "select",
+                        "clarify_id": clarify_id,
+                    },
+                }],
+            }
+            elements.append(select_el)
 
     en_input_ph, zh_input_ph = _T["clarify_input_placeholder"]
     input_el: dict[str, Any] = {
@@ -360,3 +568,59 @@ def build_clarify_confirmed_card(*, question: str, selected: str) -> dict[str, A
         "body": {"elements": elements},
     }
     return card
+
+
+def build_clarify_retired_card(*, question: str, notice: str) -> dict[str, Any]:
+    """Build the immutable, grey terminal card for a retired Clarify request.
+
+    A retirement can race a callback or occur after the host has timed the
+    request out. This card intentionally contains no interactive elements, so
+    a rendered old card cannot invite another resolution attempt.
+    """
+    en_retired, zh_retired = _T["clarify_retired"]
+    clean_notice = str(notice).strip()
+    en_notice = f"{en_retired}\n{clean_notice}" if clean_notice else en_retired
+    zh_notice = f"{zh_retired}\n{clean_notice}" if clean_notice else zh_retired
+
+    return {
+        "schema": "2.0",
+        "config": {
+            "streaming_mode": False,
+            "locales": _LOCALES,
+        },
+        "body": {
+            "elements": [
+                {
+                    "tag": "div",
+                    "icon": {
+                        "tag": "standard_icon",
+                        "token": "info_outlined",
+                        "size": "20px 20px",
+                        "color": "grey",
+                    },
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**{_escape_md(question)}**",
+                    },
+                },
+                {
+                    "tag": "div",
+                    "icon": {
+                        "tag": "standard_icon",
+                        "token": "info_outlined",
+                        "size": "16px 16px",
+                        "color": "grey",
+                    },
+                    # Plain text makes a runtime notice inert even if it
+                    # contains Markdown-like content from an upstream host.
+                    "text": {
+                        "tag": "plain_text",
+                        "content": en_notice,
+                        "i18n_content": _i18n(en_notice, zh_notice),
+                        "text_color": "grey",
+                        "text_size": "notation",
+                    },
+                },
+            ],
+        },
+    }

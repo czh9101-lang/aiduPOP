@@ -230,6 +230,16 @@ See [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the full list of custom
 
 ---
 
+## Latest release improvements
+
+- **Native Slash confirmation**: confirmation cards now use Feishu's native static selector with only one-time approval and cancel; completed cards become non-interactive terminal results.
+- **Complete Clarify lifecycle**: each question is tracked independently, supports multi-select results, and retires its interactive card safely after completion, timeout, reset, or replacement.
+- **Safer conversation routing**: confirmation callbacks and follow-up text preserve the existing conversation/topic anchor; without a reliable message anchor, the host text path is retained.
+
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for complete changes and known boundaries.
+
+---
+
 ## What's new in 2.3.2
 
 - **🛡️ Cold-start patch guard**: Synchronized `hermes_adapter` detection logic to greedily patch direct agent runners on first incoming message, eliminating plain-text fallback during the 60s cold-start window.

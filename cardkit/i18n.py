@@ -40,6 +40,16 @@ _T: dict[str, tuple[str, str]] = {
     "clarify_submitted": ("Submitted, awaiting confirmation...", "已提交，等待确认..."),
     "clarify_retry": ("Retry submission", "重试提交"),
     "clarify_confirmed": ("Confirmed", "已确认"),
+    "clarify_multi_submit": ("Submit choices", "提交选择"),
+    # ── Slash confirmation (native select_static only) ──
+    "slash_confirm_select_placeholder": ("Choose an action...", "请选择操作..."),
+    "slash_confirm_once": ("Confirm once", "确认一次"),
+    "slash_confirm_cancel": ("Cancel", "取消"),
+    "slash_confirm_resolved_once": ("Confirmed once", "已确认一次"),
+    "slash_confirm_resolved_cancel": ("Cancelled", "已取消"),
+    "slash_confirm_resolved": ("Resolved: {}", "已处理：{}"),
+    # ── Clarify terminal lifecycle ──
+    "clarify_retired": ("This question is no longer active.", "此问题已失效。"),
     "cost_estimated": ("${} (est.)", "${} (估算)"),
     "cost_actual": ("${} (actual)", "${} (实报)"),
     "cost_included": ("Free", "免费"),

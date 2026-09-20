@@ -383,12 +383,29 @@ class FeishuClient:
             return str(resp.data.message_id)
         raise FeishuAPIError("send_card_to_chat: response missing message_id")
 
-    async def reply_card(self, message_id: str, card: dict[str, Any]) -> str:
-        """回复消息，返回 message_id."""
+    async def reply_card(
+        self,
+        message_id: str,
+        card: dict[str, Any],
+        *,
+        reply_in_thread: bool = False,
+    ) -> str:
+        """Reply with an interactive card and return its message id.
+
+        ``reply_in_thread`` must be explicit when the host metadata names a
+        topic.  Feishu otherwise defaults it to false unless the replied-to
+        message happens already to be a topic message.
+        """
         request = (
             ReplyMessageRequest.builder()
             .message_id(message_id)
-            .request_body(ReplyMessageRequestBody.builder().msg_type("interactive").content(self._dumps(card)).build())
+            .request_body(
+                ReplyMessageRequestBody.builder()
+                .msg_type("interactive")
+                .content(self._dumps(card))
+                .reply_in_thread(reply_in_thread)
+                .build()
+            )
             .build()
         )
         resp = await self._client.im.v1.message.areply(request)
