@@ -9,7 +9,7 @@ This document details all customizations applied on top of [Aowen-Nowor/hermes-l
 | Model Display | v22.2 | Stable model name from card birth via module-level global dict |
 | Panel Position | — | Answer on top, collapsible stats panel at bottom |
 | Footer Removal | — | Model moved to panel header; footer default empty |
-| Model Formatting | — | Clean `⚕model` format with path/date stripping |
+| Model Formatting | — | Clean `☤model` format with path/date stripping |
 | Phase 2 Protection | v22.3 | Rollback protection for atomic batch_update failures |
 | Adapter Patching | v1.5.4 | Three-class identity resolution for FeishuAdapter |
 | Clarify Fix | v1.6.0 | Card delivery for clarify responses |
@@ -76,10 +76,10 @@ Answer element first, panel second (both in initial creation and updates):
 ### Panel Header Format
 
 ```
-⚕ModelName · 💭N · 🛠️N · ⏱elapsed
+☤ModelName · 💭N · 🛠️N · ⏱elapsed
 ```
 
-- `⚕`紧贴 model name, no space
+- `☤`紧贴 model name, no space
 - Model name cleaned: path prefixes removed, date suffixes stripped, truncated at 28 chars
 
 ### Footer
@@ -105,7 +105,7 @@ Hook `GatewayRunner._authorization_adapter` — intercept before use, check clas
 | File | Changes |
 |------|---------|
 | `cardkit/elements.py` | `_format_model_display()`, panel header format, footer default `[]` |
-| `cardkit/i18n.py` | `⚕` no-space processing hint |
+| `cardkit/i18n.py` | `☤` no-space processing hint |
 | `cardkit/cards.py` | Panel position after answer |
 | `controller/core.py` | Pre-create unified_state to prevent async race |
 | `controller/linear_mixin.py` | `_get_model_from_ctx()`, `_build_session_panel()`, Phase 2 protection, loading hint hidden |

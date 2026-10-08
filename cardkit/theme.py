@@ -51,9 +51,9 @@ BUBBLE_WAVE: dict[str, Any] = {
     },
     # ── 折叠提示图标（决策表③: ⚡→💦；文案结构不变）──
     "collapse_icon": "💦",
-    # ── Footer（决策表③: ⚕/↑↓ 保持，推理 token 💭→🫧）──
+    # ── Footer（决策表③: ☤/↑↓ 保持，推理 token 💭→🫧）──
     "footer": {
-        "model_prefix": "⚕",
+        "model_prefix": "☤",
         "reasoning_icon": "🫧",
     },
     # ── Reaction → 状态标签（决策表③；拦截默认关闭 — 嘟嘟定制，数据供开源启用方使用）──

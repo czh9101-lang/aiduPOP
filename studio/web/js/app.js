@@ -37,7 +37,7 @@ window.App = {
         browser: "🥷🏻", agent: "👷🏻‍♀️", check: "👩🏻‍⚖️", analyze: "👩🏻‍🎓", fallback: "👩🏻‍🔧"
       },
       panel: { model_prefix: "👸🏻", rounds_icon: "🌊", tools_icon: "🫧", elapsed_icon: "✨", separator: " · " },
-      footer: { model_prefix: "⚕", reasoning_icon: "🫧" }
+      footer: { model_prefix: "☤", reasoning_icon: "🫧" }
     },
     footer: { show_label: false, fields: [] },
     // v2.3.1: 空映射 = 不写入 text_sizes，沿用插件内置默认（normal_v2 等

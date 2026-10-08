@@ -141,7 +141,7 @@ class TestI18nDecisions:
 
     def test_processing_prefix_zh_changed_en_kept(self) -> None:
         en, zh = _T["processing_prefix"]
-        assert zh == "⚕Hermesing…"
+        assert zh == "☤Hermesing…"
         assert en == "💭 Processing..."  # 英文不动
 
     def test_agent_process_zh_bubble(self) -> None:
@@ -166,7 +166,7 @@ class TestI18nDecisions:
 
     def test_untouched_keys_stay(self) -> None:
         # 铁律#1: 未填写的保持原状（抽查关键键）
-        assert _T["processing"] == ("⚕Hermesing…", "⚕Hermesing…")
+        assert _T["processing"] == ("☤Hermesing…", "☤Hermesing…")
         assert _T["elapsed"] == ("Elapsed {}", "耗时 {}")
         assert _T["context"] == ("Context {}", "上下文 {}")
         assert _T["cache"] == ("Cache {}", "缓存 {}")
@@ -186,7 +186,7 @@ class TestPanelHeaderDecisions:
             model="anthropic/claude-opus-5",
         )
         stats = header["title"]["content"]
-        # ⚕model · 🫧N · ✨N · 🎶elapsed（⚕/· 保持，💭→🫧 🛠️→✨ ⏱→🎶）
+        # ☤model · 🫧N · ✨N · 🎶elapsed（☤/· 保持，💭→🫧 🛠️→✨ ⏱→🎶）
         assert stats == "👸🏻claude-opus-5 · 🌊1 · 🫧1 · ✨12.3s"
 
     def test_stats_row_no_model(self) -> None:
@@ -237,7 +237,7 @@ class TestFooterDecisions:
 
     def test_footer_model_prefix_kept(self) -> None:
         en, zh = _render_footer_field("model", {"model": "anthropic/claude-opus-5"}, False, False, False)
-        assert en == "⚕claude-opus-5"  # ⚕ 保持（决策表③）
+        assert en == "☤claude-opus-5"  # ☤ 保持（决策表③）
         assert zh == en
 
     def test_footer_tokens_arrows_kept_reasoning_bubble(self) -> None:

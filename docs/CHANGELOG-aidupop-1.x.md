@@ -40,7 +40,7 @@ Based on [Aowen-Nowor/hermes-lark-streaming](https://gitee.com/Aowen-Nowor/herme
 ### Added
 - **v22.2 Model Display** — Stable model name from card birth via module-level global `_model_cache` dict
 - **v22.3 Phase 2 Protection** — Rollback protection for Feishu atomic `batch_update` failures (300314)
-- **Model Formatting** — Clean `⚕model` display with path prefix/date suffix stripping
+- **Model Formatting** — Clean `☤model` display with path prefix/date suffix stripping
 - **Panel Position** — Answer on top, collapsible stats panel at bottom
 - **Footer Removal** — Model moved to panel header; footer default empty
 - **Card Recreation** — Auto-retry on API failure (card cache invalidation after gateway restart)
@@ -50,9 +50,9 @@ Based on [Aowen-Nowor/hermes-lark-streaming](https://gitee.com/Aowen-Nowor/herme
 - **Three-Class Identity Resolution** — Auto-patch FeishuAdapter regardless of import path
 
 ### Changed
-- Panel header format: `⚕model · 💭N · 🛠️N · ⏱elapsed` (紧凑格式)
+- Panel header format: `☤model · 💭N · 🛠️N · ⏱elapsed` (紧凑格式)
 - Footer default fields: `[]` (empty, model in panel header)
-- Processing hint: `⚕Hermesing…` (no space after ⚕️)
+- Processing hint: `☤Hermesing…` (no space after ☤)
 - Panel always renders (even for pure conversations without tools/reasoning)
 
 ### Fixed

@@ -195,7 +195,7 @@
 ### 🎨 Added — 可视化配置工作坊
 
 - **`studio/` 独立可选模块 + `aidupop studio` 命令**：启动纯本地、零第三方依赖（仅标准库 `http.server`）的 Web 配置工作坊。可视化配置工具 Emoji、Panel 统计栏、Footer 矩阵、流式与字号，内置 1:1 飞书 CardKit 2.0 卡片实时仿真预览（所见即所得，支持终态/流式两种视图）。
-- **品牌视觉对齐 aiduMEI**：纯白纸底（`#ffffff`）+ 墨黑（`#000000`）+ 深蓝点睛（`#1f4e79`）+ 冷灰（`#525252`），三原色随机六边形背景，单行 logo+站名（`🫧 aidu`(灰)`POP`(蓝)`⚕`(黑)`爱嘟`(灰)`波泡卡`(蓝)），双侧对称 slogan（爱嘟/唯吾/智助、aidu/I do/AI do）。
+- **品牌视觉对齐 aiduMEI**：纯白纸底（`#ffffff`）+ 墨黑（`#000000`）+ 深蓝点睛（`#1f4e79`）+ 冷灰（`#525252`），三原色随机六边形背景，单行 logo+站名（`🫧 aidu`(灰)`POP`(蓝)`☤`(黑)`爱嘟`(灰)`波泡卡`(蓝)），双侧对称 slogan（爱嘟/唯吾/智助、aidu/I do/AI do）。
 - **一键预设**：泡波样式（Bubble Wave）/ 经典工作流 / 极简极客，随时换肤或重置为出厂泡波默认。
 - **「当前 → 替换」交互**：每个图标行左显生效值、右为手动输入框（仅接受 Emoji，实时校验并拒绝 ASCII token），并提供 🎨 分类挑选器。
 
@@ -248,8 +248,8 @@
 
 - **可配置主题层 `cardkit/theme.py`**：新增 `BUBBLE_WAVE` 出厂默认主题 + `get_theme()` 深度合并机制（配置键 `hermes_lark_streaming.theme` 覆盖）。出厂默认即泡波样式，用户零配置即可获得萌化视觉；进阶用户可通过配置层覆盖任意图标/文本，**不改一行源码**。
 - **工具图标全面 emoji 化**：13 个工具描述符（read/write/exec/web_search/grep/glob/browser/agent/check/analyze/skill 等）从飞书官方 token 图标替换为泡波 emoji 图标群（👩🏻‍🏫/👩🏻‍🎨/👩🏻‍💻/🕵🏻‍♀️/👩🏻‍🔬/👮🏻‍♀️/🥷🏻/👷🏻‍♀️/👩🏻‍⚖️/👩🏻‍🎓/🤹🏻‍♀️）。`is_emoji_icon()` 分类器智能分流：emoji 走文本渲染，官方 token 走 `standard_icon`，零冲突。
-- **i18n 文本泡波化**：5 处中文文本键萌化（`processing_prefix`→`⚕Hermesing…`、`agent_process`→`🫧`、`rounds`→`🫧{}`、`tools_count`→`✨{}`、`round_n`→`第 {} 波`），英文键保持不动（国际化安全铁律）。
-- **面板头部/折叠/footer 统一泡波视觉**：统计行 `⚕model · 🫧N · ✨N · 🎶elapsed`、轮次标题 `🌊`、折叠提示 `💦`、footer 推理 token `🫧`，统一水/气泡意象。
+- **i18n 文本泡波化**：5 处中文文本键萌化（`processing_prefix`→`☤Hermesing…`、`agent_process`→`🫧`、`rounds`→`🫧{}`、`tools_count`→`✨{}`、`round_n`→`第 {} 波`），英文键保持不动（国际化安全铁律）。
+- **面板头部/折叠/footer 统一泡波视觉**：统计行 `☤model · 🫧N · ✨N · 🎶elapsed`、轮次标题 `🌊`、折叠提示 `💦`、footer 推理 token `🫧`，统一水/气泡意象。
 - **reaction 表情映射**：7 个状态 reaction 统一为女性职业 emoji 群（Reading→👩🏻‍🏫、Done→🙆🏻‍♀️、Thinking→🧏🏻‍♀️ 等），数据为休眠配置，**结构守卫保持 reaction 拦截注释禁用**（嘟嘟定制不动）。
 
 ### 🐛 Fixed
@@ -312,7 +312,7 @@
 ### Added / Changed
 
 - 引入 Markdown 防爆引擎、无损紧凑表格降级和代码块安全截断。
-- 保持 aiduPOP 定制的模型缓存及 `⚕️💭🛠️⏱` 面板布局。
+- 保持 aiduPOP 定制的模型缓存及 `☤💭🛠️⏱` 面板布局。
 
 ---
 
@@ -352,10 +352,10 @@ aiduPOP 专属补丁发布。
 aiduPOP 专属全能高可用重磅升级版。整合社区 Cheerwhy upstream v0.12.0 最新底层（支持 Profile 隔离、Hermes 0.19 TurnRunner 上下文适配、CardKit 重试机制、Width Mode 等），同时全量回植定制专属卡片美化与根治补丁（v22.2 / v22.3）。
  
  ### 💎 重磅更新与定制
-- **Model 头部展示与紧贴**：Panel Header 最左边完美呈现在线 AI Model 名称，格式为 `⚕️model`（⚕️ 字符与模型名紧贴无空格，视觉极佳）。
+- **Model 头部展示与紧贴**：Panel Header 最左边完美呈现在线 AI Model 名称，格式为 `☤model`（☤ 字符与模型名紧贴无空格，视觉极佳）。
 - **Model 全生命周期高可用（v22.2 根治）**：引入 `_model_cache` 模块级全局字典，摆脱 contextvar / thread-local 跨 asyncio task 丢失的死穴，确保卡片从创建 Phase 2 到封卡 Phase 3 始终稳定百分百显示 Model。
 - **元素缺失回滚根治（v22.3 防护）**：解耦 `existing_elements` 与 `include_loading_hint` 状态，彻底避免飞书 CardKit 300314 原子更新导致 answer/panel 被错误回滚问题。
-- **界面去噪与优雅布局**：默认隐藏冗余 Footer，模型移入 Panel Header，清理卡片回复中的“回复:……”等牛皮癣文本，只保留优雅有度的 💭/🛠️/⏱/⚕ 核心数据信息。
+- **界面去噪与优雅布局**：默认隐藏冗余 Footer，模型移入 Panel Header，清理卡片回复中的“回复:……”等牛皮癣文本，只保留优雅有度的 💭/🛠️/⏱/☤ 核心数据信息。
 - **完全兼容 Hermes 0.19 架构**：全量支持 多 Profile 控制隔离、CardKit 重建重试机制、cron 定时任务卡片独立渲染交付与动态响应模式（default / compact / fill）。
 
 ---

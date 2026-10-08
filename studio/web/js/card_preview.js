@@ -34,7 +34,7 @@ const CardPreview = {
     const roundIcon = theme.round_icon || "🌊";
     const footerCfg = state.footer || {};
     const thFooter = theme.footer || {
-      model_prefix: "⚕",
+      model_prefix: "☤",
       reasoning_icon: "🫧"
     };
 

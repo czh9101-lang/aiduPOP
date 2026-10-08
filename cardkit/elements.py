@@ -221,7 +221,7 @@ def _format_model_display(model: str | None) -> str | None:
     - 去 provider 路径前缀（a/b/model → model）
     - 去日期尾巴（-20250514 / -2025-05-14）
     - 过长截断，避免 panel 标题被长 ID 撑丑
-    - 前缀用单字符 ⚕（U+2695，无 VS16），飞书 notation 字号下比 ⚕️ 更利落
+    - 前缀用单字符 ☤（U+2695，无 VS16），飞书 notation 字号下比 ☤ 更利落
     """
     if not model:
         return None
@@ -251,7 +251,7 @@ def build_panel_header(
     tools_count = len(tool_steps)
     elapsed_str = _format_elapsed(tool_elapsed_ms)
 
-    # 组装: ⚕model · 🫧N · ✨N · 🎶elapsed（v2.2.0 泡波样式，图标走 theme 层；⚕/· 保持）
+    # 组装: ☤model · 🫧N · ✨N · 🎶elapsed（v2.2.0 泡波样式，图标走 theme 层；☤/· 保持）
     th_panel = get_theme()["panel"]
     parts: list[str] = []
     model_disp = _format_model_display(model)
@@ -898,7 +898,7 @@ def _render_footer_field(
     if name == "model":
         v = _format_model_display(data.get("model") or None)
         if v:
-            v = f"{get_theme()['footer']['model_prefix']}{v}"  # ⚕ 紧贴 model，无空格（飞书小字号更美观）
+            v = f"{get_theme()['footer']['model_prefix']}{v}"  # ☤ 紧贴 model，无空格（飞书小字号更美观）
         return v, v
 
     if name == "tokens":

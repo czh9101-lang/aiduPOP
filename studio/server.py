@@ -98,14 +98,14 @@ PRESETS: dict[str, dict[str, Any]] = {
                 "fallback": "✨",
             },
             "panel": {
-                "model_prefix": "⚕",
+                "model_prefix": "☤",
                 "rounds_icon": "💭",
                 "tools_icon": "🛠️",
                 "elapsed_icon": "⏱",
                 "separator": " · ",
             },
             "footer": {
-                "model_prefix": "⚕",
+                "model_prefix": "☤",
                 "reasoning_icon": "💭",
             },
         },
