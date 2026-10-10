@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import sys
+import functools
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -760,6 +761,9 @@ def _apply_direct_agent_patch() -> bool:
         except (ValueError, TypeError):
             _has_persist_ts = False
 
+        # v1.8.3 (P1, issue #21): functools.wraps is REQUIRED here so that
+        # inspect.signature() follows __wrapped__ to the real method's signature.
+        @functools.wraps(_orig_method)
         def _patched_run_conversation(
             self,
             user_message,

@@ -18,6 +18,22 @@ from . import (
 
 # ── GatewayRunner method wrappers ──────────────────────────────────
 
+
+def _context_max_from(ctx, result) -> int:
+    """v1.8.3 (issue #12): context max lives ONLY on agent.context_compressor.
+
+    result dict never carries context_length in current hermes, so the old
+    result.get("context_length") always rendered 0 and the footer lost its
+    context field. Prefer the live compressor; fall back to the result dict.
+    """
+    agent = (ctx or {}).get("_agent_ref") if isinstance(ctx, dict) else None
+    compressor = getattr(agent, "context_compressor", None) if agent else None
+    live = getattr(compressor, "context_length", 0) or 0
+    if live:
+        return int(live)
+    res = result if isinstance(result, dict) else {}
+    return int(res.get("context_length", 0) or 0)
+
 def _wrap_handle_message(orig: Callable) -> Callable:
     """Inject NORMALIZE hook at the top of GatewayRunner._handle_message."""
 
@@ -424,7 +440,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                         },
                         context={
                             "used_tokens": result.get("last_prompt_tokens", 0),
-                            "max_tokens": result.get("context_length", 0),
+                            "max_tokens": _context_max_from(ctx, result),
                         },
                         api_calls=result.get("api_calls", 0),
                         history_offset=result.get("history_offset", 0),
@@ -511,7 +527,7 @@ def _wrap_run_agent(orig: Callable) -> Callable:
                     },
                     context={
                         "used_tokens": result.get("last_prompt_tokens", 0),
-                        "max_tokens": result.get("context_length", 0),
+                        "max_tokens": _context_max_from(ctx, result),
                     },
                     api_calls=result.get("api_calls", 0),
                     history_offset=result.get("history_offset", 0),
@@ -696,7 +712,7 @@ def _wrap_run_background_task(orig: Callable) -> Callable:
                         },
                         context={
                             "used_tokens": (result or {}).get("last_prompt_tokens", 0),
-                            "max_tokens": (result or {}).get("context_length", 0),
+                            "max_tokens": _context_max_from(ctx, result),
                         },
                         api_calls=(result or {}).get("api_calls", 0),
                         history_offset=(result or {}).get("history_offset", 0),
