@@ -32,7 +32,7 @@ def _maybe_wrap_callbacks(agent) -> None:
     # 症状：后台复盘 fork（auxiliary.background_review 走 aux 模型）在独立线程里
     # 调 _maybe_wrap_callbacks，拿不到 event_message_id，只写了 _model_cache["current"]。
     # 主卡片封版渲染 panel 时若 eid 未命中，fallback 读 "current"，
-    # 就把 aux 模型名（如 Grok-4.5）印到大叔的卡片上。
+    # 就把 aux 模型名（如 Grok-4.5）印到用户的卡片上。
     # 判定依据：background_review.py 给 fork 打了 _memory_write_origin /
     # _persist_disabled 标记；正常主 agent 不带这些。
     ctx = _msg_ctx.get()

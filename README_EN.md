@@ -232,6 +232,13 @@ See [docs/CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the full list of custom
 
 ## Latest release improvements
 
+- **Webui signature compatibility**: the run wrapper now preserves the real method signature, so webui checks no longer misread parameters.
+- **Footer context limit fix**: the context limit is read from the compressor, so the footer no longer shows 0.
+- **Startup dependency sync**: the `pyproject.toml` author field is fixed, so `pm sync` completes.
+- **Log level adjustment**: idempotent duplicate card IDs are logged at INFO instead of WARNING.
+
+**2.7 feature updates**
+
 - **Native Slash confirmation**: confirmation cards now use Feishu's native static selector with only one-time approval and cancel; completed cards become non-interactive terminal results.
 - **Complete Clarify lifecycle**: each question is tracked independently, supports multi-select results, and retires its interactive card safely after completion, timeout, reset, or replacement.
 - **Safer conversation routing**: confirmation callbacks and follow-up text preserve the existing conversation/topic anchor; without a reliable message anchor, the host text path is retained.

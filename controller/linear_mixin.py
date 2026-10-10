@@ -791,7 +791,7 @@ class UnifiedControllerMixin:
                 # ── 【嘟嘟定制 v22.3】Phase 2 回滚补救 ──
                 # 如果 answer 不在 _creation_stages（Phase 2 原子回滚了），
                 # 在 seal 里补做一次 Phase 2 创建，否则 answer/panel 元素
-                # 从未创建，大叔只能看到空卡片。
+                # 从未创建，用户只能看到空卡片。
                 if "answer" not in session._creation_stages and (state.answer_dirty or state.answer_text):
                     _logger.warning(
                         "preservative seal: answer not in _creation_stages "

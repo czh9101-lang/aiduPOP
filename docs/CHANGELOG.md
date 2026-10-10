@@ -6,6 +6,25 @@
 
 ---
 
+## 2.7 补丁更新 — 签名兼容 · 上下文上限修正
+
+### 🐛 修复
+
+- **webui 签名兼容**:`AIAgent.run_conversation` 包装器补齐 `functools.wraps`,`inspect.signature()` 可见真实参数(如 `persist_user_timestamp`),避免 webui 签名检查误判为 `**kwargs`。
+- **footer 上下文上限**:`context_length` 只存在于 `agent.context_compressor` 上,结果字典不携带该字段,此前 footer 的 `max_tokens` 恒为 0。现优先读取压缩器,取不到再回落到结果字典。
+- **启动依赖同步**:`pyproject.toml` 的 `authors` 去掉非法 `role` 字段,修复 `pm sync` 因此失败的问题。
+- **DUPLICATE ID 日志降级**:卡片批量更新的 300301 属于网络重发后的幂等结果,日志由 WARNING 降为 INFO,不影响功能。
+
+### 🎨 调整
+
+- 品牌标识 emoji 由 ⚕ 统一为 ☤(aiduPOP☤爱嘟泡波卡)。
+
+### 🔒 对外文档
+
+- 去除对外文档中的个人称呼与内部运行事件描述,只保留技术事实。
+
+---
+
 ## v2.7 (2026-09-21) — Slash Confirm 原生选择 · Clarify 生命周期加固
 
 ### ✨ 新增
@@ -60,7 +79,7 @@
     **1.6.8 收不到 WebSocket 事件推送**，1.7.x 另带敏感日志脱敏、token 处理加固等收益。
   - 但本机 hermes 的 `tools/lazy_deps.py`（platform.feishu）**硬钉 `lark-oapi==1.6.8`**：
     venv 与 pin 不一致时，飞书适配器会在启动事件循环里同步跑 pip install 降级——
-    出网慢时超 60 秒触发 watchdog 自杀（exit 75），systemd 连续重启 8 次熔断（2026-09-18 生产实锤，小猴复盘）。
+    出网慢时超 60 秒触发 watchdog 自杀（exit 75），systemd 连续重启 8 次熔断（运行时实测复现）。
   - **结论**：1.7.3 需等官方修复分支并入 main、`lazy_deps.py` 同步改 pin 后统一升级，
     本版不单独动 SDK 版本（已实测回滚至 1.6.8，网关稳定）。
 

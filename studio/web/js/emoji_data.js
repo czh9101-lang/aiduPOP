@@ -46,7 +46,7 @@ const TOOL_DEFINITIONS = [
   { key: "glob", label: "文件匹配 (glob)", desc: "按模式寻找文件" },
   { key: "exec", label: "命令执行 (exec)", desc: "终端/Bash 运行" },
   { key: "browser", label: "浏览器操作 (browser)", desc: "操控网页端" },
-  { key: "agent", label: "子代理委派 (agent)", desc: "派发小猴子任务" },
+  { key: "agent", label: "子代理委派 (agent)", desc: "派发子代理任务" },
   { key: "check", label: "状态核验 (check)", desc: "验证/把关结果" },
   { key: "analyze", label: "深度分析 (analyze)", desc: "推理与架构推演" },
   { key: "fallback", label: "未知工具 (fallback)", desc: "兜底未识别工具" }
