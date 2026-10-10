@@ -489,10 +489,14 @@ class UnifiedControllerMixin:
                         # 落穿到本函数下半段的流式/Phase3 更新路径。
                     elif is_duplicate_id_error(e):
                         # v1.6.1 fix: 300301 Duplicate ID — panel already exists on Feishu side
-                        # but local _creation_stages is out of sync. This is permanent:
-                        # don't retry, sync tracking to stop the loop.
-                        _logger.warning(
-                            "unified flush phase 2 DUPLICATE ID (permanent): %s — "
+                        # but local _creation_stages is out of sync.
+                        # 根因(2026-10-10 排查):cardkit_batch_update 外层 _retry_transient
+                        # 对网络错误(ReadTimeout 等)会重发同一请求。首发其实已在飞书侧插入
+                        # panel,只是响应在网络层丢失,本地 _creation_stages 未标记。重发即得
+                        # 300301。这是幂等重试的正常结果,不是错误:同步 tracking、清 dirty 即可。
+                        # 故降为 INFO,避免误导运维。
+                        _logger.info(
+                            "unified flush phase 2 DUPLICATE ID (idempotent, panel already exists): %s — "
                             "syncing _creation_stages, clearing dirty flags, card=%s",
                             e, session.card_id[:12],
                         )
@@ -672,9 +676,10 @@ class UnifiedControllerMixin:
                     return
                 if is_duplicate_id_error(e):
                     # v1.6.1 fix: 300301 Duplicate ID — panel already exists on Feishu side
-                    # but local _creation_stages is out of sync. Permanent: sync + clear.
-                    _logger.warning(
-                        "unified flush phase 3 DUPLICATE ID (permanent): %s — "
+                    # but local _creation_stages is out of sync. 幂等重试的正常结果(见 phase 2 注释),
+                    # 同步 tracking、清 dirty 即可,故降为 INFO。
+                    _logger.info(
+                        "unified flush phase 3 DUPLICATE ID (idempotent, panel already exists): %s — "
                         "syncing _creation_stages, clearing dirty flags, card=%s",
                         e, session.card_id[:12],
                     )
