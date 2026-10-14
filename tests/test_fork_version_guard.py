@@ -16,4 +16,4 @@ def test_repo_branch_version_policy():
     else:
         raise AssertionError("plugin.yaml 缺失 version字段")
 
-    assert v in ("2.7", "2.6", "2.5", "2.4"), f"未预期的公开版本号 {v}"
+    assert v in ("2.8", "2.7", "2.6", "2.5", "2.4"), f"未预期的公开版本号 {v}"
